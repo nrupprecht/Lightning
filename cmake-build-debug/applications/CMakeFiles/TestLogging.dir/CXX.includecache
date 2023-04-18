@@ -1,0 +1,30 @@
+#IncludeRegexLine: ^[ 	]*[#%][ 	]*(include|import)[ 	]*[<"]([^">]+)([">])
+
+#IncludeRegexScan: ^.*$
+
+#IncludeRegexComplain: ^$
+
+#IncludeRegexTransform: 
+
+../include/Lightning.h
+iostream
+-
+fstream
+-
+string
+-
+optional
+-
+vector
+-
+type_traits
+-
+sstream
+-
+algorithm
+-
+
+/Users/nathaniel/Documents/Nathaniel/Programs/C++/Lightning/applications/TestLogging.cpp
+Lightning.h
+/Users/nathaniel/Documents/Nathaniel/Programs/C++/Lightning/applications/Lightning.h
+

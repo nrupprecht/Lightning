@@ -1,0 +1,34 @@
+{
+ "options": [
+  [
+   "shared",
+   "True"
+  ],
+  [
+   "gtest:build_gmock",
+   "True"
+  ],
+  [
+   "gtest:fPIC",
+   "True"
+  ],
+  [
+   "gtest:hide_symbols",
+   "False"
+  ],
+  [
+   "gtest:no_main",
+   "False"
+  ],
+  [
+   "gtest:shared",
+   "False"
+  ]
+ ],
+ "root": {
+  "name": "Manta",
+  "version": "1.0.0",
+  "user": null,
+  "channel": null
+ }
+}

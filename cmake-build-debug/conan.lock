@@ -1,0 +1,25 @@
+{
+ "graph_lock": {
+  "nodes": {
+   "0": {
+    "ref": "Manta/1.0.0",
+    "options": "shared=True\ngtest:build_gmock=True\ngtest:fPIC=True\ngtest:hide_symbols=False\ngtest:no_main=False\ngtest:shared=False",
+    "requires": [
+     "1"
+    ],
+    "path": "../conanfile.py",
+    "context": "host"
+   },
+   "1": {
+    "ref": "gtest/1.11.0",
+    "options": "build_gmock=True\nfPIC=True\nhide_symbols=False\nno_main=False\nshared=False",
+    "package_id": "a8d205d2142a0df3e14de760c81b26cc135d2596",
+    "prev": "0",
+    "context": "host"
+   }
+  },
+  "revisions_enabled": false
+ },
+ "version": "0.4",
+ "profile_host": "[settings]\narch=armv8\narch_build=armv8\nbuild_type=Release\ncompiler=apple-clang\ncompiler.cppstd=gnu17\ncompiler.libcxx=libc++\ncompiler.version=13.1\nos=Macos\nos_build=Macos\n[options]\n[build_requires]\n[env]\n"
+}

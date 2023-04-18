@@ -1,0 +1,54 @@
+/Applications/CLion.app/Contents/bin/cmake/mac/bin/cmake -DCMAKE_BUILD_TYPE=Debug -DCMAKE_DEPENDS_USE_COMPILER=FALSE -G "CodeBlocks - Unix Makefiles" /Users/nathaniel/Documents/Nathaniel/Programs/C++/Lightning
+-- Conan: Automatic detection of conan settings from cmake
+In file included from <stdin>:1:
+In file included from /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/../include/c++/v1/string:506:
+In file included from /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/../include/c++/v1/string_view:175:
+In file included from /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/../include/c++/v1/__string:57:
+In file included from /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/../include/c++/v1/algorithm:641:
+In file included from /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/../include/c++/v1/cstring:60:
+/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/../include/c++/v1/string.h:60:15: fatal error: 'string.h' file not found
+#include_next <string.h>
+              ^~~~~~~~~~
+1 error generated.
+-- Conan: Settings= -s;build_type=Release;-s;compiler=apple-clang;-s;compiler.version=13.1;-s;compiler.libcxx=libc++
+-- Conan executing: conan install /Users/nathaniel/Documents/Nathaniel/Programs/C++/Lightning/conanfile.py -s build_type=Release -s compiler=apple-clang -s compiler.version=13.1 -s compiler.libcxx=libc++ -g=cmake --build=missing
+-- Configuration:
+[settings]
+arch=armv8
+arch_build=armv8
+build_type=Release
+compiler=apple-clang
+compiler.cppstd=gnu17
+compiler.libcxx=libc++
+compiler.version=13.1
+os=Macos
+os_build=Macos
+[options]
+[build_requires]
+[env]
+
+conanfile.py (Manta/1.0.0): Installing package
+Requirements
+    gtest/1.11.0 from 'conancenter' - Cache
+Packages
+    gtest/1.11.0:a8d205d2142a0df3e14de760c81b26cc135d2596 - Cache
+
+Cross-build from 'Macos:x86_64' to 'Macos:armv8'
+Installing (downloading, building) binaries...
+gtest/1.11.0: Already installed!
+conanfile.py (Manta/1.0.0): Generator txt created conanbuildinfo.txt
+conanfile.py (Manta/1.0.0): Generator cmake created conanbuildinfo.cmake
+conanfile.py (Manta/1.0.0): Aggregating env generators
+conanfile.py (Manta/1.0.0): Generated conaninfo.txt
+conanfile.py (Manta/1.0.0): Generated graphinfo
+
+-- Conan: Loading conanbuildinfo.cmake
+-- Conan: Adjusting output directories
+-- Conan: Using cmake global configuration
+-- Conan: Adjusting default RPATHs Conan policies
+-- Conan: Adjusting language standard
+-- Current conanbuildinfo.cmake directory: /Users/nathaniel/Documents/Nathaniel/Programs/C++/Lightning/cmake-build-debug
+-- Building tests...
+-- Configuring done
+-- Generating done
+-- Build files have been written to: /Users/nathaniel/Documents/Nathaniel/Programs/C++/Lightning/cmake-build-debug
