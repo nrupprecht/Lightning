@@ -64,6 +64,34 @@ inline constexpr bool always_false_v = detail_always_false::always_false<T>::val
 }; // namespace typetraits.
 
 
+class ImplBase {
+ public:
+  class Impl {
+   public:
+    virtual ~Impl() = default;
+  };
+
+  template <typename Concrete_t>
+  NO_DISCARD bool IsType() const {
+    return dynamic_cast<typename Concrete_t::Impl>(impl_.get());
+  }
+
+ protected:
+  template<typename Concrete_t>
+  typename Concrete_t::Impl* impl() {
+    return reinterpret_cast<typename Concrete_t::Impl*>(impl_.get());
+  }
+
+  template<typename Concrete_t>
+  const typename Concrete_t::Impl* impl() const {
+    return reinterpret_cast<const typename Concrete_t::Impl*>(impl_.get());
+  }
+
+  std::shared_ptr<Impl> impl_ = nullptr;
+
+  explicit ImplBase(std::shared_ptr<Impl> impl) : impl_(std::move(impl)) {}
+};
+
 // ==============================================================================
 //  Settings and configurations.
 // ==============================================================================
@@ -87,12 +115,14 @@ struct SinkSettings {
 
 namespace attribute { // namespace lightning::attribute
 
-class Attribute {
+class Attribute : public ImplBase {
+  friend class ImplBase; // So impl<>() function works.
  protected:
-  class Impl {
+  class Impl : public ImplBase::Impl {
    public:
     explicit Impl(const std::string& name) : attr_name(name) {}
     virtual ~Impl() = default;
+    virtual std::optional<Attribute> Generate() const { return {}; }
     //! \brief The name of the attribute.
     const std::string attr_name;
   };
@@ -103,12 +133,21 @@ class Attribute {
     virtual T GetAttribute() = 0;
   };
 
-  std::shared_ptr<Impl> impl_ = nullptr;
-
  public:
-  explicit Attribute(std::shared_ptr<Impl>&& impl) : impl_(std::move(impl)) {}
+  explicit Attribute(std::shared_ptr<Impl>&& impl) : ImplBase(std::move(impl)) {}
 
-  NO_DISCARD const std::string& GetAttributeName() const { return impl_->attr_name; }
+  NO_DISCARD const std::string& GetAttributeName() const { return impl<Attribute>()->attr_name; }
+
+  //! \brief  Some attributes, like timestamps, need to be generated every time an attribute is attached to
+  //!         a record. Others might not. The impl decides if the attaching an attribute should generate a
+  //!         new copy of the attribute, potentially with newly generated information inside it, or if
+  //!         this attribute should just be used.
+  Attribute Generate() const {
+    if (auto attr = impl<Attribute>()->Generate()) {
+      return *attr;
+    }
+    return *this;
+  }
 
   template<typename T>
   NO_DISCARD std::optional<T> GetAttribute() const {
@@ -119,31 +158,41 @@ class Attribute {
   }
 };
 
+template <typename Concrete_t>
+Concrete_t reinterpret_impl_cast(Attribute& attribute_type) {
+  return *reinterpret_cast<Concrete_t*>(&attribute_type);
+}
 
 //! \brief  Base class for classes that take attributes and format them in some way, which is then used
 //!         to construct a formatted logging message.
 //!
-class AttributeFormatter {
+class AttributeFormatter : public ImplBase {
+  friend class ImplBase; // So impl<>() function works.
  protected:
-  class Impl {
+  class Impl : public ImplBase::Impl {
    public:
-    explicit Impl(const std::string& name) : attr_name(name) {}
+    explicit Impl(std::string name) : attr_name(std::move(name)) {}
     virtual ~Impl() = default;
     //! \brief The name of the attribute this extractor formats.
     const std::string attr_name;
     NO_DISCARD virtual std::string FormatAttribute(const Attribute& attribute, const settings::SinkSettings& sink_settings) const = 0;
   };
 
-  std::unique_ptr<Impl> impl_ = nullptr;
  public:
-  explicit AttributeFormatter(std::unique_ptr<Impl>&& impl) : impl_(std::move(impl)) {}
+  explicit AttributeFormatter(const std::shared_ptr<Impl>& impl) : ImplBase(impl) {}
 
-  NO_DISCARD const std::string& GetAttributeName() const { return impl_->attr_name; }
+  NO_DISCARD const std::string& GetAttributeName() const { return impl<AttributeFormatter>()->attr_name; }
 
   NO_DISCARD std::string FormatAttribute(const Attribute& attribute, const settings::SinkSettings& sink_settings) const {
-    return impl_->FormatAttribute(attribute, sink_settings);
+    return impl<AttributeFormatter>()->FormatAttribute(attribute, sink_settings);
   }
+
 };
+
+template <typename Concrete_t>
+Concrete_t reinterpret_impl_cast(AttributeFormatter& attribute_type) {
+  return *reinterpret_cast<Concrete_t*>(&attribute_type);
+}
 
 }; // namespace attribute
 
@@ -169,23 +218,22 @@ struct MessageInfo {
 //!
 //!         This object is implemented as a pImpl.
 //!
-class DispatchTimeFormatting {
+class DispatchTimeFormatting : public ImplBase {
+  friend class ImplBase; // So impl<>() function works.
  protected:
-  class Impl {
+  class Impl : public ImplBase::Impl {
    public:
+    virtual ~Impl() = default;
     virtual void AddWithFormatting(std::string& message,
                                    const MessageInfo& message_info,
-                                   const settings::SinkSettings& sink_settings) = 0;
+                                   const settings::SinkSettings& sink_settings) const = 0;
   };
-
-  //! \brief  Pointer to the implementation of the formatting object.
-  std::shared_ptr<Impl> impl_;
 
  public:
   void AddWithFormatting(std::string& message,
                          const MessageInfo& message_info,
                          const settings::SinkSettings& sink_settings) const {
-    impl_->AddWithFormatting(message, message_info, sink_settings);
+    impl<DispatchTimeFormatting>()->AddWithFormatting(message, message_info, sink_settings);
   }
 };
 
@@ -248,15 +296,22 @@ class FormattedMessageSegments {
 
 class MessageFormatter {
  public:
+  virtual ~MessageFormatter() = default;
   virtual std::string operator()(const Record& record,
                                  const settings::SinkSettings&,
                                  const std::weak_ptr<std::map<std::string, attribute::AttributeFormatter>>& additional_formatters) = 0;
   void AddAttributeFormatter(attribute::AttributeFormatter&& formatter) { attribute_formatters_.emplace(formatter.GetAttributeName(), std::move(formatter)); }
+  void AddAttributeFormatter(const attribute::AttributeFormatter& formatter) { attribute_formatters_.emplace(formatter.GetAttributeName(), formatter); }
+  attribute::AttributeFormatter* GetAttributeFormatter(const std::string& formatter_name) {
+    return getAttributeFormatter(formatter_name);
+  }
  protected:
-  NO_DISCARD const attribute::AttributeFormatter* getExtractor(const std::string& name) const {
-    if (auto it = attribute_formatters_.find(name); it != attribute_formatters_.end()) {
-      return &it->second;
-    }
+  NO_DISCARD const attribute::AttributeFormatter* getAttributeFormatter(const std::string& name) const {
+    if (auto it = attribute_formatters_.find(name); it != attribute_formatters_.end()) return &it->second;
+    return nullptr;
+  }
+  NO_DISCARD attribute::AttributeFormatter* getAttributeFormatter(const std::string& name) {
+    if (auto it = attribute_formatters_.find(name); it != attribute_formatters_.end()) return &it->second;
     return nullptr;
   }
 
@@ -276,37 +331,19 @@ struct FmtFrom {
 
 
 namespace detail_unconst {
-template <typename T>
-struct Unconst {
-  using type = T;
-};
-
-template<typename T>
-struct Unconst<const T> {
-  using type = typename Unconst<T>::type;
-};
-
-template<typename T>
-struct Unconst<const T*> {
-  using type = typename Unconst<T>::type *;
-};
-
-template<typename T>
-struct Unconst<T*> {
-  using type = typename Unconst<T>::type *;
-};
+template <typename T> struct Unconst { using type = T; };
+template<typename T> struct Unconst<const T> {  using type = typename Unconst<T>::type; };
+template<typename T> struct Unconst<const T*> { using type = typename Unconst<T>::type *; };
+template<typename T> struct Unconst<T*> { using type = typename Unconst<T>::type *; };
 } // namespace detail_unconst
 
+//! \brief  Remove const-ness on all levels of pointers.
+//!
 template <typename T>
 using Unconst_t = typename detail_unconst::Unconst<T>::type;
 
 template<typename T>
 constexpr inline bool IsCstrRelated_v = std::is_same_v<Unconst_t<std::decay_t<T>>, char*> || std::is_same_v<std::remove_cvref_t<T>, std::string>;
-
-
-//! \brief  Map any c-string-like type (char*, char[N], etc.) to std::string, everything else to its own type.
-template<typename RawFormatType_t>
-using FormatType_t = std::conditional_t<IsCstrRelated_v<RawFormatType_t>, std::string, std::remove_cvref<RawFormatType_t>>;
 
 //! \brief Structure that represents part of a message coming from an attribute.
 //!
@@ -377,6 +414,55 @@ class StandardMessageFormatter : public MessageFormatter, public FmtFrom<std::st
   std::vector<std::variant<std::string, Fmt>> fmt_segments_;
 };
 
+// For a nice summary of ansi commands, see https://gist.github.com/fnky/458719343aabd01cfb17a3a4f7296797.
+// See also https://en.wikipedia.org/wiki/ANSI_escape_code.
+
+enum class AnsiForegroundColor : short {
+  Reset = 0,
+  Default = 39,
+  Black = 30, Red = 31, Green = 32, Yellow = 33, Blue = 34, Magenta = 35, Cyan = 36, White = 37,
+  BrightBlack = 90, BrightRed = 91, BrightGreen = 92, BrightYellow = 93, BrightBlue = 94, BrightMagenta = 95, BrightCyan = 96, BrightWhite = 97
+};
+
+enum class AnsiBackgroundColor : short {
+  Reset = 0,
+  Default = 49,
+  Black = 40, Red = 41, Green = 42, Yellow = 43, Blue = 44, Magenta = 45, Cyan = 46, White = 47,
+  BrightBlack = 100, BrightRed = 101, BrightGreen = 102, BrightYellow = 103, BrightBlue = 104, BrightMagenta = 105, BrightCyan = 106, BrightWhite = 107
+};
+
+using Ansi256Color = unsigned char;
+
+inline std::string StartAnsiColorFmt(AnsiForegroundColor foreground, std::optional<AnsiBackgroundColor> background = {}) {
+  std::string fmt = "\x1b[" + std::to_string(static_cast<short>(foreground));
+  if (background) fmt += ";" + std::to_string(static_cast<short>(*background));
+  return fmt + "m";
+}
+
+inline std::string StartAnsi256ColorFmt(Ansi256Color foreground_color_id, std::optional<Ansi256Color> background_color_id = {}) {
+  std::string fmt = "\x1b[38;5;" + std::to_string(foreground_color_id);
+  if (background_color_id) fmt += "\x1b[48;5;" + std::to_string(foreground_color_id);
+  return fmt + "m";
+}
+
+inline std::string StartAnsiRGBColorFmt(Ansi256Color r, Ansi256Color g, Ansi256Color b) {
+  return "\x1b[38;2;" + std::to_string(r) + ";" + std::to_string(g) + ";" + std::to_string(b) + "m";
+}
+
+inline std::string PotentiallyAnsiColor(const std::string& message,
+                                        bool do_color,
+                                        AnsiForegroundColor foreground,
+                                        AnsiBackgroundColor background = AnsiBackgroundColor::Default) {
+  std::string output;
+  if (do_color) {
+    output += StartAnsiColorFmt(foreground, background) + message + StartAnsiColorFmt(AnsiForegroundColor::Default, AnsiBackgroundColor::Default);
+  }
+  else {
+    output = message;
+  }
+  return output;
+}
+
 }// namespace formatting
 
 
@@ -428,18 +514,21 @@ class Record {
     return nullptr;
   }
 
-  void AddAttributes(const std::vector<attribute::Attribute>& attributes) {
+  Record& AddAttributes(const std::vector<attribute::Attribute>& attributes) {
     for (auto& attr : attributes) {
       AddAttribute(attr);
     }
+    return *this;
   }
 
-  void AddAttribute(const attribute::Attribute& attribute) {
+  Record& AddAttribute(const attribute::Attribute& attribute) {
     attributes_.emplace(attribute.GetAttributeName(), attribute);
+    return *this;
   }
 
-  void SetAdditionalFormatters(std::weak_ptr<std::map<std::string, attribute::AttributeFormatter>> formatters) {
+  Record& SetAdditionalFormatters(std::weak_ptr<std::map<std::string, attribute::AttributeFormatter>> formatters) {
     additional_formatters_ = std::move(formatters);
+    return *this;
   }
 
  private:
@@ -480,28 +569,31 @@ class RecordHandler {
       }
 
       record_.Dispatch();
+      record_.Close();
     }
   }
 
+  NO_DISCARD bool IsOpen() const { return record_.IsOpen(); }
+
   template<typename T>
   RecordHandler& operator<<(const T& input) {
-
     // TODO Handle values.
-
-    // TODO Handle attributes.
-
-    if constexpr (std::is_base_of_v<formatting::DispatchTimeFormatting, T>) {
+    if constexpr (std::is_base_of_v<attribute::Attribute, T>) {
+      // Add an attribute via streaming.
+      record_.AddAttribute(input);
+    }
+    else if constexpr (std::is_base_of_v<formatting::DispatchTimeFormatting, T>) {
       ensureRecordHasMessage();
       *record_.message_ << input;
     }
     else if constexpr (formatting::has_logstream_formatter_v<T>) {
+      // If a formatting function has been provided, use it.
       format_logstream(input, *this);
     }
     else if constexpr (typetraits::is_ostreamable_v<T>) {
       ensureRecordHasMessage();
       *record_.message_ << input;
     }
-
     else if constexpr (typetraits::has_to_string_v<T>) {
       // Fall-back on a to_string method.
       using std::to_string; // Allow for a customization point.
@@ -518,9 +610,7 @@ class RecordHandler {
 
  private:
   void ensureRecordHasMessage() {
-    if (!record_.message_) {
-      record_.message_ = formatting::FormattedMessageSegments{};
-    }
+    if (!record_.message_) record_.message_ = formatting::FormattedMessageSegments{};
   }
 
   //! \brief  The record being constructed by the record handler.
@@ -537,20 +627,19 @@ class RecordHandler {
 //!
 //!         Implemented as a pImpl.
 //!
-class Filter {
+class Filter : public ImplBase {
+  friend class ImplBase; // So impl<>() function works.
  public:
   virtual ~Filter() = default;
   NO_DISCARD bool Check(const Record& record) const {
-    return impl_->Check(record);
+    return impl<Filter>()->Check(record);
   }
 
  protected:
-  class Impl {
+  class Impl : public ImplBase::Impl {
    public:
     NO_DISCARD virtual bool Check(const Record& record) const = 0;
   };
-
-  std::shared_ptr<Impl> impl_;
 };
 
 
@@ -565,6 +654,7 @@ class SinkBackend {
   virtual ~SinkBackend() = default;
 
   NO_DISCARD const settings::SinkSettings& GetSettings() const { return *sink_settings_; }
+  NO_DISCARD settings::SinkSettings& GetSettings() { return *sink_settings_; }
 
  private:
   void accept(const std::optional<std::string>& formatted_message) {
@@ -595,7 +685,7 @@ class SinkBackend {
 //!         synchronization.
 class SinkFrontend {
  public:
-  explicit SinkFrontend(std::unique_ptr<SinkBackend>&& backend)
+  explicit SinkFrontend(std::shared_ptr<SinkBackend>&& backend)
       : backend_(std::move(backend))
       , formatter_(std::make_shared<formatting::StandardMessageFormatter>())
   {}
@@ -609,13 +699,26 @@ class SinkFrontend {
     return *this;
   }
 
-  bool WillAccept(const Record& record) {
-    for (auto& filter : sink_level_filters_) {
-      if (!filter->Check(record)) {
-        return false;
-      }
+  SinkFrontend& AddAttributeFormatter(const attribute::AttributeFormatter& formatter) {
+    if (formatter_) {
+      formatter_->AddAttributeFormatter(formatter);
     }
-    return true;
+    return *this;
+  }
+
+  //! \brief  Look for an attribute formatter, returning a pointer to it if it exists, otherwise a nullptr.
+  //!
+  //!         If there is no formatter, a nullptr is returned in this case as well.
+  //! \param formatter_name
+  //! \return
+  attribute::AttributeFormatter* GetAttributeFormatter(const std::string& formatter_name) {
+    return formatter_->GetAttributeFormatter(formatter_name);
+  }
+
+  bool WillAccept(const Record& record) {
+    return std::all_of(sink_level_filters_.begin(), sink_level_filters_.end(), [record](auto& filter) {
+      return filter.Check(record);
+    });
   }
 
   void TryDispatch(const Record& record) {
@@ -646,7 +749,7 @@ class SinkFrontend {
     formatter_ = std::move(formatter);
   }
 
-  const std::shared_ptr<formatting::MessageFormatter> GetFormatter() const {
+  NO_DISCARD const std::shared_ptr<formatting::MessageFormatter>& GetFormatter() const {
     return formatter_;
   }
 
@@ -667,6 +770,15 @@ class SinkFrontend {
     return false;
   }
 
+  template<typename Backend_t>
+  NO_DISCARD std::shared_ptr<Backend_t> TryGetBackendAs() const {
+    return std::dynamic_pointer_cast<Backend_t>(backend_);
+  }
+
+  NO_DISCARD const std::shared_ptr<SinkBackend>& GetBackend() const {
+    return backend_;
+  }
+
  protected:
   virtual void dispatch(const std::optional<std::string>& formatted_message) = 0;
 
@@ -679,12 +791,14 @@ class SinkFrontend {
 
   //! \brief  The backend of the sink.
   //!
-  std::unique_ptr<SinkBackend> backend_;
+  std::shared_ptr<SinkBackend> backend_;
 
   //! \brief  And filters that should be used to determine if records should be accepted by the sink.
   //!
-  std::vector<std::unique_ptr<Filter>> sink_level_filters_;
+  std::vector<Filter> sink_level_filters_;
 
+  //! \brief  The formatting object for a message.
+  //!
   std::shared_ptr<formatting::MessageFormatter> formatter_ = nullptr;
 };
 
@@ -711,6 +825,12 @@ class Core {
     return *this;
   }
 
+  template<typename Frontend_t, typename Backend_t, typename ...Args>
+  Core& AddSink(Args&&... args) {
+    sinks_.push_back(std::make_unique<Frontend_t>(std::make_unique<Backend_t>(std::forward<Args>(args)...)));
+    return *this;
+  }
+
   Core& AddFilter(const Filter& filter) {
     core_level_filters_.push_back(filter);
     return *this;
@@ -727,32 +847,66 @@ class Core {
   NO_DISCARD bool WillAccept(const Record& record) const {
     // Make sure the record will not be filtered out by core-level filters.
     for (auto& filter : core_level_filters_) {
-      if (!filter.Check(record)) {
-        return false;
-      }
+      if (!filter.Check(record)) return false;
     }
 
     // At least one sink must accept the record for the core to accept the record.
     return std::any_of(sinks_.begin(), sinks_.end(), [record](auto& s) { return s->WillAccept(record); });
   }
 
-  bool TryAccept(Record& record) const {
-    if (WillAccept(record)) {
-      record.core_ = this;
-      return true;
-    }
-    return false;
+  Record& TryAccept(Record& record) const {
+    record.core_ = WillAccept(record) ? this : nullptr;
+    return record;
   }
 
   void Dispatch(Record&& record) const {
-    for (auto& sink : sinks_) {
-      sink->TryDispatch(record);
+    std::for_each(sinks_.begin(), sinks_.end(), [record](auto sink) { sink->TryDispatch(record);});
+  }
+
+  //! \brief  Get the first sink backend of the specified type, if one exists. Otherwise, returns nullptr.
+  //!
+  template<typename Backend_t>
+  std::shared_ptr<Backend_t> GetFirstSink() const {
+    for (auto& frontend : sinks_) {
+      if (auto backend = frontend->TryGetBackendAs<Backend_t>()) {
+        return backend;
+      }
     }
+    return nullptr;
+  }
+
+  template <typename Func_t>
+  void ForEachBackend(const Func_t func) const {
+    std::for_each(sinks_.begin(), sinks_.end(), [func](auto& sink) {
+      func(*sink->GetBackend());
+    });
+  }
+
+  template <typename Func_t>
+  void ForEachFrontend(const Func_t func) const {
+    std::for_each(sinks_.begin(), sinks_.end(), [func](auto& sink) {
+      func(*sink);
+    });
+  }
+
+  template<typename FormatObj_t>
+  Core& SetAllFormats(const FormatObj_t& fmt_obj) {
+    std::for_each(sinks_.begin(), sinks_.end(), [fmt_obj](auto& sink) { sink->SetFormatFrom(fmt_obj); });
+    return *this;
+  }
+
+  Core& AddFormatterToAll(const attribute::AttributeFormatter& formatter) {
+    std::for_each(sinks_.begin(), sinks_.end(), [&](auto& sink) { sink->AddAttributeFormatter(formatter); });
+    return *this;
   }
 
  private:
+  //! \brief  Filters that apply to any message routed through the core.
+  //!
   std::vector<Filter> core_level_filters_;
 
+  //! \brief  All the sinks that the core multiplexes.
+  //!
   std::vector<std::shared_ptr<SinkFrontend>> sinks_;
 };
 
@@ -772,31 +926,33 @@ class Logger {
  public:
   //! \brief  Create a logger with a new logging core.
   //!
-  Logger() : Logger(std::make_shared<Core>()) {}
+  Logger() noexcept : Logger(std::make_shared<Core>()) {}
 
   //! \brief  Create a logger with a specific logging core.
   //!
-  explicit Logger(std::shared_ptr<Core> core)
+  explicit Logger(std::shared_ptr<Core> core) noexcept
       : core_(std::move(core)), attribute_formatters_(std::make_shared<std::map<std::string, attribute::AttributeFormatter>>()) {}
 
   //! \brief  Explicitly create the logger without a logging core.
   //!
-  explicit Logger(NoCore_t) : Logger(nullptr) {}
+  explicit Logger(NoCore_t) noexcept : Logger(nullptr) {}
 
   NO_DISCARD const std::shared_ptr<Core>& GetCore() const {
     return core_;
   }
 
-  NO_DISCARD RecordHandler operator()() const {
-    return RecordHandler(createRecord());
+  NO_DISCARD RecordHandler operator()(const std::vector<attribute::Attribute>& attributes = {}) const {
+    return RecordHandler(CreateRecord(attributes));
   }
 
-  void AddNamedAttribute(const std::string& name, const attribute::Attribute& attribute) {
+  Logger& AddNamedAttribute(const std::string& name, const attribute::Attribute& attribute) {
     logger_named_attributes_.emplace(name, attribute);
+    return *this;
   }
 
-  void AddLoggerAttributeFormatter(attribute::AttributeFormatter&& attribute_formatter) {
+  Logger& AddLoggerAttributeFormatter(attribute::AttributeFormatter&& attribute_formatter) {
     attribute_formatters_->emplace(attribute_formatter.GetAttributeName(), std::move(attribute_formatter));
+    return *this;
   }
 
   NO_DISCARD attribute::Attribute* GetNamedAttribute(const std::string& name) {
@@ -806,28 +962,24 @@ class Logger {
     return nullptr;
   }
 
- protected:
-  NO_DISCARD Record createRecord(const std::vector<attribute::Attribute>& attributes = {}) const {
+  NO_DISCARD Record CreateRecord(const std::vector<attribute::Attribute>& attributes = {}) const {
+    if (!core_) return {};
+
     Record record{};
-
-    if (!core_) {
-      return record;
-    }
-
     std::for_each(logger_named_attributes_.begin(), logger_named_attributes_.end(), [&](auto& pr) {
-      record.AddAttribute(pr.second);
+      record.AddAttribute(pr.second.Generate()); // Generate an attribute from every attribute of the logger.
     });
-    record.AddAttributes(attributes);
-    record.SetAdditionalFormatters(attribute_formatters_);
-
-    core_->TryAccept(record);
-    return record;
+    record.AddAttributes(attributes).SetAdditionalFormatters(attribute_formatters_);
+    return core_->TryAccept(record);
   }
 
+ protected:
   //! \brief  The logging core for the logger.
   //!
   std::shared_ptr<Core> core_ = nullptr;
 
+  //! \brief  Attributes that are attached to every message.
+  //!
   std::map<std::string, attribute::Attribute> logger_named_attributes_;
 
   //! \brief  Attribute formatters are passed to all the sinks via the record. If a sink does not have an attribute formatter
@@ -840,9 +992,10 @@ inline void Record::Dispatch() {
   core_->Dispatch(std::move(*this));
 }
 
-inline std::string formatting::StandardMessageFormatter::operator()(const Record& record,
-                                                                    const settings::SinkSettings& sink_settings,
-                                                                    const std::weak_ptr<std::map<std::string, attribute::AttributeFormatter>>& additional_formatters) {
+inline std::string formatting::StandardMessageFormatter::operator()(
+    const Record& record,
+    const settings::SinkSettings& sink_settings,
+    const std::weak_ptr<std::map<std::string, attribute::AttributeFormatter>>& additional_formatters) {
   MessageInfo message_info{};
 
   std::string message{};
@@ -870,7 +1023,7 @@ inline std::string formatting::StandardMessageFormatter::operator()(const Record
           //                    in the segments instead of the name, which we then have to look up.
           //                    But we would have to recalculate the fmt segments whenever a new
           //                    extractor is added.
-          if (auto extractor = getExtractor(fmt.attr_name)) {
+          if (auto extractor = getAttributeFormatter(fmt.attr_name)) {
             message += extractor->FormatAttribute(*attr, sink_settings);
           }
           else if (!additional_formatters.expired()) {
@@ -894,6 +1047,7 @@ inline std::string formatting::StandardMessageFormatter::operator()(const Record
 namespace attribute { // namespace lightning::attribute
 
 class ThreadAttribute : public attribute::Attribute {
+  friend class ImplBase;
  protected:
   class Impl : public Attribute::ImplConcrete<std::thread::id> {
    public:
@@ -902,10 +1056,11 @@ class ThreadAttribute : public attribute::Attribute {
     std::thread::id thread_id;
   };
  public:
-  ThreadAttribute() : Attribute(std::make_unique<Impl>()) {}
+  ThreadAttribute() : Attribute(std::make_shared<Impl>()) {}
 };
 
 class ThreadAttributeFormatter : public attribute::AttributeFormatter {
+  friend class ImplBase;
  protected:
   class Impl : public AttributeFormatter::Impl {
    public:
@@ -920,7 +1075,7 @@ class ThreadAttributeFormatter : public attribute::AttributeFormatter {
     }
   };
  public:
-  ThreadAttributeFormatter() : AttributeFormatter(std::make_unique<Impl>()) {}
+  ThreadAttributeFormatter() : AttributeFormatter(std::make_shared<Impl>()) {}
 };
 
 } // namespace attribute
@@ -936,6 +1091,7 @@ enum class Severity {
 namespace attribute { // namespace lightning::attribute
 
 class SeverityAttribute final : public Attribute {
+  friend class ImplBase;
  private:
   class Impl : public Attribute::ImplConcrete<Severity> {
    public:
@@ -949,28 +1105,84 @@ class SeverityAttribute final : public Attribute {
 };
 
 class SeverityFormatter final : public AttributeFormatter {
+  friend class ImplBase;
  private:
   class Impl : public AttributeFormatter::Impl {
    public:
     Impl() : AttributeFormatter::Impl("Severity") {}
-    NO_DISCARD virtual std::string FormatAttribute(const Attribute& attribute, const settings::SinkSettings& sink_settings) const override {
+    NO_DISCARD std::string FormatAttribute(const Attribute& attribute, const settings::SinkSettings& sink_settings) const override {
       if (auto sev = attribute.GetAttribute<Severity>()) {
         switch (*sev) {
-          case Severity::Debug:   return "Debug  ";
-          case Severity::Info:    return "Info   ";
-          case Severity::Warning: return "Warning";
-          case Severity::Error:   return "Error  ";
-          case Severity::Fatal:   return "Fatal  ";
+          case Severity::Debug:   return formatting::PotentiallyAnsiColor("Debug  ", sink_settings.has_color_support, formatting::AnsiForegroundColor::BrightBlack);
+          case Severity::Info:    return formatting::PotentiallyAnsiColor("Info   ", sink_settings.has_color_support, formatting::AnsiForegroundColor::Green);
+          case Severity::Warning: return formatting::PotentiallyAnsiColor("Warning", sink_settings.has_color_support, formatting::AnsiForegroundColor::Yellow);
+          case Severity::Error:   return formatting::PotentiallyAnsiColor("Error  ", sink_settings.has_color_support, formatting::AnsiForegroundColor::Red);
+          case Severity::Fatal:   return formatting::PotentiallyAnsiColor("Fatal  ", sink_settings.has_color_support, formatting::AnsiForegroundColor::BrightRed);
         }
       }
       return "";
     }
   };
  public:
-  SeverityFormatter() : AttributeFormatter(std::make_unique<Impl>()) {}
+  SeverityFormatter() : AttributeFormatter(std::make_shared<Impl>()) {}
+};
+
+class BlockLevelAttribute : public Attribute {
+  friend class ImplBase;
+ private:
+  class Impl : public Attribute::ImplConcrete<unsigned> {
+   public:
+    explicit Impl(unsigned level) : ImplConcrete("BlockLevel"), level_(level) {}
+    unsigned GetAttribute() override { return level_; }
+    void SetIndentation(unsigned level) { level_ = level; }
+    void IncrementIndentation() { ++level_; }
+    void DecrementIndentation() { if (0 < level_) --level_; }
+   private:
+    unsigned level_;
+  };
+ public:
+  explicit BlockLevelAttribute(unsigned level) : Attribute(std::make_shared<Impl>(level)) {}
+  void SetIndentation(unsigned level) { impl<BlockLevelAttribute>()->SetIndentation(level); }
+  void IncrementIndentation() { impl<BlockLevelAttribute>()->IncrementIndentation(); }
+  void DecrementIndentation() { impl<BlockLevelAttribute>()->DecrementIndentation(); }
+};
+
+class BlockIndentationFormatter final : public AttributeFormatter {
+  friend class ImplBase;
+ private:
+  class Impl : public AttributeFormatter::Impl {
+   public:
+    explicit Impl(unsigned spaces_per_level) : AttributeFormatter::Impl("BlockLevel"), spaces_per_level_(spaces_per_level) {}
+    NO_DISCARD std::string FormatAttribute(const Attribute& attribute, const settings::SinkSettings& sink_settings) const override {
+      return std::string(spaces_per_level_ * *attribute.GetAttribute<unsigned>(), ' ');
+    }
+   private:
+    unsigned spaces_per_level_;
+  };
+ public:
+  explicit BlockIndentationFormatter(unsigned spaces_per_level = 2) : AttributeFormatter(std::make_shared<Impl>(spaces_per_level)) {}
 };
 
 } // namespace attribute
+
+namespace controllers { // namespace lightning::controllers
+
+class BlockLevel {
+ public:
+  explicit BlockLevel(Logger& logger) {
+    auto attr = logger.GetNamedAttribute("BlockLevel");
+    auto block_attr = attribute::reinterpret_impl_cast<attribute::BlockLevelAttribute>(*attr);
+    block_attr.IncrementIndentation();
+  }
+  ~BlockLevel() {
+
+  }
+
+ private:
+
+};
+
+} // namespace controllers
 
 class SeverityLogger : public Logger {
  public:
@@ -979,7 +1191,7 @@ class SeverityLogger : public Logger {
   }
 
   RecordHandler operator()(Severity severity) {
-    return RecordHandler(createRecord({attribute::SeverityAttribute(severity)}));
+    return RecordHandler(CreateRecord({attribute::SeverityAttribute(severity)}));
   }
 };
 
@@ -1018,13 +1230,20 @@ class SynchronizedFrontend : public SinkFrontend {
   std::mutex dispatch_mutex_;
 };
 
+
 // ==============================================================================
 //  Specific SinkBackend implementations.
 // ==============================================================================
 
 class OstreamSink : public SinkBackend {
  public:
-  explicit OstreamSink(std::ostream& stream = std::cout) : stream_(stream) {}
+  explicit OstreamSink(std::ostringstream& stream) : stream_(stream) {
+    GetSettings().has_color_support = false;
+  }
+
+  explicit OstreamSink(std::ostream& stream = std::cout) : stream_(stream) {
+    GetSettings().has_color_support = true; // Default this to true... TODO: Detect?
+  }
 
  private:
   void dispatch(const std::optional<std::string>& formatted_message) override {
@@ -1034,5 +1253,39 @@ class OstreamSink : public SinkBackend {
   std::ostream& stream_;
 };
 
+
+// ==============================================================================
+//  Global logger.
+// ==============================================================================
+
+class Global {
+ public:
+  static std::shared_ptr<Core> GetCore() {
+    if (!global_core_) {
+      global_core_ = std::make_shared<Core>();
+    }
+    return global_core_;
+  }
+
+  static Logger& GetLogger() {
+    if (!logger_) {
+      logger_ = Logger(GetCore());
+    }
+    return *logger_;
+  }
+
+ private:
+  inline static std::shared_ptr<Core> global_core_ = std::shared_ptr<Core>();
+  inline static std::optional<Logger> logger_{};
+};
+
+#define LOG() \
+  for (auto handler = ::lightning::Global::GetLogger()(); handler.IsOpen(); ) \
+    handler
+
+#define LOG_SEV(severity) \
+  if (auto record = ::lightning::Global::GetLogger().CreateRecord({ \
+    ::lightning::attribute::SeverityAttribute(::lightning::Severity::severity) \
+  }); record.IsOpen()) ::lightning::RecordHandler(std::move(record))
 
 } // namespace lightning

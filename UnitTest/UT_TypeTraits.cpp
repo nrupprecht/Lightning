@@ -10,7 +10,7 @@ namespace {
 
 struct Nonstreamable {};
 
-}
+} // namespace <unnamed>
 
 namespace Testing {
 
