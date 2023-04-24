@@ -9,69 +9,56 @@
 #include <string>
 
 using namespace lightning;
+using namespace std::string_literals;
 
 namespace {
 
 struct Nonstreamable {};
 
-struct ToStringable {};
+struct ToStringable { char c; };
 
-inline std::string to_string(const ToStringable) { return ""; }
+inline std::string to_string(const ToStringable x) {
+  return std::string{'<', x.c, '>'};
+}
 
 } // namespace <unnamed>
 
 
-namespace UnitTest {
+namespace Testing {
 
-TEST(Lightning, IsOstreamable) {
-  EXPECT_TRUE(lightning::typetraits::is_ostreamable_v<std::string>);
-  EXPECT_TRUE(lightning::typetraits::is_ostreamable_v<char[14]>);
-  EXPECT_TRUE(lightning::typetraits::is_ostreamable_v<bool>);
 
-  EXPECT_FALSE(lightning::typetraits::is_ostreamable_v<Nonstreamable>);
+TEST(Lightning, SimpleSeveritySetup) {
+  SeverityLogger logger;
+  logger.GetCore()->
+          AddSink<UnsynchronizedFrontend, OstreamSink>()
+      .SetAllFormats("[{Severity}]: {Message}");
+
+  logger(Severity::Info) << "Hi there, friend.";
 }
 
-TEST(Lightning, Unconst_t) {
-  EXPECT_TRUE((std::is_same_v<formatting::Unconst_t<const char*>, char*>));
-  EXPECT_TRUE((std::is_same_v<formatting::Unconst_t<char*>, char*>));
-  EXPECT_TRUE((std::is_same_v<formatting::Unconst_t<char const* const>, char*>));
-  EXPECT_TRUE((std::is_same_v<formatting::Unconst_t<const double>, double>));
-}
 
-TEST(Lightning, IsCstrRelated_v) {
-  EXPECT_TRUE(formatting::IsCstrRelated_v<char*>);
-  EXPECT_TRUE(formatting::IsCstrRelated_v<const char*>);
-  EXPECT_TRUE(formatting::IsCstrRelated_v<char[5]>);
-  EXPECT_TRUE(formatting::IsCstrRelated_v<char[]>);
+TEST(Lightning, RecordHandler_Streaming) {
+  std::ostringstream stream;
+  auto sink = MakeSink<UnsynchronizedFrontend, OstreamSink>(stream);
+  lightning::Logger logger({sink});
+  logger() << ToStringable{'h'};
 
-  EXPECT_FALSE(formatting::IsCstrRelated_v<int>);
-  EXPECT_FALSE(formatting::IsCstrRelated_v<double>);
-}
-
-TEST(Lightning, HasToString) {
-//  EXPECT_TRUE(lightning::typetraits::has_to_string_v<double>);
-//  EXPECT_TRUE(lightning::typetraits::has_to_string_v<bool>);
-  EXPECT_TRUE(lightning::typetraits::has_to_string_v<ToStringable>);
-
-  EXPECT_FALSE(lightning::typetraits::has_to_string_v<std::string>);
-  EXPECT_FALSE(lightning::typetraits::has_to_string_v<char[14]>);
-  EXPECT_FALSE(lightning::typetraits::has_to_string_v<Nonstreamable>);
+  EXPECT_EQ(stream.str(), "<h>\n");
 }
 
 TEST(Lightning, OstreamSink) {
   std::ostringstream stream;
-
-  auto sink = std::make_unique<OstreamSink>(stream);
+  auto sink = MakeSink<UnsynchronizedFrontend, OstreamSink>(stream);
 
   lightning::Logger logger;
-  logger.GetCore()->AddSink<SimpleFrontend>(std::move(sink));
+  logger.GetCore()->AddSink(std::move(sink));
 
   logger() << "Hello world!";
   EXPECT_EQ(stream.str(), "Hello world!\n");
   stream.str("");
 }
 
-TEST(Lightning, Segmentize) {
+TEST(Lightning, Segmentize_1) {
   auto segments = formatting::Segmentize("[{Severity}]: {Message}");
   EXPECT_EQ(segments.size(), 4u);
   EXPECT_EQ(segments[0].index(), 0);
@@ -85,10 +72,36 @@ TEST(Lightning, Segmentize) {
   EXPECT_EQ(std::get<1>(segments[3]).attr_name, "Message");
 }
 
+TEST(Lightning, Segmentize_2) {
+  auto segments = formatting::Segmentize("{First}==<>=={Time}{Attitude}:{Weather}({Thread}): {Message}");
+  EXPECT_EQ(segments.size(), 10);
+  EXPECT_EQ(segments[0].index(), 1);
+  EXPECT_EQ(segments[1].index(), 0);
+  EXPECT_EQ(segments[2].index(), 1);
+  EXPECT_EQ(segments[3].index(), 1);
+  EXPECT_EQ(segments[4].index(), 0);
+  EXPECT_EQ(segments[5].index(), 1);
+  EXPECT_EQ(segments[6].index(), 0);
+  EXPECT_EQ(segments[7].index(), 1);
+  EXPECT_EQ(segments[8].index(), 0);
+  EXPECT_EQ(segments[9].index(), 1);
+
+  EXPECT_EQ(std::get<1>(segments[0]).attr_name, "First");
+  EXPECT_EQ(std::get<0>(segments[1]), "==<>==");
+  EXPECT_EQ(std::get<1>(segments[2]).attr_name, "Time");
+  EXPECT_EQ(std::get<1>(segments[3]).attr_name, "Attitude");
+  EXPECT_EQ(std::get<0>(segments[4]), ":");
+  EXPECT_EQ(std::get<1>(segments[5]).attr_name, "Weather");
+  EXPECT_EQ(std::get<0>(segments[6]), "(");
+  EXPECT_EQ(std::get<1>(segments[7]).attr_name, "Thread");
+  EXPECT_EQ(std::get<0>(segments[8]), "): ");
+  EXPECT_EQ(std::get<1>(segments[9]).attr_name, "Message");
+}
+
 TEST(Lightning, SeverityLogger) {
   std::ostringstream stream;
 
-  auto sink = MakeSink<SimpleFrontend, OstreamSink>(stream);
+  auto sink = MakeSink<UnsynchronizedFrontend, OstreamSink>(stream);
 
   EXPECT_TRUE(sink->SetFormatFrom("[{Severity}]: {Message}"));
 
@@ -114,6 +127,37 @@ TEST(Lightning, SeverityLogger) {
   logger(Severity::Fatal) << "Goodbye, my friends.";
   EXPECT_EQ(stream.str(), "[Fatal  ]: Goodbye, my friends.\n");
   stream.str("");
+}
+
+TEST(Lightning, BlockAttributes) {
+  std::ostringstream stream;
+  auto sink = MakeSink<UnsynchronizedFrontend, OstreamSink>(stream);
+  SeverityLogger logger({sink});
+
+  logger
+      .AddLoggerAttributeFormatter(attribute::BlockIndentationFormatter{})
+      .AddAttribute(attribute::BlockLevelAttribute{});
+
+  EXPECT_TRUE(sink->SetFormatFrom("[{Severity}]: {BlockLevel}>> {Message}"));
+
+  logger(Severity::Info) << "Hi there.";
+  {
+    controllers::BlockLevel indent(logger);
+    logger(Severity::Info) << "Indented message.";
+    {
+      controllers::BlockLevel indent(logger);
+      logger(Severity::Warning) << "Even more indented??";
+    }
+    logger(Severity::Error) << "This has gone too far.";
+  }
+  logger(Severity::Fatal) << "Death approaches.";
+
+  EXPECT_EQ(stream.str(), "[Info   ]: >> Hi there.\n"
+                          "[Info   ]:   >> Indented message.\n"
+                          "[Warning]:     >> Even more indented??\n"
+                          "[Error  ]:   >> This has gone too far.\n"
+                          "[Fatal  ]: >> Death approaches.\n"
+                          "");
 }
 
 } // namespace Testing

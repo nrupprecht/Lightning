@@ -294,6 +294,9 @@ class FormattedMessageSegments {
   std::vector<std::variant<DispatchTimeFormatting, std::string>> segments_{};
 };
 
+
+//! \brief  An object that can format a message from a record.
+//!
 class MessageFormatter {
  public:
   virtual ~MessageFormatter() = default;
@@ -332,9 +335,9 @@ struct FmtFrom {
 
 namespace detail_unconst {
 template <typename T> struct Unconst { using type = T; };
-template<typename T> struct Unconst<const T> {  using type = typename Unconst<T>::type; };
-template<typename T> struct Unconst<const T*> { using type = typename Unconst<T>::type *; };
-template<typename T> struct Unconst<T*> { using type = typename Unconst<T>::type *; };
+template <typename T> struct Unconst<const T> {  using type = typename Unconst<T>::type; };
+template <typename T> struct Unconst<const T*> { using type = typename Unconst<T>::type *; };
+template <typename T> struct Unconst<T*> { using type = typename Unconst<T>::type *; };
 } // namespace detail_unconst
 
 //! \brief  Remove const-ness on all levels of pointers.
@@ -348,8 +351,8 @@ constexpr inline bool IsCstrRelated_v = std::is_same_v<Unconst_t<std::decay_t<T>
 //! \brief Structure that represents part of a message coming from an attribute.
 //!
 struct Fmt {
-  std::string attr_name;
-  std::string attr_fmt{};
+  std::string attr_name{}; // The name of the attribute that should be string-ized.
+  std::string attr_fmt{}; // Any formatting that should be used for the attribute.
 };
 
 //! \brief  Convert a format string into a set of formatting segments.
@@ -364,9 +367,10 @@ inline std::vector<std::variant<std::string, Fmt>> Segmentize(const std::string&
   for (auto i = 0u; i < fmt_string.size(); ++i) {
     char c = fmt_string[i];
     if (c == '{' && !is_escape && i + 1 < fmt_string.size()) {
-      fmt_segments.emplace_back(std::move(segment));
-      segment.clear();
-
+      if (!segment.empty()) {
+        fmt_segments.emplace_back(std::move(segment));
+        segment.clear();
+      }
       Fmt fmt;
       ++i;
       c = fmt_string[i++];
@@ -596,6 +600,7 @@ class RecordHandler {
     }
     else if constexpr (typetraits::has_to_string_v<T>) {
       // Fall-back on a to_string method.
+      ensureRecordHasMessage();
       using std::to_string; // Allow for a customization point.
       *record_.message_ << to_string(input);
     }
@@ -685,7 +690,7 @@ class SinkBackend {
 //!         synchronization.
 class SinkFrontend {
  public:
-  explicit SinkFrontend(std::shared_ptr<SinkBackend>&& backend)
+  explicit SinkFrontend(std::unique_ptr<SinkBackend>&& backend)
       : backend_(std::move(backend))
       , formatter_(std::make_shared<formatting::StandardMessageFormatter>())
   {}
@@ -771,12 +776,12 @@ class SinkFrontend {
   }
 
   template<typename Backend_t>
-  NO_DISCARD std::shared_ptr<Backend_t> TryGetBackendAs() const {
-    return std::dynamic_pointer_cast<Backend_t>(backend_);
+  NO_DISCARD Backend_t* TryGetBackendAs() const {
+    return dynamic_cast<Backend_t>(backend_.get());
   }
 
-  NO_DISCARD const std::shared_ptr<SinkBackend>& GetBackend() const {
-    return backend_;
+  NO_DISCARD const SinkBackend& GetBackend() const {
+    return *backend_;
   }
 
  protected:
@@ -789,9 +794,9 @@ class SinkFrontend {
     backend_->accept(formatted_message);
   }
 
-  //! \brief  The backend of the sink.
+  //! \brief  The backend of the sink. Unique pointer, since each backend should be owned by exactly one frontend.
   //!
-  std::shared_ptr<SinkBackend> backend_;
+  std::unique_ptr<SinkBackend> backend_;
 
   //! \brief  And filters that should be used to determine if records should be accepted by the sink.
   //!
@@ -805,8 +810,9 @@ class SinkFrontend {
 //! \brief  Convenience function to create a full front/back sink, forwarding the arguments to the sink backend's constructor.
 //!
 template<typename Frontend_t, typename Backend_t, typename ...Args>
-std::unique_ptr<Frontend_t> MakeSink(Args&& ...args) {
-  return std::make_unique<Frontend_t>(std::make_unique<Backend_t>(std::forward<Args>(args)...));
+requires std::is_base_of_v<SinkFrontend, Frontend_t> && std::is_base_of_v<SinkBackend, Backend_t>
+std::shared_ptr<Frontend_t> MakeSink(Args&& ...args) {
+  return std::make_shared<Frontend_t>(std::make_unique<Backend_t>(std::forward<Args>(args)...));
 }
 
 //! \brief  Object that manages a set of sinks and maintains a set of general filters for messages.
@@ -818,16 +824,10 @@ class Core {
     return *this;
   }
 
-  template<typename Sink_t, typename ...Args>
-  // requires std::is_base_of_v<SinkFrontend, Sink_t>
-  Core& AddSink(Args&& ...args) {
-    sinks_.push_back(std::make_unique<Sink_t>(std::forward<Args>(args)...));
-    return *this;
-  }
-
   template<typename Frontend_t, typename Backend_t, typename ...Args>
+  requires std::is_base_of_v<SinkFrontend, Frontend_t> && std::is_base_of_v<SinkBackend, Backend_t>
   Core& AddSink(Args&&... args) {
-    sinks_.push_back(std::make_unique<Frontend_t>(std::make_unique<Backend_t>(std::forward<Args>(args)...)));
+    sinks_.push_back(MakeSink<Frontend_t, Backend_t>(std::forward<Args>(args)...));
     return *this;
   }
 
@@ -866,7 +866,7 @@ class Core {
   //! \brief  Get the first sink backend of the specified type, if one exists. Otherwise, returns nullptr.
   //!
   template<typename Backend_t>
-  std::shared_ptr<Backend_t> GetFirstSink() const {
+  Backend_t* GetFirstSink() const {
     for (auto& frontend : sinks_) {
       if (auto backend = frontend->TryGetBackendAs<Backend_t>()) {
         return backend;
@@ -933,6 +933,15 @@ class Logger {
   explicit Logger(std::shared_ptr<Core> core) noexcept
       : core_(std::move(core)), attribute_formatters_(std::make_shared<std::map<std::string, attribute::AttributeFormatter>>()) {}
 
+  //! \brief  Create a logger and add some sinks to the loggers (newly created) core.
+  //!
+  explicit Logger(const std::vector<std::shared_ptr<SinkFrontend>>& sinks) noexcept
+      : Logger() {
+    for (auto& sink: sinks) {
+      GetCore()->AddSink(sink);
+    }
+  }
+
   //! \brief  Explicitly create the logger without a logging core.
   //!
   explicit Logger(NoCore_t) noexcept : Logger(nullptr) {}
@@ -947,6 +956,11 @@ class Logger {
 
   Logger& AddNamedAttribute(const std::string& name, const attribute::Attribute& attribute) {
     logger_named_attributes_.emplace(name, attribute);
+    return *this;
+  }
+
+  Logger& AddAttribute(const attribute::Attribute& attribute) {
+    logger_named_attributes_.emplace(attribute.GetAttributeName(), attribute);
     return *this;
   }
 
@@ -1065,7 +1079,7 @@ class ThreadAttributeFormatter : public attribute::AttributeFormatter {
   class Impl : public AttributeFormatter::Impl {
    public:
     Impl() : AttributeFormatter::Impl("Thread") {}
-    NO_DISCARD std::string FormatAttribute(const Attribute& attribute, const settings::SinkSettings& sink_settings) const override {
+    NO_DISCARD std::string FormatAttribute(const Attribute& attribute, const settings::SinkSettings&) const override {
       if (auto thread_id = attribute.GetAttribute<std::thread::id>()) {
         std::ostringstream stream;
         stream << *thread_id; // to_string does not work on thread::id.
@@ -1141,7 +1155,7 @@ class BlockLevelAttribute : public Attribute {
     unsigned level_;
   };
  public:
-  explicit BlockLevelAttribute(unsigned level) : Attribute(std::make_shared<Impl>(level)) {}
+  explicit BlockLevelAttribute(unsigned level = 0) : Attribute(std::make_shared<Impl>(level)) {}
   void SetIndentation(unsigned level) { impl<BlockLevelAttribute>()->SetIndentation(level); }
   void IncrementIndentation() { impl<BlockLevelAttribute>()->IncrementIndentation(); }
   void DecrementIndentation() { impl<BlockLevelAttribute>()->DecrementIndentation(); }
@@ -1153,7 +1167,7 @@ class BlockIndentationFormatter final : public AttributeFormatter {
   class Impl : public AttributeFormatter::Impl {
    public:
     explicit Impl(unsigned spaces_per_level) : AttributeFormatter::Impl("BlockLevel"), spaces_per_level_(spaces_per_level) {}
-    NO_DISCARD std::string FormatAttribute(const Attribute& attribute, const settings::SinkSettings& sink_settings) const override {
+    NO_DISCARD std::string FormatAttribute(const Attribute& attribute, const settings::SinkSettings&) const override {
       return std::string(spaces_per_level_ * *attribute.GetAttribute<unsigned>(), ' ');
     }
    private:
@@ -1167,19 +1181,22 @@ class BlockIndentationFormatter final : public AttributeFormatter {
 
 namespace controllers { // namespace lightning::controllers
 
+//! \brief  RAII wrapper that increments a block attribute upon creation, and decrements it upon destruction.
+//!
 class BlockLevel {
  public:
   explicit BlockLevel(Logger& logger) {
-    auto attr = logger.GetNamedAttribute("BlockLevel");
-    auto block_attr = attribute::reinterpret_impl_cast<attribute::BlockLevelAttribute>(*attr);
-    block_attr.IncrementIndentation();
+    if (auto attr = logger.GetNamedAttribute("BlockLevel")) {
+      block_attribute_ = attribute::reinterpret_impl_cast<attribute::BlockLevelAttribute>(*attr);
+      block_attribute_->IncrementIndentation();
+    }
   }
   ~BlockLevel() {
-
+    if (block_attribute_) block_attribute_->DecrementIndentation();
   }
 
  private:
-
+  std::optional<attribute::BlockLevelAttribute> block_attribute_;
 };
 
 } // namespace controllers
@@ -1187,6 +1204,10 @@ class BlockLevel {
 class SeverityLogger : public Logger {
  public:
   SeverityLogger() : Logger() {
+    AddLoggerAttributeFormatter(attribute::SeverityFormatter{});
+  }
+
+  explicit SeverityLogger(const std::vector<std::shared_ptr<SinkFrontend>>& sinks) : Logger(sinks) {
     AddLoggerAttributeFormatter(attribute::SeverityFormatter{});
   }
 
@@ -1202,9 +1223,9 @@ class SeverityLogger : public Logger {
 
 //! \brief  A basic frontend that does no synchronization.
 //!
-class SimpleFrontend : public SinkFrontend {
+class UnsynchronizedFrontend : public SinkFrontend {
  public:
-  explicit SimpleFrontend(std::unique_ptr<SinkBackend>&& backend)
+  explicit UnsynchronizedFrontend(std::unique_ptr<SinkBackend>&& backend)
       : SinkFrontend(std::move(backend))
   {}
 
@@ -1258,6 +1279,8 @@ class OstreamSink : public SinkBackend {
 //  Global logger.
 // ==============================================================================
 
+//! \brief  The global interface for logging.
+//!
 class Global {
  public:
   static std::shared_ptr<Core> GetCore() {
@@ -1280,12 +1303,13 @@ class Global {
 };
 
 #define LOG() \
-  for (auto handler = ::lightning::Global::GetLogger()(); handler.IsOpen(); ) \
-    handler
+  if (auto record = ::lightning::Global::GetLogger().CreateRecord(); record.IsOpen()) \
+    ::lightning::RecordHandler(std::move(record))
 
 #define LOG_SEV(severity) \
   if (auto record = ::lightning::Global::GetLogger().CreateRecord({ \
     ::lightning::attribute::SeverityAttribute(::lightning::Severity::severity) \
-  }); record.IsOpen()) ::lightning::RecordHandler(std::move(record))
+  }); record.IsOpen()) \
+    ::lightning::RecordHandler(std::move(record))
 
 } // namespace lightning

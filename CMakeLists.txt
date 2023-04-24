@@ -76,17 +76,6 @@ target_link_libraries     (${PROJECT_NAME} INTERFACE ${PROJECT_LIBRARIES})
 target_compile_definitions(${PROJECT_NAME} INTERFACE ${PROJECT_COMPILE_DEFINITIONS})
 target_compile_options    (${PROJECT_NAME} INTERFACE ${PROJECT_COMPILE_OPTIONS})
 
-# Hack for header-only project to appear in the IDEs.
-add_library(${PROJECT_NAME}_ STATIC ${PROJECT_FILES})
-target_include_directories(${PROJECT_NAME}_ PUBLIC
-        ${CMAKE_CURRENT_SOURCE_DIR}/include
-        ${CMAKE_CURRENT_BINARY_DIR})
-target_include_directories(${PROJECT_NAME}_ PUBLIC ${PROJECT_INCLUDE_DIRS})
-target_link_libraries     (${PROJECT_NAME}_ PUBLIC ${PROJECT_LIBRARIES})
-target_compile_definitions(${PROJECT_NAME}_ PUBLIC ${PROJECT_COMPILE_DEFINITIONS})
-target_compile_options    (${PROJECT_NAME}_ PUBLIC ${PROJECT_COMPILE_OPTIONS})
-set_target_properties     (${PROJECT_NAME}_ PROPERTIES LINKER_LANGUAGE CXX)
-
 ##################################################    Testing     ##################################################
 if(BUILD_TESTS)
     message(STATUS "Building tests...")
