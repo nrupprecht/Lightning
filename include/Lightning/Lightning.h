@@ -11,6 +11,7 @@
 #include <string>
 #include <algorithm>
 #include <thread>
+#include <chrono>
 
 namespace lightning {
 
@@ -44,6 +45,31 @@ namespace detail_traits_##trait_name {                                          
 template<typename Value_t> static constexpr bool trait_name                         \
   = detail_traits_##trait_name::trait_class_##trait_name<Value_t>::value;
 
+// ==============================================================================
+//  Error checking and handling.
+// ==============================================================================
+
+#define LL_REQUIRE(condition, message) { \
+  if (!(condition)) {                       \
+    std::ostringstream _strm_; \
+    _strm_ << message; \
+    throw std::runtime_error(_strm_.str()); \
+  }                                         \
+}
+
+#define LL_ASSERT(condition, message) { \
+  if (!(condition)) {                       \
+    std::ostringstream _strm_; \
+    _strm_ << message; \
+    throw std::runtime_error(_strm_.str()); \
+  }                                         \
+}
+
+#define LL_FAIL(message) { \
+  std::ostringstream _strm_; \
+  _strm_ << message; \
+  throw std::runtime_error(_strm_.str()); \
+}
 
 // ==============================================================================
 //  Type traits.
@@ -128,7 +154,7 @@ class Attribute : public ImplBase {
  protected:
   class Impl : public ImplBase::Impl {
    public:
-    explicit Impl(std::string  name) : attr_name(std::move(name)) {}
+    explicit Impl(std::string name) : attr_name(std::move(name)) {}
     virtual std::optional<Attribute> Generate() const = 0;
     //! \brief The name of the attribute.
     const std::string attr_name;
@@ -1030,6 +1056,11 @@ class Logger {
     return *this;
   }
 
+  Logger& AddAttribute(const attribute::Attribute& attribute, attribute::AttributeFormatter&& attribute_formatter) {
+    logger_named_attributes_.emplace(attribute.GetAttributeName(), attribute);
+    return AddLoggerAttributeFormatter(std::move(attribute_formatter));
+  }
+
   NO_DISCARD attribute::Attribute* GetNamedAttribute(const std::string& name) {
     if (auto it = logger_named_attributes_.find(name); it != logger_named_attributes_.end()) {
       return &it->second;
@@ -1213,11 +1244,11 @@ class SeverityFormatter final : public AttributeFormatter {
     NO_DISCARD std::string FormatAttribute(const Attribute& attribute, const settings::SinkSettings& sink_settings) const override {
       if (auto sev = attribute.GetAttribute<Severity>()) {
         switch (*sev) {
-          case Severity::Debug:   return formatting::PotentiallyAnsiColor("Debug  ", sink_settings.has_color_support, formatting::AnsiForegroundColor::BrightBlack);
-          case Severity::Info:    return formatting::PotentiallyAnsiColor("Info   ", sink_settings.has_color_support, formatting::AnsiForegroundColor::Green);
+          case Severity::Debug: return formatting::PotentiallyAnsiColor("Debug  ", sink_settings.has_color_support, formatting::AnsiForegroundColor::BrightBlack);
+          case Severity::Info: return formatting::PotentiallyAnsiColor("Info   ", sink_settings.has_color_support, formatting::AnsiForegroundColor::Green);
           case Severity::Warning: return formatting::PotentiallyAnsiColor("Warning", sink_settings.has_color_support, formatting::AnsiForegroundColor::Yellow);
-          case Severity::Error:   return formatting::PotentiallyAnsiColor("Error  ", sink_settings.has_color_support, formatting::AnsiForegroundColor::Red);
-          case Severity::Fatal:   return formatting::PotentiallyAnsiColor("Fatal  ", sink_settings.has_color_support, formatting::AnsiForegroundColor::BrightRed);
+          case Severity::Error: return formatting::PotentiallyAnsiColor("Error  ", sink_settings.has_color_support, formatting::AnsiForegroundColor::Red);
+          case Severity::Fatal: return formatting::PotentiallyAnsiColor("Fatal  ", sink_settings.has_color_support, formatting::AnsiForegroundColor::BrightRed);
         }
       }
       return "";
@@ -1366,6 +1397,269 @@ class OstreamSink : public SinkBackend {
   std::ostream& stream_;
 };
 
+// ==============================================================================
+//  Date / time support.
+// ==============================================================================
+
+namespace time { // namespace lightning::time
+
+inline bool IsLeapYear(int year) {
+  // According to the Gregorian calendar, a year is a leap year if the year is divisible by 4
+  // UNLESS the year is also divisible by 100, in which case it is not a leap year
+  // UNLESS the year is also divisible by 400, in which case it is a leap year.
+  if (year % 4 != 0) {
+    return false;
+  }
+  if (year % 400 == 0) {
+    return true;
+  }
+  return year % 100 != 0;
+}
+
+//! \brief  Get the number of days in a month in a particular year.
+//!
+inline int DaysInMonth(int month, int year) {
+  LL_REQUIRE(0 < month && month < 13, "month must be in the range [1, 12], not " << month);
+  static int days_in_month_[] = {0, 31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31};
+  if (month != 2) {
+    return days_in_month_[month];
+  }
+  return IsLeapYear(year) ? 29 : 28;
+}
+
+enum class Month {
+  January = 1, February, March, April, May, June, July, August, September, October, November, December
+};
+
+inline std::string MonthAbbreviation(Month m) {
+  static std::string abbrev_[]{"", "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"};
+  return abbrev_[static_cast<int>(m)];
+}
+
+inline Month MonthIntToMonth(int month) {
+  LL_REQUIRE(0 < month && month < 13, "month must be in the range [1, 12], not " << month);
+  static Month months_[]{Month::January, Month::February, Month::March, Month::April,
+                         Month::May, Month::June, Month::July, Month::August,
+                         Month::September, Month::October, Month::November, Month::December};
+  return months_[month - 1];
+}
+
+class DateTime {
+ public:
+  DateTime() = default;
+  DateTime(int year, int month, int day, int hour = 0, int minute = 0, int second = 0, int millisecond = 0) {
+    setYMD(year, month, day);
+    setHMSMS(hour, minute, second, millisecond);
+  }
+
+  explicit DateTime(int yyyymmdd) : DateTime(yyyymmdd / 10000, (yyyymmdd / 100) % 100, yyyymmdd % 100) {}
+
+  NO_DISCARD int AsYYYYMMDD() const {
+    return GetYear() * 10000 + GetMonthInt() * 100 + GetDay();
+  }
+
+  NO_DISCARD int GetYear() const { return y_m_d_ >> shift_year_; }
+  NO_DISCARD int GetMonthInt() const { return (y_m_d_ >> shift_month_) & month_mask_; }
+  NO_DISCARD Month GetMonth() const { return MonthIntToMonth(GetMonthInt()); }
+  NO_DISCARD int GetDay() const { return y_m_d_ & day_mask_; }
+  NO_DISCARD int GetHour() const { return h_m_s_ms_ >> shift_hour_; }
+  NO_DISCARD int GetMinute() const { return (h_m_s_ms_ >> shift_minute_) & minute_mask_; }
+  NO_DISCARD int GetSecond() const { return (h_m_s_ms_ >> shift_second_) & second_mask_; }
+  NO_DISCARD int GetMillisecond() const { return h_m_s_ms_ & ms_mask_; }
+
+  //! \brief Check if the date is a non-null (empty) date.
+  explicit operator bool() const { return y_m_d_ != 0; }
+
+  static DateTime Now() {
+    auto time = std::chrono::system_clock::now();
+    // get number of milliseconds for the current second
+    // (remainder after division into seconds)
+    int ms = static_cast<int>((duration_cast<std::chrono::milliseconds>(time.time_since_epoch()) % 1000).count());
+    // convert to std::time_t in order to convert to std::tm (broken time)
+    auto t = std::chrono::system_clock::to_time_t(time);
+
+    std::tm* now = std::localtime(&t);
+    return {now->tm_year + 1900, now->tm_mon + 1, now->tm_mday, now->tm_hour, now->tm_min, now->tm_sec, ms};
+  }
+
+  static DateTime YMD_HMS(int yyyymmdd, int hours, int minutes, int seconds, int milliseconds = 0) {
+    DateTime dt(yyyymmdd);
+    dt.setHMSMS(hours, minutes, seconds, milliseconds);
+    return dt;
+  }
+
+ private:
+  void setYMD(int year, int month, int day) {
+    validateYMD(year, month, day);
+    y_m_d_ = (year << shift_year_) | ((month & month_mask_) << shift_month_) | (day & day_mask_);
+  }
+
+  void setHMSMS(int hour, int minute, int second, int millisecond) {
+    validateHMSMS(hour, minute, second, millisecond);
+    h_m_s_ms_ = (hour << shift_hour_) | (minute << shift_minute_) | (second << shift_second_) | millisecond;
+  }
+
+  static void validateYMD(int year, int month, int day) {
+    LL_REQUIRE(0 < year, "year must be > 0");
+    LL_REQUIRE(0 < month && month <= 12, "month must be in the range [1, 12]")
+    LL_REQUIRE(0 < day < DaysInMonth(month, year), "there are only " << DaysInMonth(month, year) << " days in " << year << "-" << month);
+  }
+
+  static void validateHMSMS(int hour, int minute, int second, int millisecond) {
+    // I am ignoring things like the time change and leap seconds.
+    LL_REQUIRE(0 <= hour && hour < 24, "hour must be in the range [0, 24)");
+    LL_REQUIRE(0 <= minute && minute < 60, "minute must be in the range [0, 60)");
+    LL_REQUIRE(0 <= second && second < 60, "second must be in the range [0, 60)");
+    LL_REQUIRE(0 <= millisecond && millisecond < 1000, "millisecond must be in the range [0, 1000)");
+  }
+
+  //! \brief  Packed storage for year, month, and day.
+  //!
+  //!         0 <= Y < 4096   => 12 bits (up to 17)
+  //!         0 < m <= 12     => 7 bits
+  //!         0 < d < 32      => 8 bits
+  //!         Total: 27 bits
+  //!         00000yyyyyyyyyyyymmmmmmmdddddddd
+  int y_m_d_{};
+
+  //! \brief  Packed storage for hour, minute, second.
+  //!
+  //!         0 <= h < 24     => 5 bits
+  //!         0 <= m < 60     => 6 bits
+  //!         0 <= s < 60     => 6 bits
+  //!         0 <= ms < 1000  => 10 bits
+  //!         Total: 27 bits
+  //!         00000hhhhhmmmmmmssssssuuuuuuuuuu
+  int h_m_s_ms_{};
+
+  static constexpr int shift_month_ = 8;
+  static constexpr int shift_year_ = 15;
+  static constexpr int day_mask_ = 0b11111111;
+  static constexpr int month_mask_ = 0b1111111;
+
+  static constexpr int shift_second_ = 10;
+  static constexpr int shift_minute_ = 16;
+  static constexpr int shift_hour_ = 22;
+  static constexpr int ms_mask_ = 0b1111111111;
+  static constexpr int second_mask_ = 0b111111;
+  static constexpr int minute_mask_ = 0b111111;
+};
+
+inline std::vector<std::variant<char /* Fmt */, std::string>> Segmentize(const std::string& fmt) {
+  std::vector<std::variant<char, std::string>> segments;
+  std::string literal;
+  for (auto i = 0u; i < fmt.size(); ++i) {
+    if (fmt[i] == '%') {
+      LL_ASSERT(i + 1 < fmt.size(), "cannot end a formatting string with an un-escaped '%'");
+      if (!literal.empty()) {
+        segments.emplace_back(std::move(literal));
+        literal = std::string{};
+      }
+      segments.emplace_back(fmt[++i]);
+    }
+    else literal.push_back(fmt[i]);
+  }
+  return segments;
+}
+
+inline std::string Pad(int x, int pad) {
+  std::ostringstream stream;
+  stream << std::setw(pad) << std::setfill('0') << x;
+  return stream.str();
+}
+
+inline std::string Format(const DateTime& dt, const std::string& fmt) {
+  // Using basically this format: https://www.programiz.com/python-programming/datetime/strftime
+  std::string output;
+  auto segments = Segmentize(fmt);
+  for (auto seg : segments) {
+    if (seg.index() == 0) {
+      switch (std::get<0>(seg)) {
+        case 'Y': // Year (with century) as a decimal.
+          output += std::to_string(dt.GetYear());
+          break;
+        case 'y': // Year (without century) as a zero-padded decimal.
+          output += std::to_string(dt.GetYear() % 100);
+          break;
+        case 'd': // Day as a zero-padded decimal
+          output += Pad(dt.GetDay(), 2);
+          break;
+        case 'm': // Month as a zero-padded decimal.
+          output += Pad(dt.GetMonthInt(), 2);
+          break;
+        case 'b': // Abbreviated month name.
+          output += MonthAbbreviation(dt.GetMonth());
+          break;
+        case 'H': // Hour as a zero-padded decimal.
+          output += Pad(dt.GetHour(), 2);
+          break;
+        case 'I': // Hour (1-12) as a zero-padded decimal.
+          output += Pad((dt.GetHour() - 1) % 12 + 1, 2);
+          break;
+        case 'M': // Minute as a zero-padded decimal.
+          output += Pad(dt.GetMinute(), 2);
+          break;
+        case 'S': // Second as a zero-padded decimal.
+          output += Pad(dt.GetSecond(), 2);
+          break;
+        case 'f': // Milliseconds as zero-padded decimal
+          output += Pad(dt.GetMillisecond(), 3);
+          break;
+        case 'p': // Local "AM" or "PM"
+          output += dt.GetHour() < 12 ? "AM" : "PM";
+          break;
+        case '%': // Literal, escaped, '%'
+          output += "%";
+          break;
+        default: LL_FAIL("unrecognized formatting specifier '" << std::get<0>(seg) << "'");
+      }
+    }
+    else {
+      output += std::get<1>(seg);
+    }
+  }
+
+  return output;
+}
+
+} // namespace time
+
+namespace attribute {
+
+
+class DateTimeAttribute final : public Attribute {
+  friend class ImplBase;
+ private:
+  class Impl : public Attribute::ImplConcrete<time::DateTime> {
+   public:
+    explicit Impl(const time::DateTime& date_time) : ImplConcrete("DateTime"), date_time_(date_time) {}
+    time::DateTime GetAttribute() override { return date_time_; }
+    NO_DISCARD std::optional<Attribute> Generate() const override { return DateTimeAttribute(time::DateTime::Now()); }
+   private:
+    time::DateTime date_time_;
+  };
+ public:
+  explicit DateTimeAttribute(const time::DateTime& date_time = {}) : Attribute(std::make_shared<Impl>(date_time)) {}
+};
+
+class DateTimeFormatter final : public AttributeFormatter {
+  friend class ImplBase;
+ private:
+  class Impl : public AttributeFormatter::Impl {
+   public:
+    Impl() : AttributeFormatter::Impl("DateTime") {}
+    NO_DISCARD std::string FormatAttribute(const Attribute& attribute, const settings::SinkSettings&) const override {
+      if (auto attr = attribute.GetAttribute<time::DateTime>()) {
+        return Format(*attr, "%Y-%m-%d %H:%M:%S:%f");
+      }
+      return "";
+    }
+  };
+ public:
+  DateTimeFormatter() : AttributeFormatter(std::make_shared<Impl>()) {}
+};
+
+} // namespace attribute
 
 // ==============================================================================
 //  Global logger.
