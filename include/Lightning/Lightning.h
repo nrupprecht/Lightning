@@ -9,7 +9,6 @@
 #include <algorithm>
 #include <thread>
 
-
 namespace lightning {
 
 // Forward declarations.
@@ -58,7 +57,7 @@ struct always_false {
 } // detail_always_false
 
 //! \brief  "Type trait" that is always false, useful in static_asserts, since right now, you cannot static_assert(false).
-template<typename T>
+template <typename T>
 inline constexpr bool always_false_v = detail_always_false::always_false<T>::value;
 
 }; // namespace typetraits.
@@ -77,12 +76,12 @@ class ImplBase {
   }
 
  protected:
-  template<typename Concrete_t>
+  template <typename Concrete_t>
   typename Concrete_t::Impl* impl() {
     return reinterpret_cast<typename Concrete_t::Impl*>(impl_.get());
   }
 
-  template<typename Concrete_t>
+  template <typename Concrete_t>
   const typename Concrete_t::Impl* impl() const {
     return reinterpret_cast<const typename Concrete_t::Impl*>(impl_.get());
   }
@@ -127,7 +126,8 @@ class Attribute : public ImplBase {
     const std::string attr_name;
   };
 
-  template<typename T> class ImplConcrete : public Impl {
+  template <typename T>
+  class ImplConcrete : public Impl {
    public:
     explicit ImplConcrete(const std::string& name) : Impl(name) {}
     virtual T GetAttribute() = 0;
@@ -149,7 +149,7 @@ class Attribute : public ImplBase {
     return *this;
   }
 
-  template<typename T>
+  template <typename T>
   NO_DISCARD std::optional<T> GetAttribute() const {
     if (auto ptr = dynamic_cast<ImplConcrete<T>*>(impl_.get())) {
       return ptr->GetAttribute();
@@ -203,9 +203,6 @@ Concrete_t reinterpret_impl_cast(AttributeFormatter& attribute_type) {
 
 namespace formatting { // namespace lightning::formatting
 
-//! \brief  Create a type trait that determines if a 'format_logstream' function has been defined for a type.
-NEW_TYPE_TRAIT(has_logstream_formatter_v, format_logstream(std::declval<Value_t>()));
-
 struct MessageInfo {
   //! \brief  The indentation of the start of the message within the formatted record.
   unsigned message_indentation = 0;
@@ -235,8 +232,8 @@ class DispatchTimeFormatting : public ImplBase {
                          const settings::SinkSettings& sink_settings) const {
     impl<DispatchTimeFormatting>()->AddWithFormatting(message, message_info, sink_settings);
   }
+  DispatchTimeFormatting(const std::shared_ptr<Impl>& impl) : ImplBase(impl) {}
 };
-
 
 //! \brief  A message composed of several segments and dispatch-time formatting objects.
 //!
@@ -246,7 +243,7 @@ class FormattedMessageSegments {
   //!
   template <typename T>
   FormattedMessageSegments& operator<<(const T& object) {
-    if constexpr (std::is_base_of_v<FormattedMessageSegments, T>) {
+    if constexpr (std::is_base_of_v<DispatchTimeFormatting, T>) {
       segments_.emplace_back(object);
     }
     else {
@@ -294,7 +291,6 @@ class FormattedMessageSegments {
   std::vector<std::variant<DispatchTimeFormatting, std::string>> segments_{};
 };
 
-
 //! \brief  An object that can format a message from a record.
 //!
 class MessageFormatter {
@@ -325,19 +321,25 @@ class MessageFormatter {
 //!         FmtObject_t. This allows us to have a general (template) SetFormatFrom(T) function on the SinkFrontend (below), which
 //!         is able to set the format of the MessageFormatter if the message formatter accepts formatting from objects of this type.
 //!
-template<typename FmtObject_t>
+template <typename FmtObject_t>
 struct FmtFrom {
-  bool SetFormatFrom(const FmtObject_t& fmt) { setFormatFrom(fmt); return true; }
+  bool SetFormatFrom(const FmtObject_t& fmt) {
+    setFormatFrom(fmt);
+    return true;
+  }
  private:
   virtual void setFormatFrom(const FmtObject_t&) = 0;
 };
 
-
 namespace detail_unconst {
-template <typename T> struct Unconst { using type = T; };
-template <typename T> struct Unconst<const T> {  using type = typename Unconst<T>::type; };
-template <typename T> struct Unconst<const T*> { using type = typename Unconst<T>::type *; };
-template <typename T> struct Unconst<T*> { using type = typename Unconst<T>::type *; };
+template <typename T>
+struct Unconst { using type = T; };
+template <typename T>
+struct Unconst<const T> { using type = typename Unconst<T>::type; };
+template <typename T>
+struct Unconst<const T*> { using type = typename Unconst<T>::type*; };
+template <typename T>
+struct Unconst<T*> { using type = typename Unconst<T>::type*; };
 } // namespace detail_unconst
 
 //! \brief  Remove const-ness on all levels of pointers.
@@ -345,7 +347,7 @@ template <typename T> struct Unconst<T*> { using type = typename Unconst<T>::typ
 template <typename T>
 using Unconst_t = typename detail_unconst::Unconst<T>::type;
 
-template<typename T>
+template <typename T>
 constexpr inline bool IsCstrRelated_v = std::is_same_v<Unconst_t<std::decay_t<T>>, char*> || std::is_same_v<std::remove_cvref_t<T>, std::string>;
 
 //! \brief Structure that represents part of a message coming from an attribute.
@@ -437,37 +439,92 @@ enum class AnsiBackgroundColor : short {
 
 using Ansi256Color = unsigned char;
 
-inline std::string StartAnsiColorFmt(AnsiForegroundColor foreground, std::optional<AnsiBackgroundColor> background = {}) {
-  std::string fmt = "\x1b[" + std::to_string(static_cast<short>(foreground));
-  if (background) fmt += ";" + std::to_string(static_cast<short>(*background));
-  return fmt + "m";
+inline std::string StartAnsiColorFmt(std::optional<AnsiForegroundColor> foreground, std::optional<AnsiBackgroundColor> background = {}) {
+  std::string fmt{};
+  if (foreground) fmt += "\x1b[" + std::to_string(static_cast<short>(*foreground)) + "m";
+  if (background) fmt += "\x1b[" + std::to_string(static_cast<short>(*background)) + "m";
+  return fmt;
 }
 
-inline std::string StartAnsi256ColorFmt(Ansi256Color foreground_color_id, std::optional<Ansi256Color> background_color_id = {}) {
-  std::string fmt = "\x1b[38;5;" + std::to_string(foreground_color_id);
-  if (background_color_id) fmt += "\x1b[48;5;" + std::to_string(foreground_color_id);
-  return fmt + "m";
+inline std::string ResetColors() { return StartAnsiColorFmt(AnsiForegroundColor::Default, AnsiBackgroundColor::Default); }
+
+inline std::string StartAnsi256ColorFmt(std::optional<Ansi256Color> foreground_color_id, std::optional<Ansi256Color> background_color_id = {}) {
+  std::string fmt{};
+  if (foreground_color_id) fmt = "\x1b[38;5;" + std::to_string(*foreground_color_id) + "m";
+  if (background_color_id) fmt += "\x1b[48;5;" + std::to_string(*background_color_id) + "m";
+  return fmt;
 }
 
 inline std::string StartAnsiRGBColorFmt(Ansi256Color r, Ansi256Color g, Ansi256Color b) {
   return "\x1b[38;2;" + std::to_string(r) + ";" + std::to_string(g) + ";" + std::to_string(b) + "m";
 }
 
-inline std::string PotentiallyAnsiColor(const std::string& message,
-                                        bool do_color,
-                                        AnsiForegroundColor foreground,
-                                        AnsiBackgroundColor background = AnsiBackgroundColor::Default) {
-  std::string output;
-  if (do_color) {
-    output += StartAnsiColorFmt(foreground, background) + message + StartAnsiColorFmt(AnsiForegroundColor::Default, AnsiBackgroundColor::Default);
-  }
-  else {
-    output = message;
-  }
-  return output;
+inline std::string PotentiallyAnsiColor(const std::string& message, bool do_color, std::optional<AnsiForegroundColor> foreground, std::optional<AnsiBackgroundColor> background = {}) {
+  return do_color ? StartAnsiColorFmt(foreground, background) + message + ResetColors() : message;
 }
 
-}// namespace formatting
+inline std::string PotentiallyAnsiRGBColor(const std::string& message, bool do_color, Ansi256Color r, Ansi256Color g, Ansi256Color b) {
+  return do_color ? StartAnsiRGBColorFmt(r, g, b) + message + ResetColors() : message;
+}
+
+//! \brief  A dispatch time formatting that colors a string using Ansi RGB colors (if the sink supports colors).
+//!
+class AnsiColor8Bit : public DispatchTimeFormatting {
+  friend class ImplBase; // So impl<>() function works.
+ protected:
+  class Impl : public DispatchTimeFormatting::Impl {
+   public:
+    Impl(std::string msg, std::optional<AnsiForegroundColor> foreground_color, std::optional<AnsiBackgroundColor> background_color)
+        : msg_(std::move(msg)), foreground_color_(foreground_color), background_color_(background_color) {}
+    void AddWithFormatting(std::string& message, const MessageInfo&, const settings::SinkSettings& sink_settings) const override {
+      message += PotentiallyAnsiColor(msg_, sink_settings.has_color_support, foreground_color_, background_color_);
+    }
+   private:
+    const std::string msg_;
+    std::optional<AnsiForegroundColor> foreground_color_;
+    std::optional<AnsiBackgroundColor> background_color_;
+  };
+ public:
+  AnsiColor8Bit(const std::string& msg, std::optional<AnsiForegroundColor> foreground_color, std::optional<AnsiBackgroundColor> background_color = {})
+      : DispatchTimeFormatting(std::make_shared<Impl>(msg, foreground_color, background_color)) {}
+};
+
+//! \brief  A dispatch time formatting that colors a string using Ansi RGB colors (if the sink supports colors).
+//!
+class AnsiColorRGB : public DispatchTimeFormatting {
+ protected:
+  class Impl : public DispatchTimeFormatting::Impl {
+   public:
+    Impl(std::string msg, Ansi256Color r, Ansi256Color g, Ansi256Color b)
+        : msg_(std::move(msg)), r_(r), g_(g), b_(b) {}
+    void AddWithFormatting(std::string& message, const MessageInfo&, const settings::SinkSettings& sink_settings) const override {
+      message += PotentiallyAnsiRGBColor(msg_, sink_settings.has_color_support, r_, g_, b_);
+    }
+   private:
+    std::string msg_{};
+    Ansi256Color r_{}, g_{}, b_{};
+  };
+ public:
+  AnsiColorRGB(const std::string& msg, Ansi256Color r, Ansi256Color g, Ansi256Color b) : DispatchTimeFormatting(std::make_shared<Impl>(msg, r, g, b)) {}
+};
+
+//! \brief  A dispatch time formatting that adds a newline to the logging message, and then indents the line to match the start of the message.
+//!
+class NewLineIndent_t : public DispatchTimeFormatting {
+ protected:
+  class Impl : public DispatchTimeFormatting::Impl {
+   public:
+    void AddWithFormatting(std::string& message, const MessageInfo& message_info, const settings::SinkSettings&) const override {
+      message += "\n" + std::string(message_info.message_indentation, ' ');
+    }
+  };
+ public:
+  NewLineIndent_t() noexcept : DispatchTimeFormatting(std::make_shared<Impl>()) {}
+};
+
+const inline NewLineIndent_t NewLineIndent{};
+
+};// namespace formatting
 
 
 // ==============================================================================
@@ -519,7 +576,7 @@ class Record {
   }
 
   Record& AddAttributes(const std::vector<attribute::Attribute>& attributes) {
-    for (auto& attr : attributes) {
+    for (auto& attr: attributes) {
       AddAttribute(attr);
     }
     return *this;
@@ -542,7 +599,7 @@ class Record {
 
   //! \brief Attribute formatters that, in general, come from the logger that created this record.
   //!
-  std::weak_ptr<std::map<std::string, attribute::AttributeFormatter>> additional_formatters_;
+  std::weak_ptr<std::map<std::string, attribute::AttributeFormatter>> additional_formatters_{};
 
   // TODO: Add values.
   std::map<std::string, attribute::Attribute> attributes_{};
@@ -552,15 +609,12 @@ class Record {
   bool do_standard_formatting_ = true;
 };
 
-
 //! \brief  Class that knows how to construct a record via streaming data into it.
 //!
 class RecordHandler {
  public:
   explicit RecordHandler(Record&& record)
-      : record_(record)
-      , initial_uncaught_exception_(std::uncaught_exceptions())
-  {}
+      : record_(record), initial_uncaught_exception_(std::uncaught_exceptions()) {}
 
   //! \brief  The record handler's destruction causes the record to be dispatched to its core.
   ~RecordHandler() {
@@ -579,39 +633,8 @@ class RecordHandler {
 
   NO_DISCARD bool IsOpen() const { return record_.IsOpen(); }
 
-  template<typename T>
-  RecordHandler& operator<<(const T& input) {
-    // TODO Handle values.
-    if constexpr (std::is_base_of_v<attribute::Attribute, T>) {
-      // Add an attribute via streaming.
-      record_.AddAttribute(input);
-    }
-    else if constexpr (std::is_base_of_v<formatting::DispatchTimeFormatting, T>) {
-      ensureRecordHasMessage();
-      *record_.message_ << input;
-    }
-    else if constexpr (formatting::has_logstream_formatter_v<T>) {
-      // If a formatting function has been provided, use it.
-      format_logstream(input, *this);
-    }
-    else if constexpr (typetraits::is_ostreamable_v<T>) {
-      ensureRecordHasMessage();
-      *record_.message_ << input;
-    }
-    else if constexpr (typetraits::has_to_string_v<T>) {
-      // Fall-back on a to_string method.
-      ensureRecordHasMessage();
-      using std::to_string; // Allow for a customization point.
-      *record_.message_ << to_string(input);
-    }
-    else {
-      // Static fail.
-      static_assert(typetraits::always_false_v<T>,
-                    "No logging for this type, define a format_logstream or to_string function in the same namespace as this type.");
-    }
-
-    return *this;
-  }
+  template <typename T>
+  RecordHandler& operator<<(const T& input);
 
  private:
   void ensureRecordHasMessage() {
@@ -627,6 +650,47 @@ class RecordHandler {
   int initial_uncaught_exception_{};
 };
 
+namespace formatting { // namespace lightning::formatting
+
+//! \brief  Create a type trait that determines if a 'format_logstream' function has been defined for a type.
+NEW_TYPE_TRAIT(has_logstream_formatter_v, format_logstream(std::declval<Value_t>(), std::declval<RecordHandler&>()));
+
+} // namespace formatting
+
+
+template <typename T>
+RecordHandler& RecordHandler::operator<<(const T& input) {
+  // TODO Handle values.
+  if constexpr (std::is_base_of_v<attribute::Attribute, T>) {
+    // Add an attribute via streaming.
+    record_.AddAttribute(input);
+  }
+  else if constexpr (std::is_base_of_v<formatting::DispatchTimeFormatting, T>) {
+    ensureRecordHasMessage();
+    *record_.message_ << input;
+  }
+  else if constexpr (formatting::has_logstream_formatter_v < T >) {
+    // If a formatting function has been provided, use it.
+    format_logstream(input, *this);
+  }
+  else if constexpr (typetraits::is_ostreamable_v<T>) {
+    ensureRecordHasMessage();
+    *record_.message_ << input;
+  }
+  else if constexpr (typetraits::has_to_string_v<T>) {
+    // Fall-back on a to_string method.
+    ensureRecordHasMessage();
+    using std::to_string; // Allow for a customization point.
+    *record_.message_ << to_string(input);
+  }
+  else {
+    // Static fail.
+    static_assert(typetraits::always_false_v<T>,
+                  "No logging for this type, define a format_logstream or to_string function in the same namespace as this type.");
+  }
+
+  return *this;
+}
 
 //! \brief  An object that is used to filter acceptance of record.
 //!
@@ -646,7 +710,6 @@ class Filter : public ImplBase {
     NO_DISCARD virtual bool Check(const Record& record) const = 0;
   };
 };
-
 
 //! \brief  Base class for sink backends. These are the objects that are actually responsible for taking
 //!         a record an doing something with its message and values.
@@ -684,16 +747,13 @@ class SinkBackend {
   std::unique_ptr<settings::SinkSettings> sink_settings_;
 };
 
-
 //! \brief  Base class for sink frontends. These are classes responsible for formatting messages, doing common
 //!         filtering tasks, and feeding data to the sink backend, possible controlling things like thread
 //!         synchronization.
 class SinkFrontend {
  public:
   explicit SinkFrontend(std::unique_ptr<SinkBackend>&& backend)
-      : backend_(std::move(backend))
-      , formatter_(std::make_shared<formatting::StandardMessageFormatter>())
-  {}
+      : backend_(std::move(backend)), formatter_(std::make_shared<formatting::StandardMessageFormatter>()) {}
 
   virtual ~SinkFrontend() = default;
 
@@ -737,7 +797,7 @@ class SinkFrontend {
     if (record.do_standard_formatting_ && formatter_) {
       formatted_message = (*formatter_)(record, settings, record.additional_formatters_);
     }
-    else if (auto segments = record.GetMessage()){
+    else if (auto segments = record.GetMessage()) {
       formatted_message = (*segments).MakeMessage(formatting::MessageInfo{}, settings);
     }
 
@@ -758,9 +818,9 @@ class SinkFrontend {
     return formatter_;
   }
 
-  template<typename FormatObj_t>
+  template <typename FormatObj_t>
   bool SetFormatFrom(const FormatObj_t fmt_obj) {
-    if constexpr (formatting::IsCstrRelated_v<FormatObj_t>) {
+    if constexpr (formatting::IsCstrRelated_v < FormatObj_t >) {
       if (auto ptr = dynamic_cast<formatting::FmtFrom<std::string>*>(formatter_.get())) {
         ptr->SetFormatFrom(std::string(fmt_obj));
         return true;
@@ -775,7 +835,7 @@ class SinkFrontend {
     return false;
   }
 
-  template<typename Backend_t>
+  template <typename Backend_t>
   NO_DISCARD Backend_t* TryGetBackendAs() const {
     return dynamic_cast<Backend_t>(backend_.get());
   }
@@ -809,7 +869,7 @@ class SinkFrontend {
 
 //! \brief  Convenience function to create a full front/back sink, forwarding the arguments to the sink backend's constructor.
 //!
-template<typename Frontend_t, typename Backend_t, typename ...Args>
+template <typename Frontend_t, typename Backend_t, typename ...Args>
 requires std::is_base_of_v<SinkFrontend, Frontend_t> && std::is_base_of_v<SinkBackend, Backend_t>
 std::shared_ptr<Frontend_t> MakeSink(Args&& ...args) {
   return std::make_shared<Frontend_t>(std::make_unique<Backend_t>(std::forward<Args>(args)...));
@@ -824,9 +884,9 @@ class Core {
     return *this;
   }
 
-  template<typename Frontend_t, typename Backend_t, typename ...Args>
+  template <typename Frontend_t, typename Backend_t, typename ...Args>
   requires std::is_base_of_v<SinkFrontend, Frontend_t> && std::is_base_of_v<SinkBackend, Backend_t>
-  Core& AddSink(Args&&... args) {
+  Core& AddSink(Args&& ... args) {
     sinks_.push_back(MakeSink<Frontend_t, Backend_t>(std::forward<Args>(args)...));
     return *this;
   }
@@ -846,7 +906,7 @@ class Core {
 
   NO_DISCARD bool WillAccept(const Record& record) const {
     // Make sure the record will not be filtered out by core-level filters.
-    for (auto& filter : core_level_filters_) {
+    for (auto& filter: core_level_filters_) {
       if (!filter.Check(record)) return false;
     }
 
@@ -860,14 +920,14 @@ class Core {
   }
 
   void Dispatch(Record&& record) const {
-    std::for_each(sinks_.begin(), sinks_.end(), [record](auto sink) { sink->TryDispatch(record);});
+    std::for_each(sinks_.begin(), sinks_.end(), [record](auto sink) { sink->TryDispatch(record); });
   }
 
   //! \brief  Get the first sink backend of the specified type, if one exists. Otherwise, returns nullptr.
   //!
-  template<typename Backend_t>
+  template <typename Backend_t>
   Backend_t* GetFirstSink() const {
-    for (auto& frontend : sinks_) {
+    for (auto& frontend: sinks_) {
       if (auto backend = frontend->TryGetBackendAs<Backend_t>()) {
         return backend;
       }
@@ -889,7 +949,7 @@ class Core {
     });
   }
 
-  template<typename FormatObj_t>
+  template <typename FormatObj_t>
   Core& SetAllFormats(const FormatObj_t& fmt_obj) {
     std::for_each(sinks_.begin(), sinks_.end(), [fmt_obj](auto& sink) { sink->SetFormatFrom(fmt_obj); });
     return *this;
@@ -910,7 +970,6 @@ class Core {
   std::vector<std::shared_ptr<SinkFrontend>> sinks_;
 };
 
-
 //! \brief  A structure that is used to signal that an object should be created without a logging core.
 //!
 struct NoCore_t {};
@@ -918,7 +977,6 @@ struct NoCore_t {};
 //! \brief  The prototypical NoCore_t object.
 //!
 constexpr inline NoCore_t NoCore;
-
 
 //! \brief  Base class for logging objects.
 //!
@@ -1006,6 +1064,24 @@ inline void Record::Dispatch() {
   core_->Dispatch(std::move(*this));
 }
 
+//! \brief Count the number of characters in a range that are not part of an Ansi escape sequence.
+inline std::size_t CountNonAnsiSequenceCharacters(std::string::iterator begin, std::string::iterator end) {
+  std::size_t count = 0;
+  bool in_escape = false;
+  for (auto it = begin; it != end; ++it) {
+    if (*it == '\x1b') {
+      in_escape = true;
+    }
+    if (!in_escape) {
+      ++count;
+    }
+    if (*it == 'm') {
+      in_escape = false;
+    }
+  }
+  return count;
+}
+
 inline std::string formatting::StandardMessageFormatter::operator()(
     const Record& record,
     const settings::SinkSettings& sink_settings,
@@ -1025,6 +1101,9 @@ inline std::string formatting::StandardMessageFormatter::operator()(
       // Check if this is where the message should be printed.
       if (fmt.attr_name == "Message") {
         if (auto& msg = record.GetMessage()) {
+          // Calculate message indentation, calculate it from the last newline.
+          auto it = std::find(message.rbegin(), message.rend(), '\n');
+          message_info.message_indentation = CountNonAnsiSequenceCharacters(it.base(), message.end());
           if (auto opt = (*msg).MakeMessage(message_info, sink_settings)) {
             message += *opt;
           }
@@ -1060,6 +1139,8 @@ inline std::string formatting::StandardMessageFormatter::operator()(
 
 namespace attribute { // namespace lightning::attribute
 
+//! \brief  Attribute that stores the thread that a message came from.
+//!
 class ThreadAttribute : public attribute::Attribute {
   friend class ImplBase;
  protected:
@@ -1141,6 +1222,8 @@ class SeverityFormatter final : public AttributeFormatter {
   SeverityFormatter() : AttributeFormatter(std::make_shared<Impl>()) {}
 };
 
+//! \brief  Attribute that indicates a level of indentation.
+//!
 class BlockLevelAttribute : public Attribute {
   friend class ImplBase;
  private:
@@ -1161,6 +1244,8 @@ class BlockLevelAttribute : public Attribute {
   void DecrementIndentation() { impl<BlockLevelAttribute>()->DecrementIndentation(); }
 };
 
+//! \brief  Attribute formatter that reads the block level and injects spaces based on the BlockLevelAttribute attribute.
+//!
 class BlockIndentationFormatter final : public AttributeFormatter {
   friend class ImplBase;
  private:
@@ -1226,8 +1311,7 @@ class SeverityLogger : public Logger {
 class UnsynchronizedFrontend : public SinkFrontend {
  public:
   explicit UnsynchronizedFrontend(std::unique_ptr<SinkBackend>&& backend)
-      : SinkFrontend(std::move(backend))
-  {}
+      : SinkFrontend(std::move(backend)) {}
 
  private:
   void dispatch(const std::optional<std::string>& formatted_message) override {
@@ -1256,6 +1340,8 @@ class SynchronizedFrontend : public SinkFrontend {
 //  Specific SinkBackend implementations.
 // ==============================================================================
 
+//! \brief  Sink backend that writes output to an ostream.
+//!
 class OstreamSink : public SinkBackend {
  public:
   explicit OstreamSink(std::ostringstream& stream) : stream_(stream) {
@@ -1290,6 +1376,8 @@ class Global {
     return global_core_;
   }
 
+  //! \brief  Get the global logger.
+  //!
   static Logger& GetLogger() {
     if (!logger_) {
       logger_ = Logger(GetCore());

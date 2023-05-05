@@ -26,17 +26,6 @@ inline std::string to_string(const ToStringable x) {
 
 namespace Testing {
 
-
-TEST(Lightning, SimpleSeveritySetup) {
-  SeverityLogger logger;
-  logger.GetCore()->
-          AddSink<UnsynchronizedFrontend, OstreamSink>()
-      .SetAllFormats("[{Severity}]: {Message}");
-
-  logger(Severity::Info) << "Hi there, friend.";
-}
-
-
 TEST(Lightning, RecordHandler_Streaming) {
   std::ostringstream stream;
   auto sink = MakeSink<UnsynchronizedFrontend, OstreamSink>(stream);
@@ -61,10 +50,10 @@ TEST(Lightning, OstreamSink) {
 TEST(Lightning, Segmentize_1) {
   auto segments = formatting::Segmentize("[{Severity}]: {Message}");
   EXPECT_EQ(segments.size(), 4u);
-  EXPECT_EQ(segments[0].index(), 0);
-  EXPECT_EQ(segments[1].index(), 1);
-  EXPECT_EQ(segments[2].index(), 0);
-  EXPECT_EQ(segments[3].index(), 1);
+  EXPECT_EQ(segments[0].index(), 0u);
+  EXPECT_EQ(segments[1].index(), 1u);
+  EXPECT_EQ(segments[2].index(), 0u);
+  EXPECT_EQ(segments[3].index(), 1u);
 
   EXPECT_EQ(std::get<0>(segments[0]), "[");
   EXPECT_EQ(std::get<1>(segments[1]).attr_name, "Severity");
@@ -74,17 +63,17 @@ TEST(Lightning, Segmentize_1) {
 
 TEST(Lightning, Segmentize_2) {
   auto segments = formatting::Segmentize("{First}==<>=={Time}{Attitude}:{Weather}({Thread}): {Message}");
-  EXPECT_EQ(segments.size(), 10);
-  EXPECT_EQ(segments[0].index(), 1);
-  EXPECT_EQ(segments[1].index(), 0);
-  EXPECT_EQ(segments[2].index(), 1);
-  EXPECT_EQ(segments[3].index(), 1);
-  EXPECT_EQ(segments[4].index(), 0);
-  EXPECT_EQ(segments[5].index(), 1);
-  EXPECT_EQ(segments[6].index(), 0);
-  EXPECT_EQ(segments[7].index(), 1);
-  EXPECT_EQ(segments[8].index(), 0);
-  EXPECT_EQ(segments[9].index(), 1);
+  EXPECT_EQ(segments.size(), 10u);
+  EXPECT_EQ(segments[0].index(), 1u);
+  EXPECT_EQ(segments[1].index(), 0u);
+  EXPECT_EQ(segments[2].index(), 1u);
+  EXPECT_EQ(segments[3].index(), 1u);
+  EXPECT_EQ(segments[4].index(), 0u);
+  EXPECT_EQ(segments[5].index(), 1u);
+  EXPECT_EQ(segments[6].index(), 0u);
+  EXPECT_EQ(segments[7].index(), 1u);
+  EXPECT_EQ(segments[8].index(), 0u);
+  EXPECT_EQ(segments[9].index(), 1u);
 
   EXPECT_EQ(std::get<1>(segments[0]).attr_name, "First");
   EXPECT_EQ(std::get<0>(segments[1]), "==<>==");
@@ -142,10 +131,10 @@ TEST(Lightning, BlockAttributes) {
 
   logger(Severity::Info) << "Hi there.";
   {
-    controllers::BlockLevel indent(logger);
+    controllers::BlockLevel indent1(logger);
     logger(Severity::Info) << "Indented message.";
     {
-      controllers::BlockLevel indent(logger);
+      controllers::BlockLevel indent2(logger);
       logger(Severity::Warning) << "Even more indented??";
     }
     logger(Severity::Error) << "This has gone too far.";
