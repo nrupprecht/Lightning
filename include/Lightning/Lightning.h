@@ -2,6 +2,7 @@
 #include <fstream>
 #include <string>
 #include <optional>
+#include <utility>
 #include <vector>
 #include <type_traits>
 #include <sstream>
@@ -19,7 +20,13 @@ class Record;
 // ==============================================================================
 
 #define NO_DISCARD [[nodiscard]]
+#define MAYBE_UNUSED [[maybe_unused]]
 
+//! \brief  Macro that allows you to create a type trait based on whether a statement about a type called Value_t is valid.
+//!         For example, to make a type trait called can_i_stream_this_v<T> that will be true if T can be streamed into std::cout,
+//!         you can write:
+//!         NEW_TYPE_TRAIT(can_i_stream_this_v, std::cout << std::declval<T>());
+//!
 #define NEW_TYPE_TRAIT(trait_name, trait_test)                                      \
 namespace detail_traits_##trait_name {                                              \
   template<typename Value_t>                                                        \
@@ -71,7 +78,7 @@ class ImplBase {
   };
 
   template <typename Concrete_t>
-  NO_DISCARD bool IsType() const {
+  NO_DISCARD MAYBE_UNUSED bool IsType() const {
     return dynamic_cast<typename Concrete_t::Impl>(impl_.get());
   }
 
@@ -119,9 +126,8 @@ class Attribute : public ImplBase {
  protected:
   class Impl : public ImplBase::Impl {
    public:
-    explicit Impl(const std::string& name) : attr_name(name) {}
-    virtual ~Impl() = default;
-    virtual std::optional<Attribute> Generate() const { return {}; }
+    explicit Impl(std::string  name) : attr_name(std::move(name)) {}
+    virtual std::optional<Attribute> Generate() const = 0;
     //! \brief The name of the attribute.
     const std::string attr_name;
   };
@@ -142,7 +148,7 @@ class Attribute : public ImplBase {
   //!         a record. Others might not. The impl decides if the attaching an attribute should generate a
   //!         new copy of the attribute, potentially with newly generated information inside it, or if
   //!         this attribute should just be used.
-  Attribute Generate() const {
+  NO_DISCARD Attribute Generate() const {
     if (auto attr = impl<Attribute>()->Generate()) {
       return *attr;
     }
@@ -172,7 +178,6 @@ class AttributeFormatter : public ImplBase {
   class Impl : public ImplBase::Impl {
    public:
     explicit Impl(std::string name) : attr_name(std::move(name)) {}
-    virtual ~Impl() = default;
     //! \brief The name of the attribute this extractor formats.
     const std::string attr_name;
     NO_DISCARD virtual std::string FormatAttribute(const Attribute& attribute, const settings::SinkSettings& sink_settings) const = 0;
@@ -220,19 +225,15 @@ class DispatchTimeFormatting : public ImplBase {
  protected:
   class Impl : public ImplBase::Impl {
    public:
-    virtual ~Impl() = default;
-    virtual void AddWithFormatting(std::string& message,
-                                   const MessageInfo& message_info,
+    virtual void AddWithFormatting(std::string& message, const MessageInfo& message_info,
                                    const settings::SinkSettings& sink_settings) const = 0;
   };
-
  public:
-  void AddWithFormatting(std::string& message,
-                         const MessageInfo& message_info,
+  void AddWithFormatting(std::string& message, const MessageInfo& message_info,
                          const settings::SinkSettings& sink_settings) const {
     impl<DispatchTimeFormatting>()->AddWithFormatting(message, message_info, sink_settings);
   }
-  DispatchTimeFormatting(const std::shared_ptr<Impl>& impl) : ImplBase(impl) {}
+  explicit DispatchTimeFormatting(const std::shared_ptr<Impl>& impl) : ImplBase(impl) {}
 };
 
 //! \brief  A message composed of several segments and dispatch-time formatting objects.
@@ -1147,6 +1148,7 @@ class ThreadAttribute : public attribute::Attribute {
   class Impl : public Attribute::ImplConcrete<std::thread::id> {
    public:
     Impl() : ImplConcrete("Thread"), thread_id(std::this_thread::get_id()) {}
+    std::optional<Attribute> Generate() const override { return ThreadAttribute(); }
     std::thread::id GetAttribute() override { return thread_id; }
     std::thread::id thread_id;
   };
@@ -1192,6 +1194,7 @@ class SeverityAttribute final : public Attribute {
    public:
     explicit Impl(Severity severity) : ImplConcrete("Severity"), severity_(severity) {}
     Severity GetAttribute() override { return severity_; }
+    std::optional<Attribute> Generate() const override { return SeverityAttribute(severity_); }
    private:
     Severity severity_;
   };
@@ -1234,6 +1237,7 @@ class BlockLevelAttribute : public Attribute {
     void SetIndentation(unsigned level) { level_ = level; }
     void IncrementIndentation() { ++level_; }
     void DecrementIndentation() { if (0 < level_) --level_; }
+    std::optional<Attribute> Generate() const override { return BlockLevelAttribute(level_); }
    private:
     unsigned level_;
   };

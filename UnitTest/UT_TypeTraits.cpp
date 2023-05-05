@@ -11,11 +11,11 @@ using namespace std::string_literals;
 
 namespace {
 
-struct [[maybe_unused]] Nonstreamable {};
+struct MAYBE_UNUSED Nonstreamable {};
 
-struct [[maybe_unused]] ToStringable { char c; };
+struct MAYBE_UNUSED ToStringable { char c; };
 
-[[maybe_unused]] inline std::string to_string(const ToStringable x) { return "<"s + x.c + ">"; }
+MAYBE_UNUSED inline std::string to_string(const ToStringable x) { return "<"s + x.c + ">"; }
 
 } // namespace <unnamed>
 
