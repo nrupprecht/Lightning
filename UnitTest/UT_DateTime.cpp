@@ -31,7 +31,7 @@ TEST(DateTime, Basic) {
 }
 
 TEST(DateTime, Formatting) {
-  auto dt = DateTime::YMD_HMS(2023'05'06, 13, 01, 15, 532);
+  auto dt = DateTime::YMD_Time(2023'05'06, 13, 01, 15, 532000);
 
   EXPECT_EQ(Format(dt, "%Y-%m-%d"), "2023-05-06");
   EXPECT_EQ(Format(dt, "%m/%d/%y"), "05/06/23");

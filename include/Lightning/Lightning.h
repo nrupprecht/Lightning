@@ -1447,9 +1447,9 @@ inline Month MonthIntToMonth(int month) {
 class DateTime {
  public:
   DateTime() = default;
-  DateTime(int year, int month, int day, int hour = 0, int minute = 0, int second = 0, int millisecond = 0) {
+  DateTime(int year, int month, int day, int hour = 0, int minute = 0, int second = 0, int microsecond = 0) {
     setYMD(year, month, day);
-    setHMSMS(hour, minute, second, millisecond);
+    setHMSUS(hour, minute, second, microsecond);
   }
 
   explicit DateTime(int yyyymmdd) : DateTime(yyyymmdd / 10000, (yyyymmdd / 100) % 100, yyyymmdd % 100) {}
@@ -1458,23 +1458,24 @@ class DateTime {
     return GetYear() * 10000 + GetMonthInt() * 100 + GetDay();
   }
 
-  NO_DISCARD int GetYear() const { return y_m_d_ >> shift_year_; }
-  NO_DISCARD int GetMonthInt() const { return (y_m_d_ >> shift_month_) & month_mask_; }
+  NO_DISCARD int GetYear() const { return static_cast<int>(y_m_d_h_m_s_um_ >> shift_year_); }
+  NO_DISCARD int GetMonthInt() const { return static_cast<int>((y_m_d_h_m_s_um_ >> shift_month_) & month_mask_); }
   NO_DISCARD Month GetMonth() const { return MonthIntToMonth(GetMonthInt()); }
-  NO_DISCARD int GetDay() const { return y_m_d_ & day_mask_; }
-  NO_DISCARD int GetHour() const { return h_m_s_ms_ >> shift_hour_; }
-  NO_DISCARD int GetMinute() const { return (h_m_s_ms_ >> shift_minute_) & minute_mask_; }
-  NO_DISCARD int GetSecond() const { return (h_m_s_ms_ >> shift_second_) & second_mask_; }
-  NO_DISCARD int GetMillisecond() const { return h_m_s_ms_ & ms_mask_; }
+  NO_DISCARD int GetDay() const { return static_cast<int>((y_m_d_h_m_s_um_ >> shift_day_) & day_mask_); }
+  NO_DISCARD int GetHour() const { return static_cast<int>(y_m_d_h_m_s_um_ >> shift_hour_) & hour_mask_; }
+  NO_DISCARD int GetMinute() const { return static_cast<int>((y_m_d_h_m_s_um_ >> shift_minute_) & minute_mask_); }
+  NO_DISCARD int GetSecond() const { return static_cast<int>((y_m_d_h_m_s_um_ >> shift_second_) & second_mask_); }
+  NO_DISCARD int GetMillisecond() const { return GetMicrosecond() / 1000; }
+  NO_DISCARD int GetMicrosecond() const { return static_cast<int>(y_m_d_h_m_s_um_ & us_mask_); }
 
   //! \brief Check if the date is a non-null (empty) date.
-  explicit operator bool() const { return y_m_d_ != 0; }
+  explicit operator bool() const { return y_m_d_h_m_s_um_ != 0; }
 
   static DateTime Now() {
     auto time = std::chrono::system_clock::now();
     // get number of milliseconds for the current second
     // (remainder after division into seconds)
-    int ms = static_cast<int>((duration_cast<std::chrono::milliseconds>(time.time_since_epoch()) % 1000).count());
+    int ms = static_cast<int>((duration_cast<std::chrono::microseconds>(time.time_since_epoch()) % 1'000'000).count());
     // convert to std::time_t in order to convert to std::tm (broken time)
     auto t = std::chrono::system_clock::to_time_t(time);
 
@@ -1482,21 +1483,31 @@ class DateTime {
     return {now->tm_year + 1900, now->tm_mon + 1, now->tm_mday, now->tm_hour, now->tm_min, now->tm_sec, ms};
   }
 
-  static DateTime YMD_HMS(int yyyymmdd, int hours, int minutes, int seconds, int milliseconds = 0) {
+  static DateTime YMD_Time(int yyyymmdd, int hours, int minutes, int seconds = 0, int microsecond = 0) {
     DateTime dt(yyyymmdd);
-    dt.setHMSMS(hours, minutes, seconds, milliseconds);
+    dt.setHMSUS(hours, minutes, seconds, microsecond);
     return dt;
   }
 
  private:
   void setYMD(int year, int month, int day) {
     validateYMD(year, month, day);
-    y_m_d_ = (year << shift_year_) | ((month & month_mask_) << shift_month_) | (day & day_mask_);
+    // Zero previous y-m-d.
+    y_m_d_h_m_s_um_ = (y_m_d_h_m_s_um_ << 32) >> 32;
+    y_m_d_h_m_s_um_ |=
+        (static_cast<long>(year) << shift_year_)
+        | (static_cast<long>(month) << shift_month_)
+        | (static_cast<long>(day) << shift_day_);
   }
 
-  void setHMSMS(int hour, int minute, int second, int millisecond) {
-    validateHMSMS(hour, minute, second, millisecond);
-    h_m_s_ms_ = (hour << shift_hour_) | (minute << shift_minute_) | (second << shift_second_) | millisecond;
+  void setHMSUS(int hour, int minute, int second, int microseconds) {
+    validateHMSUS(hour, minute, second, microseconds);
+    // Zero previous h-m-s-us.
+    y_m_d_h_m_s_um_ = (y_m_d_h_m_s_um_ >> 32) << 32;
+    y_m_d_h_m_s_um_ |= (static_cast<long>(hour) << shift_hour_)
+        | (static_cast<long>(minute) << shift_minute_)
+        | (static_cast<long>(second) << shift_second_)
+        | microseconds;
   }
 
   static void validateYMD(int year, int month, int day) {
@@ -1505,44 +1516,38 @@ class DateTime {
     LL_REQUIRE(0 < day < DaysInMonth(month, year), "there are only " << DaysInMonth(month, year) << " days in " << year << "-" << month);
   }
 
-  static void validateHMSMS(int hour, int minute, int second, int millisecond) {
+  static void validateHMSUS(int hour, int minute, int second, int microseconds) {
     // I am ignoring things like the time change and leap seconds.
     LL_REQUIRE(0 <= hour && hour < 24, "hour must be in the range [0, 24)");
     LL_REQUIRE(0 <= minute && minute < 60, "minute must be in the range [0, 60)");
     LL_REQUIRE(0 <= second && second < 60, "second must be in the range [0, 60)");
-    LL_REQUIRE(0 <= millisecond && millisecond < 1000, "millisecond must be in the range [0, 1000)");
+    LL_REQUIRE(0 <= microseconds && microseconds < 1'000'000, "microseconds must be in the range [0, 1,000,000)");
   }
 
-  //! \brief  Packed storage for year, month, and day.
-  //!
-  //!         0 <= Y < 4096   => 12 bits (up to 17)
-  //!         0 < m <= 12     => 7 bits
-  //!         0 < d < 32      => 8 bits
-  //!         Total: 27 bits
-  //!         00000yyyyyyyyyyyymmmmmmmdddddddd
-  int y_m_d_{};
+  //!         0 <= Y < 4096   => 12 bits  (shift =  52)
+  //!         0 < m <= 12     => 7 bits   (shift = 45)
+  //!         0 < d < 32      => 8 bits   (shift = 37)
+  //!         0 <= h < 24     => 5 bits   (shift = 32)
+  //!         0 <= m < 60     => 6 bits   (shift = 26)
+  //!         0 <= s < 60     => 6 bits   (shift = 20)
+  //!         0 <= ms < 1'000'000  => 20 bits
+  //!         Total: 64 bits
+  //! yyyyyyyy-yyyymmmm-mmmddddd-dddhhhhh mmmmmmss-ssssuuuu-uuuuuuuu-uuuuuuuu
+  long y_m_d_h_m_s_um_{};
 
-  //! \brief  Packed storage for hour, minute, second.
-  //!
-  //!         0 <= h < 24     => 5 bits
-  //!         0 <= m < 60     => 6 bits
-  //!         0 <= s < 60     => 6 bits
-  //!         0 <= ms < 1000  => 10 bits
-  //!         Total: 27 bits
-  //!         00000hhhhhmmmmmmssssssuuuuuuuuuu
-  int h_m_s_ms_{};
+  static constexpr int shift_second_ = 20;
+  static constexpr int shift_minute_ = 26;
+  static constexpr int shift_hour_ = 32;
+  static constexpr int shift_day_ = 37;
+  static constexpr int shift_month_ = 45;
+  static constexpr int shift_year_ = 52;
 
-  static constexpr int shift_month_ = 8;
-  static constexpr int shift_year_ = 15;
-  static constexpr int day_mask_ = 0b11111111;
-  static constexpr int month_mask_ = 0b1111111;
-
-  static constexpr int shift_second_ = 10;
-  static constexpr int shift_minute_ = 16;
-  static constexpr int shift_hour_ = 22;
-  static constexpr int ms_mask_ = 0b1111111111;
+  static constexpr int us_mask_ = 0b11111111111111111111;
   static constexpr int second_mask_ = 0b111111;
   static constexpr int minute_mask_ = 0b111111;
+  static constexpr int hour_mask_ = 0b11111;
+  static constexpr int day_mask_ = 0b11111111;
+  static constexpr int month_mask_ = 0b1111111;
 };
 
 inline std::vector<std::variant<char /* Fmt */, std::string>> Segmentize(const std::string& fmt) {
@@ -1602,8 +1607,8 @@ inline std::string Format(const DateTime& dt, const std::string& fmt) {
         case 'S': // Second as a zero-padded decimal.
           output += Pad(dt.GetSecond(), 2);
           break;
-        case 'f': // Milliseconds as zero-padded decimal
-          output += Pad(dt.GetMillisecond(), 3);
+        case 'f': // Microseconds as zero-padded decimal
+          output += Pad(dt.GetMicrosecond(), 3);
           break;
         case 'p': // Local "AM" or "PM"
           output += dt.GetHour() < 12 ? "AM" : "PM";
