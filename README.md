@@ -26,6 +26,18 @@ A somewhat more complex example that uses a severity logger.
     
     logger(Severity::Info) << "Hi there, friend.";
 
+Global logging can be set up by accessing the global logger and core,
+
+    // Add sink to the global logger, set formatting.
+    lightning::Global::GetCore()
+      ->AddSink<UnsynchronizedFrontend, OstreamSink>()
+      .SetAllFormats("[{Severity}][{DateTime}]: {Message}");
+
+    // Add an attributes and formatters to the global logger.
+    Global::GetLogger()
+    .AddAttribute(attribute::DateTimeAttribute{}, attribute::DateTimeFormatter{})
+    .AddLoggerAttributeFormatter(attribute::SeverityFormatter{});
+
 # Overview
 
 Lightning Logging is based on a source-core-sink model. Sources (loggers) are what receive input (logs), and are

@@ -1695,14 +1695,24 @@ class Global {
   inline static std::optional<Logger> logger_{};
 };
 
-#define LOG() \
-  if (auto record = ::lightning::Global::GetLogger().CreateRecord(); record.IsOpen()) \
+
+//! \brief Log to the specified logger.
+#define LOG_TO(logger) \
+  if (auto record = logger.CreateRecord(); record.IsOpen()) \
     ::lightning::RecordHandler(std::move(record))
 
-#define LOG_SEV(severity) \
-  if (auto record = ::lightning::Global::GetLogger().CreateRecord({ \
+//! \brief Log to the global logger.
+#define LOG() LOG_TO(::lightning::Global::GetLogger())
+
+//! \brief Log with a severity attribute to the specified logger.
+#define LOG_SEV_TO(logger, severity) \
+  if (auto record = logger.CreateRecord({ \
     ::lightning::attribute::SeverityAttribute(::lightning::Severity::severity) \
   }); record.IsOpen()) \
     ::lightning::RecordHandler(std::move(record))
+
+//! \brief Log with a severity attribute to the global logger.
+#define LOG_SEV(severity) LOG_SEV_TO(::lightning::Global::GetLogger(), severity)
+
 
 } // namespace lightning
