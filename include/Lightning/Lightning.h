@@ -518,6 +518,39 @@ class AnsiColor8Bit : public DispatchTimeFormatting {
       : DispatchTimeFormatting(std::make_shared<Impl>(msg, foreground_color, background_color)) {}
 };
 
+//! \brief  A dispatch time formatting that changes the stream to use a specific color.
+class StartAnsiColor8Bit : public DispatchTimeFormatting {
+ protected:
+  class Impl : public DispatchTimeFormatting::Impl {
+   public:
+    Impl(std::optional<AnsiForegroundColor> foreground_color, std::optional<AnsiBackgroundColor> background_color)
+        : foreground_color_(foreground_color), background_color_(background_color) {}
+    void AddWithFormatting(std::string& message, const MessageInfo&, const settings::SinkSettings& sink_settings) const override {
+      if (sink_settings.has_color_support) message += StartAnsiColorFmt(foreground_color_, background_color_);
+    }
+   private:
+    std::optional<AnsiForegroundColor> foreground_color_;
+    std::optional<AnsiBackgroundColor> background_color_;
+  };
+ public:
+  explicit StartAnsiColor8Bit(std::optional<AnsiForegroundColor> foreground_color, std::optional<AnsiBackgroundColor> background_color = {})
+      : DispatchTimeFormatting(std::make_shared<Impl>(foreground_color, background_color)) {}
+};
+
+//! \brief  A dispatch time formatting that resets the colors in the stream.
+class ResetStreamColor : public DispatchTimeFormatting {
+ protected:
+  class Impl : public DispatchTimeFormatting::Impl {
+   public:
+    void AddWithFormatting(std::string& message, const MessageInfo&, const settings::SinkSettings& sink_settings) const override {
+      if (sink_settings.has_color_support) message += ResetColors();
+    }
+  };
+ public:
+  ResetStreamColor() : DispatchTimeFormatting(std::make_shared<Impl>()) {}
+};
+
+
 //! \brief  A dispatch time formatting that colors a string using Ansi RGB colors (if the sink supports colors).
 //!
 class AnsiColorRGB : public DispatchTimeFormatting {
@@ -698,7 +731,7 @@ RecordHandler& RecordHandler::operator<<(const T& input) {
     ensureRecordHasMessage();
     *record_.message_ << input;
   }
-  else if constexpr (formatting::has_logstream_formatter_v < T >) {
+  else if constexpr (formatting::has_logstream_formatter_v<T>) {
     // If a formatting function has been provided, use it.
     format_logstream(input, *this);
   }

@@ -35,8 +35,70 @@ Global logging can be set up by accessing the global logger and core,
 
     // Add an attributes and formatters to the global logger.
     Global::GetLogger()
-    .AddAttribute(attribute::DateTimeAttribute{}, attribute::DateTimeFormatter{})
-    .AddLoggerAttributeFormatter(attribute::SeverityFormatter{});
+        .AddAttribute(attribute::DateTimeAttribute{}, attribute::DateTimeFormatter{})
+        .AddLoggerAttributeFormatter(attribute::SeverityFormatter{});
+
+Global logging is most easily used via the logging macros LOG() and LOG_SEV(severity),
+
+    LOG() << "Starting run...";
+
+    LOG_SEV(Info) << "Done with workflow. Processing next item with name " << item.GetName() << ".";
+
+As usual, whatever is streamed into the logging macros (most importantly, function calls) will only be evaluated if the
+logging record opens, which occurs if the set of core-level filters allow the message (given its attributes), and at
+least one sink accepts the message (again, given its attributes).
+
+Streaming into record handlers (including macros like LOG_SEV) will work with (in order of precedence) Attributes,
+objects whose classes are children of the DispatchTimeFormatting class, objects that have an ADL-findable
+format_logstream(T&&, RecordHandler&) function, objects that have a ostreaming operator, and objects that have an
+ADL-findable to_string(T) function.
+
+The most powerful customization point of these are format_logstream functions. Since the function will be passes
+the  (mutable) record handler itself, this allows you to execute operations on the object to log and add dispatch-time
+formatting whenever an object of type T is streamed into a RecordHandler. Dispatch-time-formatting objects allow for
+decisions about the formatting to be made based on sink-specific settings, at the time that the message is *dispatched*
+to an actual sink (and is reevaluated for every sink). For example, the built in AnsiColor8Bit formatting object will
+use ansi escape sequences to color test *if* the sink that is dispatching the message supports color. Another example is
+the NewLineIndent formatting object, which knows how much to indent a message based on the width of the log "header" so
+that the message aligns with the start of the message on the first line. The width of the log header depends on the
+formatting for the specific sink, so it cannot be decided until dispatch time.
+
+For example, writing a format logstream function for std::exception like this:
+
+[comment]: <> (![Alt text]&#40;./images/format-logstream-exception.png&#41;)
+    namespace std {
+    
+    void format_logstream(const exception& ex, lightning::RecordHandler& handler) {
+        using namespace lightning::formatting;
+        
+        handler << NewLineIndent << AnsiColor8Bit(R"(""")", AnsiForegroundColor::Red)
+                << StartAnsiColor8Bit(AnsiForegroundColor::Yellow); // Exception in yellow.
+        const char* begin = ex.what(), * end = ex.what();
+        while (*end) {
+            for (; *end && *end != '\n'; ++end); // Find next newline.
+            handler << NewLineIndent << string_view(begin, end - begin);
+            while (*end && *end == '\n') ++end;  // Pass any number of newlines.
+            begin = end;
+        }
+        handler << ResetStreamColor() << NewLineIndent // Reset colors to default.
+                << AnsiColor8Bit(R"(""")", AnsiForegroundColor::Red);
+    }
+    
+    } // namespace std
+
+and throwing an exception like this
+
+    try {
+        throw std::runtime_error("oh wow, this is a big problem\nand I don't know what to do");
+    }
+    catch (const std::exception& ex) {
+        LOG_SEV(Fatal) << "Caught 'unexpected' exception: " << ex;
+        return 0;
+    }
+
+results in formatting that looks like this
+![Alt text](./images/formatted-exception.png)
+Note that this uses both color formatting and NewLineIndent formatting.
 
 # Overview
 
@@ -91,10 +153,13 @@ and none of the sinks will accept a message of severity level "Debug," the funct
 will never be called.
 
 ## Sinks
+
 TODO
 
 ### Sink Frontends
+
 TODO
 
 ### Sink Backends
+
 TODO
