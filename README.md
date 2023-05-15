@@ -65,7 +65,6 @@ formatting for the specific sink, so it cannot be decided until dispatch time.
 
 For example, writing a format logstream function for std::exception like this:
 
-[comment]: <> (![Alt text]&#40;./images/format-logstream-exception.png&#41;)
     namespace std {
     
     void format_logstream(const exception& ex, lightning::RecordHandler& handler) {
