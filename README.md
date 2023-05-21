@@ -9,41 +9,41 @@ Still a work in progress.
 ## Quick start
 
 The simplest possible way to create a logger that writes to std::cout:
+```C++
+// Create a simple logger with no attributes and default formatting.
+Logger logger;
+logger.GetCore()->AddSink<UnsynchronizedFrontend, OstreamSink>();
 
-    // Create a simple logger with no attributes and default formatting.
-    Logger logger;
-    logger.GetCore()->AddSink<UnsynchronizedFrontend, OstreamSink>();
-
-    logger() << "Hello world";
-
+logger() << "Hello world";
+```
 A somewhat more complex example that uses a severity logger.
+```C++
+// Create a simple logger with no attributes and default formatting.
+SeverityLogger logger;
+logger.GetCore()->
+    AddSink<UnsynchronizedFrontend, OstreamSink>()
+    .SetAllFormats("[{Severity}]: {Message}");
 
-    // Create a simple logger with no attributes and default formatting.
-    SeverityLogger logger;
-    logger.GetCore()->
-        AddSink<UnsynchronizedFrontend, OstreamSink>()
-        .SetAllFormats("[{Severity}]: {Message}");
-    
-    logger(Severity::Info) << "Hi there, friend.";
-
+logger(Severity::Info) << "Hi there, friend.";
+```
 Global logging can be set up by accessing the global logger and core,
+```C++
+// Add sink to the global logger, set formatting.
+lightning::Global::GetCore()
+  ->AddSink<UnsynchronizedFrontend, OstreamSink>()
+  .SetAllFormats("[{Severity}][{DateTime}]: {Message}");
 
-    // Add sink to the global logger, set formatting.
-    lightning::Global::GetCore()
-      ->AddSink<UnsynchronizedFrontend, OstreamSink>()
-      .SetAllFormats("[{Severity}][{DateTime}]: {Message}");
-
-    // Add an attributes and formatters to the global logger.
-    Global::GetLogger()
-        .AddAttribute(attribute::DateTimeAttribute{}, attribute::DateTimeFormatter{})
-        .AddLoggerAttributeFormatter(attribute::SeverityFormatter{});
-
+// Add an attributes and formatters to the global logger.
+Global::GetLogger()
+    .AddAttribute(attribute::DateTimeAttribute{}, attribute::DateTimeFormatter{})
+    .AddLoggerAttributeFormatter(attribute::SeverityFormatter{});
+```
 Global logging is most easily used via the logging macros LOG() and LOG_SEV(severity),
+```C++
+LOG() << "Starting run...";
 
-    LOG() << "Starting run...";
-
-    LOG_SEV(Info) << "Done with workflow. Processing next item with name " << item.GetName() << ".";
-
+LOG_SEV(Info) << "Done with workflow. Processing next item with name " << item.GetName() << ".";
+```
 As usual, whatever is streamed into the logging macros (most importantly, function calls) will only be evaluated if the
 logging record opens, which occurs if the set of core-level filters allow the message (given its attributes), and at
 least one sink accepts the message (again, given its attributes).
@@ -64,37 +64,37 @@ that the message aligns with the start of the message on the first line. The wid
 formatting for the specific sink, so it cannot be decided until dispatch time.
 
 For example, writing a format logstream function for std::exception like this:
+```C++
+namespace std {
 
-    namespace std {
+void format_logstream(const exception& ex, lightning::RecordHandler& handler) {
+    using namespace lightning::formatting;
     
-    void format_logstream(const exception& ex, lightning::RecordHandler& handler) {
-        using namespace lightning::formatting;
-        
-        handler << NewLineIndent << AnsiColor8Bit(R"(""")", AnsiForegroundColor::Red)
-                << StartAnsiColor8Bit(AnsiForegroundColor::Yellow); // Exception in yellow.
-        const char* begin = ex.what(), * end = ex.what();
-        while (*end) {
-            for (; *end && *end != '\n'; ++end); // Find next newline.
-            handler << NewLineIndent << string_view(begin, end - begin);
-            while (*end && *end == '\n') ++end;  // Pass any number of newlines.
-            begin = end;
-        }
-        handler << ResetStreamColor() << NewLineIndent // Reset colors to default.
-                << AnsiColor8Bit(R"(""")", AnsiForegroundColor::Red);
+    handler << NewLineIndent << AnsiColor8Bit(R"(""")", AnsiForegroundColor::Red)
+            << StartAnsiColor8Bit(AnsiForegroundColor::Yellow); // Exception in yellow.
+    const char* begin = ex.what(), * end = ex.what();
+    while (*end) {
+        for (; *end && *end != '\n'; ++end); // Find next newline.
+        handler << NewLineIndent << string_view(begin, end - begin);
+        while (*end && *end == '\n') ++end;  // Pass any number of newlines.
+        begin = end;
     }
-    
-    } // namespace std
+    handler << ResetStreamColor() << NewLineIndent // Reset colors to default.
+            << AnsiColor8Bit(R"(""")", AnsiForegroundColor::Red);
+}
 
+} // namespace std
+```
 and throwing an exception like this
-
-    try {
-        throw std::runtime_error("oh wow, this is a big problem\nand I don't know what to do");
-    }
-    catch (const std::exception& ex) {
-        LOG_SEV(Fatal) << "Caught 'unexpected' exception: " << ex;
-        return 0;
-    }
-
+```C++
+try {
+    throw std::runtime_error("oh wow, this is a big problem\nand I don't know what to do");
+}
+catch (const std::exception& ex) {
+    LOG_SEV(Fatal) << "Caught 'unexpected' exception: " << ex;
+    return 0;
+}
+```
 results in formatting that looks like this
 ![Alt text](./images/formatted-exception.png)
 Note that this uses both color formatting and NewLineIndent formatting.
@@ -145,9 +145,9 @@ attributes, but not yet with any message or values, is checked by the core to se
 filtering and if at least one sink will accept it. As is typical of logging libraries, the built-in logging macros (LOG
 and LOG_SEV) are set up to only execute any streaming into a logger, and any computation that that might entail, if the
 record can be opened. So if you have an expensive bit of logging like so:
-
-    LOG_SEV(Debug) << "Number of penguins: " << calculateNumberOfPenguins(); // Very expensive function
-
+```C++
+LOG_SEV(Debug) << "Number of penguins: " << calculateNumberOfPenguins(); // Very expensive function
+```
 and none of the sinks will accept a message of severity level "Debug," the function to calculate the number of penguins
 will never be called.
 
