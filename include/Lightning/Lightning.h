@@ -1606,6 +1606,9 @@ inline std::string Pad(int x, int pad) {
   return stream.str();
 }
 
+//! \brief Macro to make the Format function shorter and easier to read.
+#define ADD_FMT(case_char, expr) case case_char : output += (expr); break
+
 inline std::string Format(const DateTime& dt, const std::string& fmt) {
   // Using basically this format: https://www.programiz.com/python-programming/datetime/strftime
   std::string output;
@@ -1613,43 +1616,21 @@ inline std::string Format(const DateTime& dt, const std::string& fmt) {
   for (auto seg : segments) {
     if (seg.index() == 0) {
       switch (std::get<0>(seg)) {
-        case 'Y': // Year (with century) as a decimal.
-          output += std::to_string(dt.GetYear());
-          break;
-        case 'y': // Year (without century) as a zero-padded decimal.
-          output += std::to_string(dt.GetYear() % 100);
-          break;
-        case 'd': // Day as a zero-padded decimal
-          output += Pad(dt.GetDay(), 2);
-          break;
-        case 'm': // Month as a zero-padded decimal.
-          output += Pad(dt.GetMonthInt(), 2);
-          break;
-        case 'b': // Abbreviated month name.
-          output += MonthAbbreviation(dt.GetMonth());
-          break;
-        case 'H': // Hour as a zero-padded decimal.
-          output += Pad(dt.GetHour(), 2);
-          break;
-        case 'I': // Hour (1-12) as a zero-padded decimal.
-          output += Pad((dt.GetHour() - 1) % 12 + 1, 2);
-          break;
-        case 'M': // Minute as a zero-padded decimal.
-          output += Pad(dt.GetMinute(), 2);
-          break;
-        case 'S': // Second as a zero-padded decimal.
-          output += Pad(dt.GetSecond(), 2);
-          break;
-        case 'f': // Microseconds as zero-padded decimal
-          output += Pad(dt.GetMicrosecond(), 3);
-          break;
-        case 'p': // Local "AM" or "PM"
-          output += dt.GetHour() < 12 ? "AM" : "PM";
-          break;
-        case '%': // Literal, escaped, '%'
-          output += "%";
-          break;
-        default: LL_FAIL("unrecognized formatting specifier '" << std::get<0>(seg) << "'");
+        ADD_FMT('Y', std::to_string(dt.GetYear()));  // Year (with century) as a decimal.
+        ADD_FMT('y', std::to_string(dt.GetYear() % 100)); // Year (without century) as a zero-padded decimal.
+        ADD_FMT('d', Pad(dt.GetDay(), 2)); // Day as a zero-padded decimal
+        ADD_FMT('m', Pad(dt.GetMonthInt(), 2)); // Month as a zero-padded decimal.
+        ADD_FMT('b', MonthAbbreviation(dt.GetMonth())); // Abbreviated month name.
+        ADD_FMT('H', Pad(dt.GetHour(), 2)); // Hour as a zero-padded decimal.
+        ADD_FMT('I', Pad((dt.GetHour() - 1) % 12 + 1, 2)); // Hour (1-12) as a zero-padded decimal.
+        ADD_FMT('M', Pad(dt.GetMinute(), 2)); // Minute as a zero-padded decimal.
+        ADD_FMT('S', Pad(dt.GetSecond(), 2)); // Second as a zero-padded decimal.
+        ADD_FMT('f', Pad(dt.GetMicrosecond(), 3)); // Microseconds as zero-padded decimal
+        ADD_FMT('p', (dt.GetHour() < 12 ? "AM" : "PM")); // Local "AM" or "PM"
+        ADD_FMT('%', "%"); // Literal, escaped, '%'
+        default: {
+          LL_FAIL("unrecognized formatting specifier '" << std::get<0>(seg) << "'");
+        }
       }
     }
     else {
