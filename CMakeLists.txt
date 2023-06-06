@@ -102,6 +102,11 @@ if(BUILD_TESTS)
     endforeach()
 endif()
 
+if (${BUILD_APPLICATIONS})
+    message(STATUS "Building applications...")
+    add_subdirectory("${PROJECT_SOURCE_DIR}/applications" "applications")
+endif()
+
 ##################################################  Installation  ##################################################
 install(TARGETS ${PROJECT_NAME} EXPORT ${PROJECT_NAME}-config)
 install(DIRECTORY include/ DESTINATION include)

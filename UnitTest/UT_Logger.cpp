@@ -26,7 +26,7 @@ inline std::string to_string(const ToStringable x) {
 
 namespace Testing {
 
-TEST(Lightning, RecordHandler_Streaming) {
+TEST(Logger, RecordHandler_Streaming) {
   std::ostringstream stream;
   auto sink = MakeSink<UnsynchronizedFrontend, OstreamSink>(stream);
   lightning::Logger logger({sink});
@@ -35,7 +35,7 @@ TEST(Lightning, RecordHandler_Streaming) {
   EXPECT_EQ(stream.str(), "<h>\n");
 }
 
-TEST(Lightning, OstreamSink) {
+TEST(Logger, OstreamSink) {
   std::ostringstream stream;
   auto sink = MakeSink<UnsynchronizedFrontend, OstreamSink>(stream);
 
@@ -47,7 +47,7 @@ TEST(Lightning, OstreamSink) {
   stream.str("");
 }
 
-TEST(Lightning, Segmentize_1) {
+TEST(Logger, Segmentize_1) {
   auto segments = formatting::Segmentize("[{Severity}]: {Message}");
   EXPECT_EQ(segments.size(), 4u);
   EXPECT_EQ(segments[0].index(), 0u);
@@ -61,7 +61,7 @@ TEST(Lightning, Segmentize_1) {
   EXPECT_EQ(std::get<1>(segments[3]).attr_name, "Message");
 }
 
-TEST(Lightning, Segmentize_2) {
+TEST(Logger, Segmentize_2) {
   auto segments = formatting::Segmentize("{First}==<>=={Time}{Attitude}:{Weather}({Thread}): {Message}");
   EXPECT_EQ(segments.size(), 10u);
   EXPECT_EQ(segments[0].index(), 1u);
@@ -87,7 +87,7 @@ TEST(Lightning, Segmentize_2) {
   EXPECT_EQ(std::get<1>(segments[9]).attr_name, "Message");
 }
 
-TEST(Lightning, SeverityLogger) {
+TEST(Logger, SeverityLogger) {
   std::ostringstream stream;
 
   auto sink = MakeSink<UnsynchronizedFrontend, OstreamSink>(stream);
@@ -118,7 +118,25 @@ TEST(Lightning, SeverityLogger) {
   stream.str("");
 }
 
-TEST(Lightning, BlockAttributes) {
+TEST(Logger, CreateHandler) {
+  std::ostringstream stream;
+  auto sink = MakeSink<UnsynchronizedFrontend, OstreamSink>(stream);
+  EXPECT_TRUE(sink->SetFormatFrom("[{Severity}]: {Message}"));
+
+  SeverityLogger logger({sink});
+
+  // No severity level is provided.
+  logger.OpenRecordHandler() << "Good morning, friend.";
+  EXPECT_EQ(stream.str(), "[]: Good morning, friend.\n");
+  stream.str("");
+
+  // Severity level is provided.
+  logger.OpenRecordHandler(attribute::SeverityAttribute(Severity::Info)) << "Good morning, friend.";
+  EXPECT_EQ(stream.str(), "[Info   ]: Good morning, friend.\n");
+  stream.str("");
+}
+
+TEST(Logger, BlockAttributes) {
   std::ostringstream stream;
   auto sink = MakeSink<UnsynchronizedFrontend, OstreamSink>(stream);
   SeverityLogger logger({sink});

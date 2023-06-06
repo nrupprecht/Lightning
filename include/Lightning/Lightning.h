@@ -12,6 +12,8 @@
 #include <algorithm>
 #include <thread>
 #include <chrono>
+#include <map>
+
 
 namespace lightning {
 
@@ -117,7 +119,7 @@ class ImplBase {
   }
 
   template <typename Concrete_t>
-  const typename Concrete_t::Impl* impl() const {
+  NO_DISCARD const typename Concrete_t::Impl* impl() const {
     return reinterpret_cast<const typename Concrete_t::Impl*>(impl_.get());
   }
 
@@ -140,7 +142,6 @@ struct SinkSettings {
 };
 
 } // namespace settings
-
 
 
 // ==============================================================================
@@ -550,7 +551,6 @@ class ResetStreamColor : public DispatchTimeFormatting {
   ResetStreamColor() : DispatchTimeFormatting(std::make_shared<Impl>()) {}
 };
 
-
 //! \brief  A dispatch time formatting that colors a string using Ansi RGB colors (if the sink supports colors).
 //!
 class AnsiColorRGB : public DispatchTimeFormatting {
@@ -599,7 +599,6 @@ namespace values { // namespace lightning::values
 class Value {
  public:
   const std::string name;
-
 };
 
 }; // namespace values
@@ -616,6 +615,34 @@ class Record {
   friend class RecordHandler;
   friend class Core;
  public:
+  //! \brief A record is default constructable.
+  //!
+  Record() = default;
+
+  template <typename ...Attributes_t>
+  Record(class Core* core,
+         std::weak_ptr<std::map<std::string, attribute::AttributeFormatter>> attribute_formatters,
+         Attributes_t&& ...attributes)
+      : core_(core), additional_formatters_(std::move(attribute_formatters)) {
+    AddAttributes(std::forward<Attributes_t>(attributes)...);
+  }
+
+  template <typename Attribute_t, typename ...Attributes_t>
+  Record& AddAttributes(Attribute_t&& attribute, Attributes_t&& ...attributes) {
+    AddAttribute(std::forward<Attribute_t>(attribute));
+    if constexpr (sizeof...(attributes) == 0) {
+      return *this;
+    }
+    else {
+      return AddAttributes(std::forward<Attributes_t>(attributes)...);
+    }
+  }
+
+  //! \brief Zero argument version of AddAttributes.
+  Record& AddAttributes() {
+    return *this;
+  }
+
   NO_DISCARD bool IsOpen() const {
     return core_ != nullptr;
   }
@@ -671,12 +698,19 @@ class Record {
   bool do_standard_formatting_ = true;
 };
 
+
 //! \brief  Class that knows how to construct a record via streaming data into it.
 //!
 class RecordHandler {
  public:
   explicit RecordHandler(Record&& record)
-      : record_(record), initial_uncaught_exception_(std::uncaught_exceptions()) {}
+      : record_(std::move(record)), initial_uncaught_exception_(std::uncaught_exceptions()) {}
+
+  template <typename ...Attributes_t>
+  RecordHandler(class Core* core,
+                std::weak_ptr<std::map<std::string, attribute::AttributeFormatter>> attribute_formatters,
+                Attributes_t&& ...attributes)
+      : record_(core, attribute_formatters, std::forward<Attributes_t>(attributes)...), initial_uncaught_exception_(std::uncaught_exceptions()) {}
 
   //! \brief  The record handler's destruction causes the record to be dispatched to its core.
   ~RecordHandler() {
@@ -694,9 +728,18 @@ class RecordHandler {
   }
 
   NO_DISCARD bool IsOpen() const { return record_.IsOpen(); }
+  //! \brief Record handler will be contextually convertible to bool.
+  explicit operator bool() const { return IsOpen(); }
+  void Close() { record_.Close(); }
 
   template <typename T>
   RecordHandler& operator<<(const T& input);
+
+  Record& GetRecord() { return record_; }
+
+  void AddAttribute(attribute::Attribute&& attr) {
+    record_.AddAttributes(std::move(attr));
+  }
 
  private:
   void ensureRecordHasMessage() {
@@ -731,7 +774,7 @@ RecordHandler& RecordHandler::operator<<(const T& input) {
     ensureRecordHasMessage();
     *record_.message_ << input;
   }
-  else if constexpr (formatting::has_logstream_formatter_v<T>) {
+  else if constexpr (formatting::has_logstream_formatter_v < T >) {
     // If a formatting function has been provided, use it.
     format_logstream(input, *this);
   }
@@ -772,6 +815,17 @@ class Filter : public ImplBase {
     NO_DISCARD virtual bool Check(const Record& record) const = 0;
   };
 };
+
+// TODO: Work in progress.
+// Target use examples:
+//    Attribute("Severity").ValueOr(Severity::Info) > Severity::Info
+class FilterAttribute {
+ public:
+  FilterAttribute(const std::string& attr_name) : attr_name_(attr_name) {}
+ private:
+  const std::string attr_name_;
+};
+
 
 //! \brief  Base class for sink backends. These are the objects that are actually responsible for taking
 //!         a record an doing something with its message and values.
@@ -1074,6 +1128,18 @@ class Logger {
     return RecordHandler(CreateRecord(attributes));
   }
 
+  template <typename ...Attributes_t>
+  NO_DISCARD RecordHandler OpenRecordHandler(Attributes_t&& ...attributes) {
+    RecordHandler handler(core_.get(), attribute_formatters_, std::forward<Attributes_t>(attributes)...);
+    for (auto& [name, attr] : logger_named_attributes_) {
+      handler.AddAttribute(attr.Generate());
+    }
+    if (!core_->WillAccept(handler.GetRecord())) {
+      handler.Close();
+    }
+    return handler;
+  }
+
   Logger& AddNamedAttribute(const std::string& name, const attribute::Attribute& attribute) {
     logger_named_attributes_.emplace(name, attribute);
     return *this;
@@ -1367,7 +1433,7 @@ class SeverityLogger : public Logger {
   }
 
   RecordHandler operator()(Severity severity) {
-    return RecordHandler(CreateRecord({attribute::SeverityAttribute(severity)}));
+    return OpenRecordHandler(attribute::SeverityAttribute(severity));
   }
 };
 
@@ -1380,9 +1446,7 @@ class SeverityLogger : public Logger {
 //!
 class UnsynchronizedFrontend : public SinkFrontend {
  public:
-  explicit UnsynchronizedFrontend(std::unique_ptr<SinkBackend>&& backend)
-      : SinkFrontend(std::move(backend)) {}
-
+  explicit UnsynchronizedFrontend(std::unique_ptr<SinkBackend>&& backend) : SinkFrontend(std::move(backend)) {}
  private:
   void dispatch(const std::optional<std::string>& formatted_message) override {
     // Just send the message to the backend.
@@ -1395,13 +1459,11 @@ class UnsynchronizedFrontend : public SinkFrontend {
 class SynchronizedFrontend : public SinkFrontend {
  public:
   explicit SynchronizedFrontend(std::unique_ptr<SinkBackend>&& backend) : SinkFrontend(std::move(backend)) {}
-
  private:
   void dispatch(const std::optional<std::string>& formatted_message) override {
     std::lock_guard guard(dispatch_mutex_);
     sendToBackend(formatted_message);
   }
-
   std::mutex dispatch_mutex_;
 };
 
@@ -1430,12 +1492,28 @@ class OstreamSink : public SinkBackend {
   std::ostream& stream_;
 };
 
+class FileSink : public SinkBackend {
+ public:
+  explicit FileSink(const std::string& filename)
+      : filename_(filename), fout_(filename) {}
+
+ private:
+  void dispatch(const std::optional<std::string>& formatted_message) override {
+    if (formatted_message) fout_ << *formatted_message;
+  }
+
+  std::string filename_;
+  std::ofstream fout_;
+};
+
 // ==============================================================================
 //  Date / time support.
 // ==============================================================================
 
 namespace time { // namespace lightning::time
 
+//! \brief Compute whether a year is a leap year.
+//!
 inline bool IsLeapYear(int year) {
   // According to the Gregorian calendar, a year is a leap year if the year is divisible by 4
   // UNLESS the year is also divisible by 100, in which case it is not a leap year
@@ -1477,6 +1555,10 @@ inline Month MonthIntToMonth(int month) {
   return months_[month - 1];
 }
 
+//! \brief  A class that represents a date and time, all the way down to the millisecond.
+//!
+//!         This class does ignore some of the very odd bits of timekeeping, like leap-seconds.
+//!
 class DateTime {
  public:
   DateTime() = default;
@@ -1529,8 +1611,8 @@ class DateTime {
     y_m_d_h_m_s_um_ = (y_m_d_h_m_s_um_ << 32) >> 32;
     y_m_d_h_m_s_um_ |=
         (static_cast<long>(year) << shift_year_)
-        | (static_cast<long>(month) << shift_month_)
-        | (static_cast<long>(day) << shift_day_);
+            | (static_cast<long>(month) << shift_month_)
+            | (static_cast<long>(day) << shift_day_);
   }
 
   void setHMSUS(int hour, int minute, int second, int microseconds) {
@@ -1557,6 +1639,7 @@ class DateTime {
     LL_REQUIRE(0 <= microseconds && microseconds < 1'000'000, "microseconds must be in the range [0, 1,000,000)");
   }
 
+  //! \brief  Storage for all the date-time data.
   //!         0 <= Y < 4096   => 12 bits  (shift =  52)
   //!         0 < m <= 12     => 7 bits   (shift = 45)
   //!         0 < d < 32      => 8 bits   (shift = 37)
@@ -1583,21 +1666,52 @@ class DateTime {
   static constexpr int month_mask_ = 0b1111111;
 };
 
-inline std::vector<std::variant<char /* Fmt */, std::string>> Segmentize(const std::string& fmt) {
+namespace detail { // namespace lightning::time::detail
+
+std::size_t spaceOf(char fmt_char) {
+  switch (fmt_char) {
+    case 'Y': return 4;  // Year (with century) as a decimal.
+    case 'y': return 2; // Year (without century) as a zero-padded decimal.
+    case 'd': return 2; // Day as a zero-padded decimal
+    case 'm': return 2; // Month as a zero-padded decimal.
+    case 'b': return 3; // Abbreviated month name.
+    case 'H': return 2; // Hour as a zero-padded decimal.
+    case 'I': return 2; // Hour (1-12) as a zero-padded decimal.
+    case 'M': return 2; // Minute as a zero-padded decimal.
+    case 'S': return 2; // Second as a zero-padded decimal.
+    case 'u': return 3; // Milliseconds as zero-padded decimal
+    case 'f': return 6; // Microseconds as zero-padded decimal
+    case 'p': return 2; // Local "AM" or "PM"
+    case '%': return 1; // Literal, escaped, '%'
+    default: {
+      LL_FAIL("unrecognized formatting specifier '" << fmt_char << "'");
+    }
+  }
+}
+
+} // namespace detail
+
+inline std::pair<std::vector<std::variant<char /* Fmt */, std::string>>, std::size_t> Segmentize(const std::string& fmt) {
   std::vector<std::variant<char, std::string>> segments;
-  std::string literal;
+  std::string literal{};
+  std::size_t space_requirement{}; // The size that the string needs, in characters.
   for (auto i = 0u; i < fmt.size(); ++i) {
     if (fmt[i] == '%') {
       LL_ASSERT(i + 1 < fmt.size(), "cannot end a formatting string with an un-escaped '%'");
       if (!literal.empty()) {
+        space_requirement += literal.size();
         segments.emplace_back(std::move(literal));
         literal = std::string{};
       }
+      // Add a formatting segment, calculate the size it will need.
       segments.emplace_back(fmt[++i]);
+      space_requirement += detail::spaceOf(fmt[i]);
     }
-    else literal.push_back(fmt[i]);
+    else {
+      literal.push_back(fmt[i]);
+    }
   }
-  return segments;
+  return {segments, space_requirement};
 }
 
 inline std::string Pad(int x, int pad) {
@@ -1609,11 +1723,13 @@ inline std::string Pad(int x, int pad) {
 //! \brief Macro to make the Format function shorter and easier to read.
 #define ADD_FMT(case_char, expr) case case_char : output += (expr); break
 
-inline std::string Format(const DateTime& dt, const std::string& fmt) {
+inline std::string Format(const DateTime& dt, std::vector<std::variant<char /* Fmt */, std::string>> segments, std::size_t space = 0) {
   // Using basically this format: https://www.programiz.com/python-programming/datetime/strftime
   std::string output;
-  auto segments = Segmentize(fmt);
-  for (auto seg : segments) {
+  if (0 < space) {
+    output.reserve(space);
+  }
+  for (auto& seg: segments) {
     if (seg.index() == 0) {
       switch (std::get<0>(seg)) {
         ADD_FMT('Y', std::to_string(dt.GetYear()));  // Year (with century) as a decimal.
@@ -1625,7 +1741,8 @@ inline std::string Format(const DateTime& dt, const std::string& fmt) {
         ADD_FMT('I', Pad((dt.GetHour() - 1) % 12 + 1, 2)); // Hour (1-12) as a zero-padded decimal.
         ADD_FMT('M', Pad(dt.GetMinute(), 2)); // Minute as a zero-padded decimal.
         ADD_FMT('S', Pad(dt.GetSecond(), 2)); // Second as a zero-padded decimal.
-        ADD_FMT('f', Pad(dt.GetMicrosecond(), 3)); // Microseconds as zero-padded decimal
+        ADD_FMT('u', Pad(dt.GetMillisecond(), 3)); // Milliseconds as zero-padded decimal (not standard formatting option).
+        ADD_FMT('f', Pad(dt.GetMicrosecond(), 6)); // Microseconds as zero-padded decimal
         ADD_FMT('p', (dt.GetHour() < 12 ? "AM" : "PM")); // Local "AM" or "PM"
         ADD_FMT('%', "%"); // Literal, escaped, '%'
         default: {
@@ -1641,10 +1758,14 @@ inline std::string Format(const DateTime& dt, const std::string& fmt) {
   return output;
 }
 
+inline std::string Format(const DateTime& dt, const std::string& fmt) {
+  auto [segments, space] = Segmentize(fmt);
+  return Format(dt, segments, space);
+}
+
 } // namespace time
 
 namespace attribute {
-
 
 class DateTimeAttribute final : public Attribute {
   friend class ImplBase;
@@ -1666,16 +1787,22 @@ class DateTimeFormatter final : public AttributeFormatter {
  private:
   class Impl : public AttributeFormatter::Impl {
    public:
-    Impl() : AttributeFormatter::Impl("DateTime") {}
+    Impl(const std::string& fmt_string) : AttributeFormatter::Impl("DateTime") {
+      std::tie(segments_, space_requirement_) = time::Segmentize(fmt_string);
+    }
     NO_DISCARD std::string FormatAttribute(const Attribute& attribute, const settings::SinkSettings&) const override {
       if (auto attr = attribute.GetAttribute<time::DateTime>()) {
-        return Format(*attr, "%Y-%m-%d %H:%M:%S:%f");
+        return Format(*attr, segments_);
       }
       return "";
     }
+   private:
+    std::vector<std::variant<char /* Fmt */, std::string>> segments_;
+    std::size_t space_requirement_;
   };
  public:
-  DateTimeFormatter() : AttributeFormatter(std::make_shared<Impl>()) {}
+  DateTimeFormatter(const std::string& fmt_string = "%Y-%m-%d %H:%M:%S:%f")
+  : AttributeFormatter(std::make_shared<Impl>(fmt_string)) {}
 };
 
 } // namespace attribute
@@ -1712,21 +1839,18 @@ class Global {
 
 //! \brief Log to the specified logger.
 #define LOG_TO(logger) \
-  if (auto record = logger.CreateRecord(); record.IsOpen()) \
-    ::lightning::RecordHandler(std::move(record))
+  if (auto handler = logger.OpenRecordHandler()) \
+    handler
 
 //! \brief Log to the global logger.
 #define LOG() LOG_TO(::lightning::Global::GetLogger())
 
 //! \brief Log with a severity attribute to the specified logger.
 #define LOG_SEV_TO(logger, severity) \
-  if (auto record = logger.CreateRecord({ \
-    ::lightning::attribute::SeverityAttribute(::lightning::Severity::severity) \
-  }); record.IsOpen()) \
-    ::lightning::RecordHandler(std::move(record))
+  if (auto handler = logger.OpenRecordHandler(::lightning::attribute::SeverityAttribute(::lightning::Severity::severity))) \
+    handler
 
 //! \brief Log with a severity attribute to the global logger.
 #define LOG_SEV(severity) LOG_SEV_TO(::lightning::Global::GetLogger(), severity)
-
 
 } // namespace lightning
