@@ -194,7 +194,11 @@ class DateTime {
     setHMSUS(hour, minute, second, microsecond);
   }
 
-  //! \brief Date time from system clock.
+  //! \brief  Date time from system clock.
+  //!
+  //!         Note: localtime (and its related variants, and gmtime) are relatively slow functions. Prefer using
+  //!         FastDateGenerator if you need to repeatedly generate DateTimes.
+  //!
   explicit DateTime(const std::chrono::time_point<std::chrono::system_clock>& time_point) {
     auto time = std::chrono::system_clock::now();
     // get number of milliseconds for the current second
@@ -229,6 +233,26 @@ class DateTime {
   //! \brief Check if the date is a non-null (empty) date.
   explicit operator bool() const { return y_m_d_h_m_s_um_ != 0; }
 
+  //! \brief Check if two DateTime are equal.
+  bool operator==(const DateTime& dt) const {
+    return y_m_d_h_m_s_um_ == dt.y_m_d_h_m_s_um_;
+  }
+
+  //! \brief Check if two DateTime are not equal.
+  bool operator!=(const DateTime& dt) const {
+    return y_m_d_h_m_s_um_ != dt.y_m_d_h_m_s_um_;
+  }
+
+  //! \brief Check if one DateTime is less than the other.
+  bool operator<(const DateTime& dt) const {
+    return y_m_d_h_m_s_um_ < dt.y_m_d_h_m_s_um_;
+  }
+
+  //! \brief  Get the current clock time, in the local timezone.
+  //!
+  //!         Note: localtime (and its related variants, and gmtime) are relatively slow functions. Prefer using
+  //!         FastDateGenerator if you need to repeatedly generate DateTimes.
+  //!
   static DateTime Now() {
     auto time = std::chrono::system_clock::now();
     return DateTime(time);
@@ -397,6 +421,7 @@ struct MessageInfo {
 //!
 struct Fmt {
   std::string attr_name{}; // The name of the attribute that should be string-ized.
+  std::size_t attr_name_hash{}; // The hash of the attribute name.
   std::string attr_fmt{}; // Any formatting that should be used for the attribute.
 };
 
@@ -423,6 +448,7 @@ inline std::vector<std::variant<std::string, Fmt>> Segmentize(const std::string&
         fmt.attr_name.push_back(c);
         c = fmt_string[i];
       }
+      fmt.attr_name_hash = std::hash<std::string>{}(fmt.attr_name);
       fmt_segments.emplace_back(std::move(fmt));
       --i;
     }
@@ -705,19 +731,19 @@ class BasicSeverityFilter {
 struct RecordAttributes {
   template <typename ...Attrs_t>
   explicit RecordAttributes(BasicAttributes basic_attributes = {}, Attrs_t&& ...attrs)
-      : basic_attributes_(basic_attributes) {
-    attributes_.reserve(sizeof...(attrs));
-    (attributes_.emplace_back(std::move(attrs)), ...);
+      : basic_attributes(basic_attributes) {
+    attributes.reserve(sizeof...(attrs));
+    (attributes.emplace_back(std::move(attrs)), ...);
   }
 
   //! \brief  The basic record attributes. These are stored as fields, which is much faster to
   //!         create and handle than pImpl attribute objects.
   //!
-  BasicAttributes basic_attributes_{};
+  BasicAttributes basic_attributes{};
 
   //! \brief  Additional attributes, beyond the basic attributes.
   //!
-  std::vector<Attribute> attributes_;
+  std::vector<Attribute> attributes;
 };
 
 namespace filter {
@@ -725,10 +751,10 @@ namespace filter {
 struct AttributeFilter {
   NO_DISCARD bool WillAccept(const RecordAttributes& attributes) const {
     // Check basic attributes.
-    if (!severity_filter_.Check(attributes.basic_attributes_.level)) {
+    if (!severity_filter_.Check(attributes.basic_attributes.level)) {
       return false;
     }
-    return willAccept(attributes.attributes_);
+    return willAccept(attributes.attributes);
   }
 
   //! \brief Check if a message whose only attribute is severity of the specified level will be accepted.
@@ -771,11 +797,16 @@ class Record {
   RefBundle& Bundle() {
     return bundle_;
   }
+
   NO_DISCARD const RefBundle& Bundle() const {
     return bundle_;
   }
 
   NO_DISCARD const RecordAttributes& Attributes() const {
+    return attributes_;
+  }
+
+  NO_DISCARD RecordAttributes& Attributes() {
     return attributes_;
   }
 
@@ -841,6 +872,152 @@ class RecordDispatcher {
   int uncaught_exceptions_{};
 };
 
+namespace formatting {
+
+//! \brief Base class for attribute formatters, objects that know how to serialize attribute representations to strings.
+class AttributeFormatter {
+ public:
+  virtual void AddToBuffer(const RecordAttributes& attributes, const FormattingSettings& settings, char* start, char* end) const = 0;
+  NO_DISCARD virtual unsigned RequiredSize(const RecordAttributes& attributes, const FormattingSettings& settings) const = 0;
+};
+
+class SeverityAttributeFormatter : public AttributeFormatter {
+ public:
+  void AddToBuffer(const RecordAttributes& attributes, const FormattingSettings& settings, char* start, char* end) const override {
+    if (attributes.basic_attributes.level) {
+      auto& str = getString(attributes.basic_attributes.level.value());
+      std::copy(str.begin(), str.end(), start);
+    }
+  }
+
+  NO_DISCARD unsigned RequiredSize(const RecordAttributes& attributes, const FormattingSettings& settings) const override {
+    return attributes.basic_attributes.level ? getString(attributes.basic_attributes.level.value()).size() : 0u;
+  }
+
+ private:
+  NO_DISCARD const std::string& getString(Severity severity) const {
+    switch (severity) {
+      case Severity::Debug: return debug_;
+      case Severity::Info: return info_;
+      case Severity::Warning: return warn_;
+      case Severity::Error: return error_;
+      case Severity::Fatal: return fatal_;
+      default: LL_FAIL("unrecognized severity attribute");
+    }
+  }
+
+  std::string debug_ = "Debug  ";
+  std::string info_ = "Info   ";
+  std::string warn_ = "Warning";
+  std::string error_ = "Error  ";
+  std::string fatal_ = "Fatal  ";
+};
+
+
+class RecordFormatter {
+ public:
+  //! \brief The default record formatter just prints the message.
+  RecordFormatter() {
+    AddMsgSegment();
+  }
+
+  std::string Format(const Record& record, const FormattingSettings& sink_settings) {
+    std::optional<unsigned> msg_size{};
+
+    unsigned required_size = 0;
+    for (auto i = 0u; i < formatters_.size(); ++i) {
+      auto& formatter = formatters_[i];
+      unsigned size = 0;
+      switch (formatter.index()) {
+        case 0: {
+          if (!msg_size) msg_size = record.Bundle().SizeRequired(sink_settings);
+          size = msg_size.value();
+          break;
+        }
+        case 1: {
+          size = std::get<1>(formatter)->RequiredSize(record.Attributes(), sink_settings);
+          break;
+        }
+        case 2: {
+          size = std::get<2>(formatter).size();
+          break;
+        }
+      }
+
+      required_size += size;
+      required_sizes_[i] = size;
+    }
+
+    // Account for message terminator.
+    required_size += sink_settings.message_terminator.size();
+
+    std::string buffer(required_size, ' ');
+    char* c = &buffer[0], * end = c + required_size;
+
+    for (auto i = 0u; i < formatters_.size(); ++i) {
+      auto& formatter = formatters_[i];
+      switch (formatter.index()) {
+        case 0: {
+          // TODO: Update for LogNewLine type alignment.
+          record.Bundle().FmtString(sink_settings, c, end);
+          break;
+        }
+        case 1: {
+          std::get<1>(formatter)->AddToBuffer(record.Attributes(), sink_settings, c, end);
+          break;
+        }
+        case 2: {
+          std::copy(std::get<2>(formatter).begin(), std::get<2>(formatter).end(), c);
+          break;
+        }
+      }
+
+      c += required_sizes_[i];
+    }
+    // Add terminator.
+    std::copy(sink_settings.message_terminator.begin(), sink_settings.message_terminator.end(), c);
+
+    // Return the formatted message.
+    return buffer;
+  }
+
+  RecordFormatter& AddMsgSegment() {
+    required_sizes_.emplace_back(0);
+    formatters_.emplace_back(MSG{});
+    return *this;
+  }
+
+  RecordFormatter& AddAttributeFormatter(std::shared_ptr<AttributeFormatter> formatter) {
+    required_sizes_.emplace_back(0);
+    formatters_.emplace_back(std::move(formatter));
+    return *this;
+  }
+
+  RecordFormatter& AddLiteralSegment(std::string literal) {
+    required_sizes_.emplace_back(literal.size());
+    formatters_.emplace_back(std::move(literal));
+    return *this;
+  }
+
+  RecordFormatter& ClearSegments() {
+    formatters_.clear();
+    required_sizes_.clear();
+    return *this;
+  }
+
+  NO_DISCARD std::size_t NumSegments() const {
+    return formatters_.size();
+  }
+
+ private:
+  //! \brief Placeholder representing the logging message text.
+  struct MSG {};
+  std::vector<std::variant<MSG, std::shared_ptr<AttributeFormatter>, std::string>> formatters_;
+  std::vector<unsigned> required_sizes_;
+};
+
+} // namespace formatting
+
 class Sink {
  public:
   virtual ~Sink() = default;
@@ -858,11 +1035,15 @@ class Sink {
   //! \brief Get the AttributeFilter for the sink.
   filter::AttributeFilter& GetFilter() { return filter_; }
 
+  //! \brief Get the record formatter.
+  formatting::RecordFormatter& GetFormatter() { return formatter_; }
  protected:
 
   FormattingSettings settings_;
 
   filter::AttributeFilter filter_;
+
+  formatting::RecordFormatter formatter_;
 };
 
 class Core {
@@ -906,6 +1087,10 @@ class Core {
   filter::AttributeFilter core_filter_;
 };
 
+// ==============================================================================
+//  Definitions of Record functions that have to go after Core is defined.
+// ==============================================================================
+
 bool Record::TryOpen(std::shared_ptr<Core> core) {
   if (core->WillAccept(attributes_)) {
     core_ = std::move(core);
@@ -925,44 +1110,13 @@ void Record::Dispatch() {
   }
 }
 
-//! \brief An object that formats a message, as a RefBundle, into a string.
-class SinkFormatter {
- public:
-  NO_DISCARD std::string Format(const FormattingSettings& settings, const Record& record) const {
-    // Calculate total size needed for the message buffer.
-    auto message_size = record.Bundle().SizeRequired(settings);;
-    unsigned total_size = message_size;
-    // Terminator size
-    total_size += settings.message_terminator.size();
-
-    // Allocate the message buffer.
-    std::string buffer(total_size, ' ');
-
-    auto c = &buffer[0];
-    c = record.Bundle().FmtString(settings, c, c + message_size);
-
-    // Add message terminator.
-    std::copy(settings.message_terminator.begin(), settings.message_terminator.end(), c);
-
-    return buffer;
-  }
-
-  struct Fmt {
-    std::size_t name_hash;
-    std::string fmt{};
-  };
-
-  NO_DISCARD unsigned TerminatorSize() const {
-    return terminator_.size();
-  }
-
-  std::vector<std::variant<std::string, Fmt>> formatters;
-
-  std::string terminator_ = "\n";
-};
+// ==============================================================================
+//  Logger base class.
+// ==============================================================================
 
 class Logger {
  public:
+  //! \brief Create a logger with a new core and a single sink.
   explicit Logger(const std::shared_ptr<Sink>& sink)
       : core_(std::make_shared<Core>()) {
     core_->AddSink(sink);
@@ -974,7 +1128,7 @@ class Logger {
       return {};
     }
     if (do_time_stamp_) {
-      basic_attributes.time_stamp = time::DateTime::Now();
+      basic_attributes.time_stamp = generator_.CurrentTime();
     }
     return RecordDispatcher(core_, basic_attributes, attrs...);
   }
@@ -983,6 +1137,16 @@ class Logger {
   RecordDispatcher Log(Severity severity, Attrs_t&& ...attrs) {
     return Log(BasicAttributes(severity), attrs...);
   }
+
+//  template <typename ...Data_t>
+//  void FmtLog(Severity severity, const char* fmt_string, const Data_t& ...data) {
+//    if (!core_) {
+//      return;
+//    }
+//
+//    // TODO: For real.
+//    Record record(severity);
+//  }
 
   bool WillAccept(Severity severity) {
     if (!core_) return false;
@@ -1001,6 +1165,9 @@ class Logger {
  private:
   bool do_time_stamp_ = true;
 
+  //! \brief A generator to create the DateTime timestamps for records.
+  time::FastDateGenerator generator_;
+
   //! \brief The logger's core.
   std::shared_ptr<Core> core_;
 
@@ -1014,11 +1181,9 @@ class FileSink : public Sink {
   explicit FileSink(const std::string& file) : fout_(file) {}
 
   void Dispatch(const Record& record) override {
-    auto message = formatter.Format(settings_, record);
+    auto message = formatter_.Format(record, settings_);
     fout_ << message;
   }
-
-  SinkFormatter formatter;
 
   std::ofstream fout_;
 };
@@ -1031,6 +1196,9 @@ class FileSink : public Sink {
   if ((logger).WillAccept(::lightning::Severity::severity)) \
     if (auto handler = (logger).Log(::lightning::Severity::severity)) \
       handler.GetRecord().Bundle()
+
+namespace formatting {
+
 
 namespace detail {
 
@@ -1109,9 +1277,60 @@ std::string Format(const FormattingSettings& settings, const char* fmt_string, c
 }
 
 template <typename ...Args_t>
+std::string FormatTo(char* buffer, const char* end, const FormattingSettings& settings, const char* fmt_string, const Args_t& ...args) {
+  LL_REQUIRE(buffer <= end, "cannot have the buffer start after the buffer end");
+  constexpr auto N = sizeof...(args);
+  const char* starts[N + 1], * ends[N + 1];
+
+  unsigned count_placed = 0, str_length = 0;
+  starts[0] = fmt_string;
+  auto c = fmt_string;
+  for (; *c != 0; ++c) {
+    if (*c == '%' && count_placed < N) {
+      ends[count_placed++] = std::min(c, end);
+      starts[count_placed] = std::min(c + 1, end);
+    }
+    else {
+      ++str_length;
+    }
+  }
+  ends[count_placed] = std::min(c, end);
+
+  auto segments = std::make_tuple(Segment<std::decay_t<std::remove_cvref_t<Args_t>>>(args)...);
+  unsigned format_size = detail::sizeRequired<0>(segments, count_placed, settings);
+  detail::formatHelper<0>(&buffer[0], starts, ends, count_placed, segments, settings, std::make_index_sequence<sizeof...(args)>{});
+  return buffer;
+}
+
+template <typename ...Args_t>
 std::string Format(const char* fmt_string, const Args_t& ...args) {
   return Format(FormattingSettings{}, fmt_string, args...);
 }
 
+
+
+// ==============================================================================
+//  Additional AttributeFormatters that require Format().
+// ==============================================================================
+
+class DateTimeAttributeFormatter : public AttributeFormatter {
+  // TODO: Allow for different formattings of the DateTime, via format string.
+ public:
+  void AddToBuffer(const RecordAttributes& attributes, const FormattingSettings& settings, char* start, char* end) const override {
+    if (attributes.basic_attributes.time_stamp) {
+      auto& dt = attributes.basic_attributes.time_stamp.value();
+      // TODO: Integer padding.
+      FormatTo(start, end, settings, "%-%-% %:%:%.%",
+               dt.GetYear(), dt.GetMonthInt(), dt.GetDay(),
+               dt.GetHour(), dt.GetMinute(), dt.GetSecond(), dt.GetMicrosecond());
+    }
+  }
+
+  NO_DISCARD unsigned RequiredSize(const RecordAttributes& attributes, const FormattingSettings& settings) const override {
+    return attributes.basic_attributes.time_stamp ? 26 : 0u;
+  }
+};
+
+} // namespace formatting
 
 } // namespace lightning

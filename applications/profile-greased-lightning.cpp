@@ -17,9 +17,6 @@ using std::chrono::high_resolution_clock;
 
 #define LOG_SEV(arg) std::cout
 
-
-
-
 std::string Format(long long x) {
   auto digits = static_cast<int>(std::log10(x));
   auto periods = digits / 3;
@@ -33,7 +30,7 @@ std::string Format(long long x) {
   for (auto i = 1; i <= periods; ++i) {
     stream << ",";
     p = static_cast<int>(std::pow(10, 3 * (periods - i)));
-    stream << std::setfill('0') << std::setw(3)<< x / p;
+    stream << std::setfill('0') << std::setw(3) << x / p;
     x %= p;
   }
 
@@ -41,17 +38,20 @@ std::string Format(long long x) {
 }
 
 std::string Format(const time::DateTime& x) {
-  return Format("[%-%-% %:%:%.%]", x.GetYear(), x.GetMonthInt(), x.GetDay(), x.GetHour(), x.GetMinute(), x.GetSecond(), x.GetMicrosecond());
+  return lightning::formatting::Format(
+      "[%-%-% %:%:%.%]", x.GetYear(), x.GetMonthInt(), x.GetDay(), x.GetHour(), x.GetMinute(), x.GetSecond(), x.GetMicrosecond());
 }
 
-void gl(int howmany);
+void bench_st(int howmany);
 void bench_nonacceptingseverity_sink(int howmany);
 void bench_nonacceptingseverity_core(int howmany);
 
 void bench_fastdatetimegen(int howmany);
 void bench_datetimenow(int howmany);
 void bench_systemclock(int howmany);
+void bench_recordformatting(int howmany);
 
+void bench_fmtdatetime(int howmany);
 
 int main() {
 
@@ -61,7 +61,7 @@ int main() {
   LOG_SEV(Info) << "**************************************************************\n";
   LOG_SEV(Info) << "Single threaded: " << Format(iters) << " messages\n";
   LOG_SEV(Info) << "**************************************************************\n";
-  gl(iters);
+  bench_st(iters);
   LOG_SEV(Info) << "\n";
 
   LOG_SEV(Info) << "**************************************************************\n";
@@ -85,7 +85,7 @@ int main() {
   LOG_SEV(Info) << "**************************************************************\n";
   LOG_SEV(Info) << "DateTime::Now\n";
   LOG_SEV(Info) << "**************************************************************\n";
-  bench_fastdatetimegen(iters);
+  bench_datetimenow(iters);
   LOG_SEV(Info) << "\n";
 
   LOG_SEV(Info) << "**************************************************************\n";
@@ -94,48 +94,47 @@ int main() {
   bench_systemclock(iters);
   LOG_SEV(Info) << "\n";
 
+  LOG_SEV(Info) << "**************************************************************\n";
+  LOG_SEV(Info) << "Record formatting\n";
+  LOG_SEV(Info) << "**************************************************************\n";
+  bench_recordformatting(iters);
+  LOG_SEV(Info) << "\n";
+
+
+  LOG_SEV(Info) << "**************************************************************\n";
+  LOG_SEV(Info) << "DateTime formatting time comparison\n";
+  LOG_SEV(Info) << "**************************************************************\n";
+  bench_fmtdatetime(iters);
+  LOG_SEV(Info) << "\n";
+
+
   return 0;
 }
 
-
-void gl(int howmany) {
+void bench_st(int howmany) {
   auto fs = std::make_shared<FileSink>("logs/greased_lightning_basic_st.log");
-
-  time::FastDateGenerator generator;
-
   Logger logger(fs);
-  logger.SetDoTimeStamp(true);
 
+  // TODO:  Better way to format, including possibly fmt style composition of formatting.
+  //        e.g. SetFormatting("[{}] [basic_st/backtrace-off] [{}] {}", DateTimeFormatter{}, SeverityAttributeFormatter{}, MSG{});
+  //
+  fs->GetFormatter()
+      .ClearSegments()
+      .AddLiteralSegment("[")
+      .AddAttributeFormatter(std::make_shared<formatting::DateTimeAttributeFormatter>())
+      .AddLiteralSegment("] [basic_st/backtrace-off] [")
+      .AddAttributeFormatter(std::make_shared<formatting::SeverityAttributeFormatter>())
+      .AddLiteralSegment("] ")
+      .AddMsgSegment();
 
   auto start = high_resolution_clock::now();
   for (auto i = 0; i < howmany; ++i) {
-    // auto x = generator.CurrentTime();
-    //auto str = Format("[%-%-% %:%:%.%]", x.GetYear(), x.GetMonthInt(), x.GetDay(), x.GetHour(), x.GetMinute(), x.GetSecond(), x.GetMicrosecond());
-
-    LOG_SEV_TO(logger, Info)
-      << "[{DateTime}]"
-      << " [basic_mt/backtrace-off] [{Severity}] " << "Hello logger: msg number " << i;
-
-    // auto time = std::chrono::system_clock::now();
-
-
-    // Format("%-%-%", x.GetYear(), x.GetMonthInt(), x.GetDay());
-
-//    // get number of milliseconds for the current second
-//    // (remainder after division into seconds)
-//    int ms = static_cast<int>((duration_cast<std::chrono::microseconds>(time.time_since_epoch()) % 1'000'000).count());
-//    // convert to std::time_t in order to convert to std::tm (broken time)
-//    std::time_t t = std::chrono::system_clock::to_time_t(time);
-//
-//    std::tm now; // = std::gmtime(&t);
-//    gmtime_r(&t, &now);
-
-    // Format("", now->tm_year + 1900, now->tm_mon + 1, now->tm_mday, now->tm_hour, now->tm_min, now->tm_sec, ms);
+    LOG_SEV_TO(logger, Info) << "Hello logger: msg number " << i;
   }
   auto delta_d = duration_cast<duration<double>>(high_resolution_clock::now() - start).count();
 
   // LOG_SEV(Info) << "Elapsed: " << delta_d << " secs " <<  Format(static_cast<int>(howmany / delta_d)) << "/sec";
-  std::cout << "Elapsed: " << delta_d << " secs " <<  Format(static_cast<int>(howmany / delta_d)) << "/sec\n";
+  std::cout << "Elapsed: " << delta_d << " secs " << Format(static_cast<int>(howmany / delta_d)) << "/sec\n";
 }
 
 void bench_nonacceptingseverity_sink(int howmany) {
@@ -149,7 +148,7 @@ void bench_nonacceptingseverity_sink(int howmany) {
   }
   auto delta_d = duration_cast<duration<double>>(high_resolution_clock::now() - start).count();
 
-  LOG_SEV(Info) << "Elapsed: " << delta_d << " secs " <<  Format(static_cast<int>(howmany / delta_d)) << "/sec\n";
+  LOG_SEV(Info) << "Elapsed: " << delta_d << " secs " << Format(static_cast<int>(howmany / delta_d)) << "/sec\n";
 }
 
 void bench_nonacceptingseverity_core(int howmany) {
@@ -168,7 +167,7 @@ void bench_nonacceptingseverity_core(int howmany) {
   auto delta_d = duration_cast<duration<double>>(high_resolution_clock::now() - start).count();
 
   // LOG_SEV(Info) << "Elapsed: " << delta_d << " secs " <<  Format(static_cast<int>(howmany / delta_d)) << "/sec";
-  std::cout << "Elapsed: " << delta_d << " secs " <<  Format(static_cast<int>(howmany / delta_d)) << "/sec\n";
+  std::cout << "Elapsed: " << delta_d << " secs " << Format(static_cast<int>(howmany / delta_d)) << "/sec\n";
 }
 
 void bench_fastdatetimegen(int howmany) {
@@ -181,7 +180,7 @@ void bench_fastdatetimegen(int howmany) {
   }
   auto delta_d = duration_cast<duration<double>>(high_resolution_clock::now() - start).count();
 
-  LOG_SEV(Info) << Format(dt) << " Elapsed: " << delta_d << " secs " <<  Format(static_cast<int>(howmany / delta_d)) << "/sec\n";
+  LOG_SEV(Info) << Format(dt) << " Elapsed: " << delta_d << " secs " << Format(static_cast<int>(howmany / delta_d)) << "/sec\n";
 }
 
 void bench_datetimenow(int howmany) {
@@ -193,7 +192,7 @@ void bench_datetimenow(int howmany) {
   }
   auto delta_d = duration_cast<duration<double>>(high_resolution_clock::now() - start).count();
 
-  LOG_SEV(Info) << Format(dt) << " Elapsed: " << delta_d << " secs " <<  Format(static_cast<int>(howmany / delta_d)) << "/sec\n";
+  LOG_SEV(Info) << Format(dt) << " Elapsed: " << delta_d << " secs " << Format(static_cast<int>(howmany / delta_d)) << "/sec\n";
 }
 
 void bench_systemclock(int howmany) {
@@ -203,5 +202,31 @@ void bench_systemclock(int howmany) {
   }
   auto delta_d = duration_cast<duration<double>>(high_resolution_clock::now() - start).count();
 
-  LOG_SEV(Info) << "Elapsed: " << delta_d << " secs " <<  Format(static_cast<int>(howmany / delta_d)) << "/sec\n";
+  LOG_SEV(Info) << "Elapsed: " << delta_d << " secs " << Format(static_cast<int>(howmany / delta_d)) << "/sec\n";
+}
+
+void bench_recordformatting(int howmany) {
+  auto dt = time::DateTime::Now();
+  time::FastDateGenerator generator;
+
+  formatting::RecordFormatter record_formatter;
+  record_formatter.ClearSegments();
+  record_formatter.AddLiteralSegment("[");
+  record_formatter.AddAttributeFormatter(std::make_shared<formatting::SeverityAttributeFormatter>());
+  record_formatter.AddLiteralSegment("] ");
+  record_formatter.AddMsgSegment();
+
+  Record record;
+  record.Attributes().basic_attributes.level = Severity::Info;
+  record.Bundle() << "Hello, world!";
+
+  FormattingSettings sink_settings;
+
+  auto start = high_resolution_clock::now();
+  for (auto i = 0; i < howmany; ++i) {
+    auto message = record_formatter.Format(record, sink_settings);
+  }
+  auto delta_d = duration_cast<duration<double>>(high_resolution_clock::now() - start).count();
+
+  LOG_SEV(Info) << Format(dt) << " Elapsed: " << delta_d << " secs " << Format(static_cast<int>(howmany / delta_d)) << "/sec\n";
 }
