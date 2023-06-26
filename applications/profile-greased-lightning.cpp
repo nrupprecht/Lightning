@@ -57,15 +57,18 @@ void bench_mt(int howmany, std::size_t thread_count);
 int main() {
   // Set up global logger.
   auto sink = std::make_shared<OstreamSink>();
-  Global::GetCore()->AddSink(sink);
-
-  sink->SetFormatter(std::unique_ptr<formatting::BaseMessageFormatter>(
-      new formatting::MsgFormatter("[{}] [{}] {}", formatting::SeverityAttributeFormatter{},
-                                   formatting::DateTimeAttributeFormatter{},
-                                   formatting::MSG)));
+  Global::GetCore()->AddSink(sink)
+      .SetAllFormatters(formatting::MakeMsgFormatter("[{}] [{}] {}", formatting::SeverityAttributeFormatter{},
+                                                     formatting::DateTimeAttributeFormatter{},
+                                                     formatting::MSG));
 
   auto iters = 250'000;
   auto num_threads = 4;
+
+  LOG_SEV(Info) << AnsiColorSegment(formatting::AnsiForegroundColor::Yellow) << "Starting" << AnsiResetSegment() << " now.";
+  LOG_SEV(Info) << AnsiColorObject("Starting", formatting::AnsiForegroundColor::Yellow)
+                << " now, again, "
+                << AnsiColorObject(12, formatting::AnsiForegroundColor::Blue) << "!";
 
   LOG_SEV(Info) << "**************************************************************";
   LOG_SEV(Info) << "Single threaded: " << Format(iters) << " messages";
@@ -131,7 +134,7 @@ int main() {
 }
 
 void bench_st(int howmany) {
-  {
+  { // Benchmark using RecordFormatter
     auto fs = std::make_shared<FileSink>("logs/greased_lightning_basic_st-1.log");
     Logger logger(fs);
     auto formatter = std::make_unique<formatting::RecordFormatter>();
@@ -152,14 +155,13 @@ void bench_st(int howmany) {
     LOG_SEV(Info) << "RecordFormatter: Elapsed: " << delta_d << " secs " << Format(static_cast<int>(howmany / delta_d)) << "/sec";
   }
 
-  {
+  { // Benchmark using MsgFormatter
     auto fs = std::make_shared<FileSink>("logs/greased_lightning_basic_st-2.log");
     Logger logger(fs);
-    fs->SetFormatter(std::unique_ptr<formatting::BaseMessageFormatter>(
-        new formatting::MsgFormatter("[{}] [basic_st/backtrace-off] [{}] {}",
-                                     formatting::DateTimeAttributeFormatter{},
-                                     formatting::SeverityAttributeFormatter{},
-                                     formatting::MSG)));
+    fs->SetFormatter(MakeMsgFormatter("[{}] [basic_st/backtrace-off] [{}] {}",
+                                      formatting::DateTimeAttributeFormatter{},
+                                      formatting::SeverityAttributeFormatter{},
+                                      formatting::MSG));
 
     auto start = high_resolution_clock::now();
     for (auto i = 0; i < howmany; ++i) {
@@ -171,15 +173,19 @@ void bench_st(int howmany) {
 }
 
 void bench_st_types(int howmany) {
-  auto fs = std::make_shared<FileSink>("logs/greased_lightning_basic_st-types.log");
-  Logger logger(fs);
-  fs->SetFormatter(formatting::MakeMsgFormatter("[{}] [basic_st/backtrace-off] [{}] {}",
-                                                formatting::DateTimeAttributeFormatter{},
-                                                formatting::SeverityAttributeFormatter{},
-                                                formatting::MSG));
+  auto make_logger = []() {
+    auto fs = std::make_shared<FileSink>("logs/greased_lightning_basic_st-types.log");
+    Logger logger(fs);
+    fs->SetFormatter(formatting::MakeMsgFormatter("[{}] [basic_st/backtrace-off] [{}] {}",
+                                                  formatting::DateTimeAttributeFormatter{},
+                                                  formatting::SeverityAttributeFormatter{},
+                                                  formatting::MSG));
+    return logger;
+  };
 
   // CString
   {
+    auto logger = make_logger();
     auto start = high_resolution_clock::now();
     const char message[] = "Message";
     for (auto i = 0; i < howmany; ++i) {
@@ -191,6 +197,7 @@ void bench_st_types(int howmany) {
 
   // Long CString
   {
+    auto logger = make_logger();
     auto start = high_resolution_clock::now();
     for (auto i = 0; i < howmany; ++i) {
       LOG_SEV_TO(logger, Info) << "Richard of york may have fought battle in vain, but do you know how many other famous characters have fought battle in "
@@ -202,6 +209,7 @@ void bench_st_types(int howmany) {
 
   // String
   {
+    auto logger = make_logger();
     auto start = high_resolution_clock::now();
     std::string message = "Message";
     for (auto i = 0; i < howmany; ++i) {
@@ -213,17 +221,40 @@ void bench_st_types(int howmany) {
 
   // Integer
   {
+    auto logger = make_logger();
     auto start = high_resolution_clock::now();
-    int x = 32567734;
     for (auto i = 0; i < howmany; ++i) {
-      LOG_SEV_TO(logger, Info) << "Hello logger: writing data " << x;
+      LOG_SEV_TO(logger, Info) << "Hello logger: writing data " << i;
     }
     auto delta_d = duration_cast<duration<double>>(high_resolution_clock::now() - start).count();
     LOG_SEV(Info) << "Integer:    Elapsed: " << delta_d << " secs " << Format(static_cast<int>(howmany / delta_d)) << "/sec";
   }
 
+  // Colored Integer
+  {
+    auto logger = make_logger();
+    auto start = high_resolution_clock::now();
+    for (auto i = 0; i < howmany; ++i) {
+      LOG_SEV_TO(logger, Info) << "Hello logger: writing data " << AnsiColorObject(i, formatting::AnsiForegroundColor::Blue);
+    }
+    auto delta_d = duration_cast<duration<double>>(high_resolution_clock::now() - start).count();
+    LOG_SEV(Info) << "Colored Integer:    Elapsed: " << delta_d << " secs " << Format(static_cast<int>(howmany / delta_d)) << "/sec";
+  }
+
+  // Bool
+  {
+    auto logger = make_logger();
+    auto start = high_resolution_clock::now();
+    for (auto i = 0; i < howmany; ++i) {
+      LOG_SEV_TO(logger, Info) << "Hello logger: writing data " << (i % 2 == 0);
+    }
+    auto delta_d = duration_cast<duration<double>>(high_resolution_clock::now() - start).count();
+    LOG_SEV(Info) << "Bool:    Elapsed: " << delta_d << " secs " << Format(static_cast<int>(howmany / delta_d)) << "/sec";
+  }
+
   // Float
   {
+    auto logger = make_logger();
     auto start = high_resolution_clock::now();
     double x = 1.24525;
     for (auto i = 0; i < howmany; ++i) {
@@ -235,6 +266,7 @@ void bench_st_types(int howmany) {
 
   // Combo
   {
+    auto logger = make_logger();
     auto start = high_resolution_clock::now();
     for (auto i = 0; i < howmany; ++i) {
       LOG_SEV_TO(logger, Info) << "Hello logger: writing data to "

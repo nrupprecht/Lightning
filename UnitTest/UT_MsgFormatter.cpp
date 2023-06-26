@@ -33,4 +33,4 @@ TEST(MsgFormatter, Basic) {
   EXPECT_EQ(formatter.Format(record, sink_settings), "[\x1B[32mInfo   \x1B[0m] [2023-12-31 12:49:30.100000] Hello world!\n");
 }
 
-}
+} // namespace Testing

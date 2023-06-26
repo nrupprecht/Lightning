@@ -413,6 +413,8 @@ namespace formatting { // namespace lightning::formatting
 struct MessageInfo {
   //! \brief  The indentation of the start of the message within the formatted record.
   unsigned message_indentation = 0;
+  //! \brief The length of the message segment so far.
+  unsigned message_length = 0;
 };
 
 //! \brief Structure that represents part of a message coming from an attribute.
@@ -507,9 +509,29 @@ inline std::string SetAnsiRGBColorFmt(Ansi256Color r, Ansi256Color g, Ansi256Col
 //! \brief Generate a string that will reset the settings of a virtual terminal
 inline std::string AnsiReset() { return SetAnsiColorFmt(AnsiForegroundColor::Default, AnsiBackgroundColor::Default); }
 
+//! \brief Count the number of characters in a range that are not part of an Ansi escape sequence.
+inline std::size_t CountNonAnsiSequenceCharacters(std::string::iterator begin, std::string::iterator end) {
+  std::size_t count = 0;
+  bool in_escape = false;
+  for (auto it = begin; it != end; ++it) {
+    if (*it == '\x1b') {
+      in_escape = true;
+    }
+    if (!in_escape) {
+      ++count;
+    }
+    if (*it == 'm') {
+      in_escape = false;
+    }
+  }
+  return count;
+}
+
 } // namespace formatting
 
 
+//! \brief  Structure that specifies how a message can be formatted, and what are the capabilities of the sink that
+//!         the formatted message will be dispatched to.
 struct FormattingSettings {
   bool has_virtual_terminal_processing = false;
 
@@ -537,7 +559,7 @@ struct BaseSegment {
 struct AnsiColorSegment : public BaseSegment {
   explicit AnsiColorSegment(std::optional<formatting::AnsiForegroundColor> foreground,
                             std::optional<formatting::AnsiBackgroundColor> background = {})
-      : foreground_(foreground), background_(background), fmt_string_(SetAnsiColorFmt(foreground, background)) {}
+      : fmt_string_(SetAnsiColorFmt(foreground, background)) {}
 
   char* AddToBuffer(const FormattingSettings& settings, char* start, [[maybe_unused]] char* end) const override {
     if (settings.has_virtual_terminal_processing) {
@@ -556,10 +578,6 @@ struct AnsiColorSegment : public BaseSegment {
   }
 
  private:
-
-  std::optional<formatting::AnsiForegroundColor> foreground_;
-  std::optional<formatting::AnsiBackgroundColor> background_;
-
   std::string fmt_string_;
 };
 
@@ -572,7 +590,7 @@ struct AnsiResetSegment : public AnsiColorSegment {
 //!         is no reason to explicitly create more.
 const inline AnsiResetSegment AnsiResetSeg{};
 
-//! \brief Base template for segments.
+//! \brief Base template for formatting Segment<T>'s.
 template <typename T, typename Enable = void>
 struct Segment;
 
@@ -602,7 +620,8 @@ struct Segment<std::string> : public BaseSegment {
   }
 
   NO_DISCARD std::unique_ptr<BaseSegment> Copy() const override {
-    return std::make_unique<Segment<std::string>>(*this);
+    return std::make_unique<Segment < std::string>>
+    (*this);
   }
 
  private:
@@ -629,7 +648,8 @@ struct Segment<char*> : public BaseSegment {
   }
 
   NO_DISCARD std::unique_ptr<BaseSegment> Copy() const override {
-    return std::make_unique<Segment<char*>>(*this);
+    return std::make_unique<Segment < char * >>
+    (*this);
   }
 
  private:
@@ -664,7 +684,8 @@ struct Segment<bool> : public BaseSegment {
   }
 
   NO_DISCARD std::unique_ptr<BaseSegment> Copy() const override {
-    return std::make_unique<Segment<bool>>(*this);
+    return std::make_unique<Segment < bool>>
+    (*this);
   }
 
  private:
@@ -692,7 +713,8 @@ struct Segment<Floating_t, std::enable_if_t<std::is_floating_point_v<Floating_t>
   }
 
   NO_DISCARD std::unique_ptr<BaseSegment> Copy() const override {
-    return std::make_unique<Segment<Floating_t>>(*this);
+    return std::make_unique<Segment < Floating_t>>
+    (*this);
   }
 
  private:
@@ -719,7 +741,8 @@ struct Segment<Integral_t, std::enable_if_t<std::is_integral_v<Integral_t>>> : p
   }
 
   NO_DISCARD std::unique_ptr<BaseSegment> Copy() const override {
-    return std::make_unique<Segment<Integral_t>>(*this);
+    return std::make_unique<Segment < Integral_t>>
+    (*this);
   }
 
  private:
@@ -735,6 +758,38 @@ struct Segment<Integral_t, std::enable_if_t<std::is_integral_v<Integral_t>>> : p
   unsigned size_required_{};
 };
 
+//! \brief Formatting segment that colors a single piece of data.
+template <typename T>
+struct AnsiColorObject : public BaseSegment {
+  explicit AnsiColorObject(const T& data, std::optional<formatting::AnsiForegroundColor> foreground,
+                           std::optional<formatting::AnsiBackgroundColor> background = {})
+      : fmt_string_(SetAnsiColorFmt(foreground, background)), segment_(data, nullptr, nullptr) {}
+
+  char* AddToBuffer(const FormattingSettings& settings, char* start, [[maybe_unused]] char* end) const override {
+    if (settings.has_virtual_terminal_processing) {
+      std::copy(fmt_string_.begin(), fmt_string_.end(), start);
+      start += fmt_string_.size();
+    }
+    start = segment_.AddToBuffer(settings, start, end);
+    start = AnsiResetSeg.AddToBuffer(settings, start, end);
+    return start;
+  }
+
+  NO_DISCARD unsigned SizeRequired(const FormattingSettings& settings) const override {
+    auto required_size = settings.has_virtual_terminal_processing ? fmt_string_.size() : 0;
+    required_size += segment_.SizeRequired(settings);
+    required_size += AnsiResetSeg.SizeRequired(settings);
+    return required_size;
+  }
+
+  NO_DISCARD std::unique_ptr<BaseSegment> Copy() const override {
+    return std::make_unique<AnsiColorObject<T>>(*this);
+  }
+
+ private:
+  std::string fmt_string_;
+  Segment<std::decay_t<std::remove_cvref_t<T>>> segment_;
+};
 
 //! \brief An object that has a bundle of data, to be formatted.
 class RefBundle {
@@ -780,15 +835,16 @@ template <typename T>
 RefBundle& RefBundle::operator<<(T&& obj) {
   using decay_t = std::decay_t<std::remove_cvref_t<T>>;
 
-  if constexpr (has_logstream_formatter_v<T>) {
+  if constexpr (has_logstream_formatter_v < T >) {
     format_logstream(obj, *this);
   }
   else if constexpr (std::is_base_of_v<BaseSegment, T>) {
     AddSegment(obj.Copy());
   }
-  else if constexpr (has_segment_formatter_v<T>) {
+  else if constexpr (has_segment_formatter_v < T >) {
     // Add a formatting segment.
-    AddSegment(std::make_unique<Segment<decay_t>>(obj, nullptr, nullptr));
+    AddSegment(std::make_unique<Segment < decay_t>>
+    (obj, nullptr, nullptr));
   }
   else if constexpr (typetraits::has_to_string_v<T>) {
     operator<<(to_string(obj));
@@ -804,8 +860,6 @@ RefBundle& RefBundle::operator<<(T&& obj) {
 
   return *this;
 }
-
-
 
 class Attribute {
  protected:
@@ -1087,6 +1141,7 @@ class BaseMessageFormatter {
  public:
   virtual ~BaseMessageFormatter() = default;
   virtual std::string Format(const Record& record, const FormattingSettings& sink_settings) = 0;
+  NO_DISCARD virtual std::unique_ptr<BaseMessageFormatter> Copy() const = 0;
 };
 
 struct MSG_t {};
@@ -1143,6 +1198,10 @@ class MsgFormatter : public BaseMessageFormatter {
     }
 
     return buffer;
+  }
+
+  NO_DISCARD std::unique_ptr<BaseMessageFormatter> Copy() const override {
+    return std::unique_ptr<BaseMessageFormatter>(new MsgFormatter(*this));
   }
 
  private:
@@ -1267,6 +1326,10 @@ class RecordFormatter : public BaseMessageFormatter {
     return buffer;
   }
 
+  NO_DISCARD std::unique_ptr<BaseMessageFormatter> Copy() const override {
+    return std::unique_ptr<BaseMessageFormatter>(new RecordFormatter(*this));
+  }
+
   RecordFormatter& AddMsgSegment() {
     required_sizes_.emplace_back(0);
     formatters_.emplace_back(MSG);
@@ -1366,8 +1429,17 @@ class Core {
     }
   }
 
+  //! \brief Add a sink to the core.
   Core& AddSink(std::shared_ptr<Sink> sink) {
     sinks_.emplace_back(std::move(sink));
+    return *this;
+  }
+
+  //! \brief Set the formatter for every sink the core points at.
+  Core& SetAllFormatters(const std::unique_ptr<formatting::BaseMessageFormatter>& formatter) {
+    for (auto& sink: sinks_) {
+      sink->SetFormatter(formatter->Copy());
+    }
     return *this;
   }
 
@@ -1375,9 +1447,10 @@ class Core {
   filter::AttributeFilter& GetFilter() { return core_filter_; }
 
  private:
-
+  //! \brief All sinks the core will dispatch messages to.
   std::vector<std::shared_ptr<Sink>> sinks_;
 
+  //! \brief Core-level attribute filters.
   filter::AttributeFilter core_filter_;
 };
 
@@ -1470,6 +1543,9 @@ class Logger {
 
   //! \brief Keep track of when the logger was created.
   std::chrono::time_point<std::chrono::system_clock> start_time_point_;
+
+  //! \brief Attributes associated with a specific logger.
+  std::vector<Attribute> logger_attributes_;
 };
 
 //! \brief A simple sink that writes to a file via an ofstream.
