@@ -13,6 +13,8 @@ namespace Testing {
 
 TEST(MessageStringFormatter, Basic) {
   formatting::RecordFormatter record_formatter;
+  EXPECT_EQ(record_formatter.NumSegments(), 1);
+  record_formatter.ClearSegments();
   EXPECT_EQ(record_formatter.NumSegments(), 0);
 
   Record record;
@@ -37,8 +39,17 @@ TEST(MessageStringFormatter, Basic) {
   record_formatter.AddLiteralSegment("] ");
   record_formatter.AddMsgSegment();
   EXPECT_EQ(record_formatter.NumSegments(), 4);
-  {
-    auto result = record_formatter.Format(record, {});
+
+  { // With colors
+    FormattingSettings settings;
+    settings.has_virtual_terminal_processing = true;
+    auto result = record_formatter.Format(record, settings);
+    EXPECT_EQ(result, "[\x1B[32mInfo   \x1B[0m] Hello, world!\n");
+  }
+  { // No colors
+    FormattingSettings settings;
+    settings.has_virtual_terminal_processing = false;
+    auto result = record_formatter.Format(record, settings);
     EXPECT_EQ(result, "[Info   ] Hello, world!\n");
   }
 }
