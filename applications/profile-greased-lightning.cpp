@@ -170,6 +170,21 @@ void bench_st(int howmany) {
     auto delta_d = duration_cast<duration<double>>(high_resolution_clock::now() - start).count();
     LOG_SEV(Info) << "MsgFormatter:    Elapsed: " << delta_d << " secs " << Format(static_cast<int>(howmany / delta_d)) << "/sec";
   }
+
+  { // Benchmark using MsgFormatter, not really formatting.
+    auto fs = std::make_shared<FileSink>("logs/greased_lightning_basic_st-2.log");
+    Logger logger(fs);
+    fs->SetFormatter(MakeMsgFormatter("[2023-6-26 20:33:50.539002 ] [basic_st/backtrace-off] [Info   ] Hello logger: msg number {}",
+                                      formatting::MSG));
+
+    auto start = high_resolution_clock::now();
+    for (auto i = 0; i < howmany; ++i) {
+      LOG_SEV_TO(logger, Info) << i;
+    }
+    auto delta_d = duration_cast<duration<double>>(high_resolution_clock::now() - start).count();
+    LOG_SEV(Info) << "MsgFormatter, not formatting:    Elapsed: " << delta_d << " secs " << Format(static_cast<int>(howmany / delta_d)) << "/sec";
+  }
+
 }
 
 void bench_st_types(int howmany) {
@@ -422,6 +437,53 @@ void bench_fmtdatetime(int howmany) {
     }
     auto delta_d = duration_cast<duration<double>>(high_resolution_clock::now() - start).count();
     LOG_SEV(Info) << "Lightning no-pad: Elapsed: " << delta_d << " secs " << Format(static_cast<int>(howmany / delta_d)) << "/sec";
+  }
+
+  {
+    std::string up_to_31[] = {
+        "00", "01", "02", "03", "04", "05", "06", "07", "08", "09",
+        "10", "11", "12", "13", "14", "15", "16", "17", "18", "19",
+        "20", "21", "22", "23", "24", "25", "26", "27", "28", "29",
+        "30", "31"
+    };
+
+    FormattingSettings settings;
+    auto start = high_resolution_clock::now();
+    std::string buffer = "YYYY-mm-dd hh:mm:ss.uuuuuu";
+    char *start_c = &buffer[0], *end_c = start_c + buffer.size();
+    // auto year = 2020, month = 9, day = 22, hour = 12, minute = 1, second = 45, microseconds = 32'674;
+    for (auto i = 0; i < howmany; ++i) {
+      char* c = &buffer[0];
+
+      auto year = x.GetYear(), month = x.GetMonthInt(), day = x.GetDay();
+      auto hour = x.GetHour(), minute = x.GetMinute(), second = x.GetSecond(), microseconds = x.GetMicrosecond();
+
+      formatting::FormatDateTo(c, c + buffer.size(), x);
+
+//      std::to_chars(c, end_c, year); // Year
+//      std::copy(up_to_31[month].begin(), up_to_31[month].end(), start_c + 5);
+//      std::copy(up_to_31[day].begin(), up_to_31[day].end(), start_c + 8);
+//      // Hour.
+//      int nd = 0;
+//      std::copy(up_to_31[hour].begin(), up_to_31[hour].end(), start_c + 11);
+//      nd = formatting::NumberOfDigits(minute, 2);
+//      std::fill_n(c + 14, 2 - nd, '0');
+//      std::to_chars(c + 14 + 2 - nd, end_c, minute); // Minute.
+//
+//      nd = formatting::NumberOfDigits(second, 2);
+//      std::fill_n(c + 17, 2 - nd, '0');
+//      std::to_chars(c + 17 + 2 - nd, end_c, second); // second.
+//
+//      nd = formatting::NumberOfDigits(microseconds, 2);
+//      std::fill_n(c + 20, 6 - nd, '0');
+//      std::to_chars(c + 20 +  6 - nd, end_c, microseconds); // Minute.
+    }
+    LOG_SEV(Info) << "Message: " << buffer;
+    char* c = &buffer[0];
+    formatting::FormatDateTo(c, c + buffer.size(), x);
+    LOG_SEV(Info) << "FormatDateto: " << buffer;
+    auto delta_d = duration_cast<duration<double>>(high_resolution_clock::now() - start).count();
+    LOG_SEV(Info) << "Lightning SPECIAL: Elapsed: " << delta_d << " secs " << Format(static_cast<int>(howmany / delta_d)) << "/sec";
   }
 }
 

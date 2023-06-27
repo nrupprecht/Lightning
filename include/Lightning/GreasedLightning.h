@@ -410,6 +410,76 @@ class FastDateGenerator {
 
 namespace formatting { // namespace lightning::formatting
 
+const unsigned long long powers_of_ten[] = {
+    1,
+    10,
+    100,
+    1'000,
+    10'000,
+    100'000,
+    1'000'000,
+    10'000'000,
+    100'000'000,
+    1'000'000'000,
+    10'000'000'000,
+    100'000'000'000,
+    1'000'000'000'000,
+    10'000'000'000'000,
+    100'000'000'000'000,
+    1'000'000'000'000'000,
+    10'000'000'000'000'000,
+    100'000'000'000'000'000,
+    1'000'000'000'000'000'000,
+    10'000'000'000'000'000'000ull,
+};
+
+inline int NumberOfDigits(unsigned long long x, int upper = 19) {
+  LL_REQUIRE(0 < upper && upper <= 19, "upper must be in [1, 19], not " << upper);
+  if (x == 0) return 1;
+  auto it = std::upper_bound(&powers_of_ten[0], &powers_of_ten[upper], x);
+  return static_cast<int>(std::distance(&powers_of_ten[0], it));
+}
+
+inline char* CopyPaddedInt(char* start, char* end, unsigned long long x, int width, char fill_char = '0', int max_power = 19) {
+  auto nd = NumberOfDigits(x, max_power);
+  auto remainder = width - nd;
+  if (0 < remainder) {
+    std::fill_n(start, remainder, fill_char);
+  }
+  return std::to_chars(start + remainder, end, x).ptr;
+}
+
+char* FormatDateTo(char* c, char* end_c, const time::DateTime& dt) {
+  static std::string up_to_31[] = {
+      "00", "01", "02", "03", "04", "05", "06", "07", "08", "09",
+      "10", "11", "12", "13", "14", "15", "16", "17", "18", "19",
+      "20", "21", "22", "23", "24", "25", "26", "27", "28", "29",
+      "30", "31"
+  };
+
+  c = formatting::CopyPaddedInt(c, end_c, dt.GetYear(), 4, '0', 4);
+  *c = '-';
+  // c = formatting::CopyPaddedInt(c + 1, end_c, dt.GetMonthInt(), 2);
+  std::copy(up_to_31[dt.GetMonthInt()].begin(), up_to_31[dt.GetMonthInt()].end(), ++c);
+  c += 2;
+  *c = '-';
+  //c = formatting::CopyPaddedInt(c + 1, end_c, dt.GetDay(), 2);
+  std::copy(up_to_31[dt.GetDay()].begin(), up_to_31[dt.GetDay()].end(), ++c);
+  c += 2;
+  *c = ' ';
+  //c = formatting::CopyPaddedInt(c + 1, end_c, dt.GetHour(), 2);
+  std::copy(up_to_31[dt.GetHour()].begin(), up_to_31[dt.GetHour()].end(), ++c);
+  c += 2;
+  *c = ':';
+  c = formatting::CopyPaddedInt(c + 1, end_c, dt.GetMinute(), 2, '0', 4);
+  *c = ':';
+  c = formatting::CopyPaddedInt(c + 1, end_c, dt.GetSecond(), 2, '0', 4);
+  *c = '.';
+  c = formatting::CopyPaddedInt(c + 1, end_c, dt.GetMicrosecond(), 6, '0', 6);
+  return c;
+}
+
+
 struct MessageInfo {
   //! \brief  The indentation of the start of the message within the formatted record.
   unsigned message_indentation = 0;
@@ -648,8 +718,7 @@ struct Segment<char*> : public BaseSegment {
   }
 
   NO_DISCARD std::unique_ptr<BaseSegment> Copy() const override {
-    return std::make_unique<Segment < char * >>
-    (*this);
+    return std::make_unique<Segment<char*>>(*this);
   }
 
  private:
@@ -1195,6 +1264,7 @@ class MsgFormatter : public BaseMessageFormatter {
       c = format<0>(c, record, sink_settings);
       // Add the terminator.
       std::copy(sink_settings.message_terminator.begin(), sink_settings.message_terminator.end(), c);
+      c += sink_settings.message_terminator.size();
     }
 
     return buffer;
@@ -1737,15 +1807,12 @@ std::string Format(const char* fmt_string, const Args_t& ...args) {
 // ==============================================================================
 
 class DateTimeAttributeFormatter final : public AttributeFormatter {
-  // TODO: Allow for different formattings of the DateTime, via format string.
+  // TODO: Allow for different formatting of the DateTime, via format string.
  public:
   void AddToBuffer(const RecordAttributes& attributes, const FormattingSettings& settings, char* start, char* end) const override {
     if (attributes.basic_attributes.time_stamp) {
       auto& dt = attributes.basic_attributes.time_stamp.value();
-      // TODO: Integer padding.
-      FormatTo(start, end, settings, "%-%-% %:%:%.%",
-               dt.GetYear(), dt.GetMonthInt(), dt.GetDay(),
-               dt.GetHour(), dt.GetMinute(), dt.GetSecond(), dt.GetMicrosecond());
+      formatting::FormatDateTo(start, end, dt);
     }
   }
 
