@@ -410,6 +410,7 @@ class FastDateGenerator {
 
 namespace formatting { // namespace lightning::formatting
 
+namespace detail {
 const unsigned long long powers_of_ten[] = {
     1,
     10,
@@ -432,12 +433,27 @@ const unsigned long long powers_of_ten[] = {
     1'000'000'000'000'000'000,
     10'000'000'000'000'000'000ull,
 };
+} // namespace detail
 
-inline int NumberOfDigits(unsigned long long x, int upper = 19) {
-  LL_REQUIRE(0 < upper && upper <= 19, "upper must be in [1, 19], not " << upper);
+//! \brief Returns how many digits the decimal representation of a ull will have.
+//!        The optional bound "upper" means that the number has at most "upper" digits.
+inline int NumberOfDigitsULL(unsigned long long x, int upper = 19) {
+  using namespace detail;
+  upper = std::max(0, std::min(upper, 19));
   if (x == 0) return 1;
   auto it = std::upper_bound(&powers_of_ten[0], &powers_of_ten[upper], x);
   return static_cast<int>(std::distance(&powers_of_ten[0], it));
+}
+
+template <typename Integral_t,
+    typename = std::enable_if_t<std::is_integral_v<Integral_t> && !std::is_same_v<Integral_t, bool>>>
+inline int NumberOfDigits(Integral_t x, int upper = 19) {
+  if constexpr (!std::is_signed_v<Integral_t>) {
+    return NumberOfDigitsULL(x, upper);
+  }
+  else {
+    return NumberOfDigitsULL(std::abs(x), upper);
+  }
 }
 
 inline char* CopyPaddedInt(char* start, char* end, unsigned long long x, int width, char fill_char = '0', int max_power = 19) {
@@ -449,36 +465,55 @@ inline char* CopyPaddedInt(char* start, char* end, unsigned long long x, int wid
   return std::to_chars(start + remainder, end, x).ptr;
 }
 
+//! \brief Format a date to a buffer.
 char* FormatDateTo(char* c, char* end_c, const time::DateTime& dt) {
-  static std::string up_to_31[] = {
-      "00", "01", "02", "03", "04", "05", "06", "07", "08", "09",
-      "10", "11", "12", "13", "14", "15", "16", "17", "18", "19",
-      "20", "21", "22", "23", "24", "25", "26", "27", "28", "29",
-      "30", "31"
-  };
+  // Store all zero-padded one and two-digit numbers, allows for very fast serialization.
+  static const char up_to[] = "00010203040506070809"
+                              "10111213141516171819"
+                              "20212223242526272829"
+                              "30313233343536373839"
+                              "40414243444546474849"
+                              "50515253545556575859"
+                              "60616263646566676869"
+                              "70717273747576777879"
+                              "80818283848586878889"
+                              "90919293949596979899";
+  static const char* up_to_c = static_cast<const char*>(up_to);
 
-  c = formatting::CopyPaddedInt(c, end_c, dt.GetYear(), 4, '0', 4);
-  *c = '-';
-  // c = formatting::CopyPaddedInt(c + 1, end_c, dt.GetMonthInt(), 2);
-  std::copy(up_to_31[dt.GetMonthInt()].begin(), up_to_31[dt.GetMonthInt()].end(), ++c);
-  c += 2;
-  *c = '-';
-  //c = formatting::CopyPaddedInt(c + 1, end_c, dt.GetDay(), 2);
-  std::copy(up_to_31[dt.GetDay()].begin(), up_to_31[dt.GetDay()].end(), ++c);
-  c += 2;
-  *c = ' ';
-  //c = formatting::CopyPaddedInt(c + 1, end_c, dt.GetHour(), 2);
-  std::copy(up_to_31[dt.GetHour()].begin(), up_to_31[dt.GetHour()].end(), ++c);
-  c += 2;
-  *c = ':';
-  c = formatting::CopyPaddedInt(c + 1, end_c, dt.GetMinute(), 2, '0', 4);
-  *c = ':';
-  c = formatting::CopyPaddedInt(c + 1, end_c, dt.GetSecond(), 2, '0', 4);
-  *c = '.';
-  c = formatting::CopyPaddedInt(c + 1, end_c, dt.GetMicrosecond(), 6, '0', 6);
-  return c;
+  LL_REQUIRE(26 <= end_c - c, "need at least 26 characters to format date");
+
+  // Year
+  auto start_c = c;
+  std::to_chars(c, end_c, dt.GetYear());
+  *(start_c + 4) = '-';
+  // Month
+  auto month = dt.GetMonthInt();
+  std::copy(up_to_c + 2 * month, up_to_c + 2 * month + 2, start_c + 5);
+  *(start_c + 7) = '-';
+  // Day
+  auto day = dt.GetDay();
+  std::copy(up_to_c + 2 * day, up_to_c + 2 * day + 2, start_c + 8);
+  *(start_c + 10) = ' ';
+  // Hour.
+  auto hour = dt.GetHour();
+  std::copy(up_to_c + 2 * hour, up_to_c + 2 * hour + 2, start_c + 11);
+  *(start_c + 13) = ':';
+  // Minute.
+  auto minute = dt.GetMinute();
+  std::copy(up_to_c + 2 * minute, up_to_c + 2 * minute + 2, start_c + 14);
+  *(start_c + 16) = ':';
+  // Second.
+  auto second = dt.GetSecond();
+  std::copy(up_to_c + 2 * second, up_to_c + 2 * second + 2, start_c + 17);
+  *(start_c + 19) = '.';
+  // Microsecond.
+  auto microseconds = dt.GetMicrosecond();
+  int nd = formatting::NumberOfDigits(microseconds, 6);
+  std::fill_n(c + 20, 6 - nd, '0');
+  std::to_chars(c + 26 - nd, end_c, microseconds);
+
+  return c + 26;
 }
-
 
 struct MessageInfo {
   //! \brief  The indentation of the start of the message within the formatted record.
@@ -718,7 +753,8 @@ struct Segment<char*> : public BaseSegment {
   }
 
   NO_DISCARD std::unique_ptr<BaseSegment> Copy() const override {
-    return std::make_unique<Segment<char*>>(*this);
+    return std::make_unique<Segment < char * >>
+    (*this);
   }
 
  private:
@@ -798,7 +834,7 @@ struct Segment<Floating_t, std::enable_if_t<std::is_floating_point_v<Floating_t>
 template <typename Integral_t>
 struct Segment<Integral_t, std::enable_if_t<std::is_integral_v<Integral_t>>> : public BaseSegment {
   explicit Segment(Integral_t number, const char* fmt_begin, const char* fmt_end)
-      : BaseSegment(fmt_begin, fmt_end), number_(number), size_required_(neededPrecision(number_)) {}
+      : BaseSegment(fmt_begin, fmt_end), number_(number), size_required_(formatting::NumberOfDigits(number_)) {}
 
   char* AddToBuffer([[maybe_unused]] const FormattingSettings& settings, char* start, char* end) const override {
     std::to_chars(start, end, number_);
@@ -810,19 +846,10 @@ struct Segment<Integral_t, std::enable_if_t<std::is_integral_v<Integral_t>>> : p
   }
 
   NO_DISCARD std::unique_ptr<BaseSegment> Copy() const override {
-    return std::make_unique<Segment < Integral_t>>
-    (*this);
+    return std::make_unique<Segment<Integral_t>>(*this);
   }
 
  private:
-  NO_DISCARD unsigned neededPrecision(Integral_t number) const {
-    static const auto log10 = std::log(10);
-    number = std::max(2, std::abs(number) + 1);
-    auto precision = static_cast<unsigned>(std::ceil(std::log(number) / log10));
-    if (number < 0) ++precision; // For minus sign.
-    return precision;
-  }
-
   Integral_t number_;
   unsigned size_required_{};
 };
@@ -852,7 +879,8 @@ struct AnsiColorObject : public BaseSegment {
   }
 
   NO_DISCARD std::unique_ptr<BaseSegment> Copy() const override {
-    return std::make_unique<AnsiColorObject<T>>(*this);
+    return std::make_unique<AnsiColorObject < T>>
+    (*this);
   }
 
  private:

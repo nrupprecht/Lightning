@@ -49,6 +49,7 @@ void bench_fastdatetimegen(int howmany);
 void bench_datetimenow(int howmany);
 void bench_systemclock(int howmany);
 void bench_recordformatting(int howmany);
+void bench_segments(int howmany);
 
 void bench_fmtdatetime(int howmany);
 
@@ -119,6 +120,12 @@ int main() {
   LOG_SEV(Info) << "\n";
 
   LOG_SEV(Info) << "**************************************************************";
+  LOG_SEV(Info) << "Segments";
+  LOG_SEV(Info) << "**************************************************************";
+  bench_segments(iters);
+  LOG_SEV(Info) << "\n";
+
+  LOG_SEV(Info) << "**************************************************************";
   LOG_SEV(Info) << "DateTime formatting time comparison";
   LOG_SEV(Info) << "**************************************************************";
   bench_fmtdatetime(iters);
@@ -172,9 +179,9 @@ void bench_st(int howmany) {
   }
 
   { // Benchmark using MsgFormatter, not really formatting.
-    auto fs = std::make_shared<FileSink>("logs/greased_lightning_basic_st-2.log");
+    auto fs = std::make_shared<FileSink>("logs/greased_lightning_basic_st-nonformatting.log");
     Logger logger(fs);
-    fs->SetFormatter(MakeMsgFormatter("[2023-6-26 20:33:50.539002 ] [basic_st/backtrace-off] [Info   ] Hello logger: msg number {}",
+    fs->SetFormatter(MakeMsgFormatter("[2023-06-26 20:33:50.539002] [basic_st/backtrace-off] [Info   ] Hello logger: msg number {}",
                                       formatting::MSG));
 
     auto start = high_resolution_clock::now();
@@ -425,6 +432,44 @@ void bench_recordformatting(int howmany) {
 
 }
 
+void bench_segments(int howmany) {
+  AnsiColorSegment info_colors{formatting::AnsiForegroundColor::Green};
+  {
+    FormattingSettings settings;
+    auto start = high_resolution_clock::now();
+    for (auto i = 0; i < howmany; ++i) {
+      [[maybe_unused]] auto result = info_colors.SizeRequired(settings);
+    }
+    auto delta_d = duration_cast<duration<double>>(high_resolution_clock::now() - start).count();
+    LOG_SEV(Info) << "AnsiColorSegment, Size required (no colors):   Elapsed: " << delta_d << " secs " << Format(static_cast<int>(howmany / delta_d)) << "/sec";
+  }
+  {
+    FormattingSettings settings;
+    settings.has_virtual_terminal_processing = true;
+    auto start = high_resolution_clock::now();
+    for (auto i = 0; i < howmany; ++i) {
+      [[maybe_unused]] auto result = info_colors.SizeRequired(settings);
+    }
+    auto delta_d = duration_cast<duration<double>>(high_resolution_clock::now() - start).count();
+    LOG_SEV(Info) << "AnsiColorSegment, Size required (with colors):   Elapsed: " << delta_d << " secs " << Format(static_cast<int>(howmany / delta_d)) << "/sec";
+  }
+
+  {
+    formatting::SeverityAttributeFormatter severity_formatter;
+    RecordAttributes attributes;
+    FormattingSettings settings;
+    attributes.basic_attributes.level = Severity::Warning;
+
+    std::string buffer(32, ' ');
+    auto start = high_resolution_clock::now();
+    for (auto i = 0; i < howmany; ++i) {
+      severity_formatter.AddToBuffer(attributes, settings, &buffer[0], &buffer[0] + 32);
+    }
+    auto delta_d = duration_cast<duration<double>>(high_resolution_clock::now() - start).count();
+    LOG_SEV(Info) << "Severity formatter:   Elapsed: " << delta_d << " secs " << Format(static_cast<int>(howmany / delta_d)) << "/sec";
+  }
+}
+
 void bench_fmtdatetime(int howmany) {
   auto x = time::DateTime(2023, 1, 3, 12, 34, 12, 34'567);
   {
@@ -440,50 +485,16 @@ void bench_fmtdatetime(int howmany) {
   }
 
   {
-    std::string up_to_31[] = {
-        "00", "01", "02", "03", "04", "05", "06", "07", "08", "09",
-        "10", "11", "12", "13", "14", "15", "16", "17", "18", "19",
-        "20", "21", "22", "23", "24", "25", "26", "27", "28", "29",
-        "30", "31"
-    };
-
     FormattingSettings settings;
     auto start = high_resolution_clock::now();
     std::string buffer = "YYYY-mm-dd hh:mm:ss.uuuuuu";
-    char *start_c = &buffer[0], *end_c = start_c + buffer.size();
-    // auto year = 2020, month = 9, day = 22, hour = 12, minute = 1, second = 45, microseconds = 32'674;
+    char *start_c = &buffer[0];
     for (auto i = 0; i < howmany; ++i) {
       char* c = &buffer[0];
-
-      auto year = x.GetYear(), month = x.GetMonthInt(), day = x.GetDay();
-      auto hour = x.GetHour(), minute = x.GetMinute(), second = x.GetSecond(), microseconds = x.GetMicrosecond();
-
       formatting::FormatDateTo(c, c + buffer.size(), x);
-
-//      std::to_chars(c, end_c, year); // Year
-//      std::copy(up_to_31[month].begin(), up_to_31[month].end(), start_c + 5);
-//      std::copy(up_to_31[day].begin(), up_to_31[day].end(), start_c + 8);
-//      // Hour.
-//      int nd = 0;
-//      std::copy(up_to_31[hour].begin(), up_to_31[hour].end(), start_c + 11);
-//      nd = formatting::NumberOfDigits(minute, 2);
-//      std::fill_n(c + 14, 2 - nd, '0');
-//      std::to_chars(c + 14 + 2 - nd, end_c, minute); // Minute.
-//
-//      nd = formatting::NumberOfDigits(second, 2);
-//      std::fill_n(c + 17, 2 - nd, '0');
-//      std::to_chars(c + 17 + 2 - nd, end_c, second); // second.
-//
-//      nd = formatting::NumberOfDigits(microseconds, 2);
-//      std::fill_n(c + 20, 6 - nd, '0');
-//      std::to_chars(c + 20 +  6 - nd, end_c, microseconds); // Minute.
     }
-    LOG_SEV(Info) << "Message: " << buffer;
-    char* c = &buffer[0];
-    formatting::FormatDateTo(c, c + buffer.size(), x);
-    LOG_SEV(Info) << "FormatDateto: " << buffer;
     auto delta_d = duration_cast<duration<double>>(high_resolution_clock::now() - start).count();
-    LOG_SEV(Info) << "Lightning SPECIAL: Elapsed: " << delta_d << " secs " << Format(static_cast<int>(howmany / delta_d)) << "/sec";
+    LOG_SEV(Info) << "Lightning FormatDateTo: Elapsed: " << delta_d << " secs " << Format(static_cast<int>(howmany / delta_d)) << "/sec";
   }
 }
 
