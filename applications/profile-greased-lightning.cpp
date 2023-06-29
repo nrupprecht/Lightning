@@ -178,6 +178,22 @@ void bench_st(int howmany) {
     LOG_SEV(Info) << "MsgFormatter:    Elapsed: " << delta_d << " secs " << Format(static_cast<int>(howmany / delta_d)) << "/sec";
   }
 
+  { // Benchmark using Empty Sink
+    auto fs = std::make_shared<EmptySink>();
+    Logger logger(fs);
+    fs->SetFormatter(MakeMsgFormatter("[{}] [basic_st/backtrace-off] [{}] {}",
+                                      formatting::DateTimeAttributeFormatter{},
+                                      formatting::SeverityAttributeFormatter{},
+                                      formatting::MSG));
+
+    auto start = high_resolution_clock::now();
+    for (auto i = 0; i < howmany; ++i) {
+      LOG_SEV_TO(logger, Info) << "Hello logger: msg number " << i;
+    }
+    auto delta_d = duration_cast<duration<double>>(high_resolution_clock::now() - start).count();
+    LOG_SEV(Info) << "Empty Sink:    Elapsed: " << delta_d << " secs " << Format(static_cast<int>(howmany / delta_d)) << "/sec";
+  }
+
   { // Benchmark using MsgFormatter, not really formatting.
     auto fs = std::make_shared<FileSink>("logs/greased_lightning_basic_st-nonformatting.log");
     Logger logger(fs);
@@ -190,6 +206,21 @@ void bench_st(int howmany) {
     }
     auto delta_d = duration_cast<duration<double>>(high_resolution_clock::now() - start).count();
     LOG_SEV(Info) << "MsgFormatter, not formatting:    Elapsed: " << delta_d << " secs " << Format(static_cast<int>(howmany / delta_d)) << "/sec";
+  }
+
+  { // Benchmark using MsgFormatter, not really formatting.
+    auto fs = std::make_shared<FileSink>("logs/greased_lightning_basic_st-nonformatting.log");
+    Logger logger(fs);
+    fs->SetFormatter(MakeMsgFormatter("[{}] [basic_st/backtrace-off] [Info   ] {}",
+                                      formatting::DateTimeAttributeFormatter{},
+                                      formatting::MSG));
+
+    auto start = high_resolution_clock::now();
+    for (auto i = 0; i < howmany; ++i) {
+      LOG_SEV_TO(logger, Info) << "Hello logger: msg number " << i;
+    }
+    auto delta_d = duration_cast<duration<double>>(high_resolution_clock::now() - start).count();
+    LOG_SEV(Info) << "MsgFormatter, not formatting 2:    Elapsed: " << delta_d << " secs " << Format(static_cast<int>(howmany / delta_d)) << "/sec";
   }
 
 }

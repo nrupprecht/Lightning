@@ -1237,7 +1237,7 @@ class SeverityAttributeFormatter : public AttributeFormatter {
 class BaseMessageFormatter {
  public:
   virtual ~BaseMessageFormatter() = default;
-  virtual std::string Format(const Record& record, const FormattingSettings& sink_settings) = 0;
+  virtual std::string Format(const Record& record, const FormattingSettings& sink_settings) const = 0;
   NO_DISCARD virtual std::unique_ptr<BaseMessageFormatter> Copy() const = 0;
 };
 
@@ -1273,7 +1273,6 @@ class MsgFormatter : public BaseMessageFormatter {
       literals_.back().push_back(fmt_string[i]);
       ++i;
     }
-    required_sizes_.assign(sizeof...(Types), 0);
 
     // Make sure there are the right number of slots.
     LL_ASSERT(count_slots == sizeof...(Types),
@@ -1282,13 +1281,14 @@ class MsgFormatter : public BaseMessageFormatter {
               "not the right number of literals, needed " << sizeof...(Types) + 1 << ", but had " << literals_.size());
   }
 
-  NO_DISCARD std::string Format(const Record& record, const FormattingSettings& sink_settings) override {
+  NO_DISCARD std::string Format(const Record& record, const FormattingSettings& sink_settings) const override {
     auto required_size = getRequiredSize<0>(record, sink_settings);
     required_size += sink_settings.message_terminator.size();
 
     std::string buffer(required_size, ' ');
     if (0 < required_size) {
       auto c = &buffer[0];
+      // Format all the segments.
       c = format<0>(c, record, sink_settings);
       // Add the terminator.
       std::copy(sink_settings.message_terminator.begin(), sink_settings.message_terminator.end(), c);
@@ -1304,7 +1304,7 @@ class MsgFormatter : public BaseMessageFormatter {
 
  private:
   template <std::size_t N>
-  NO_DISCARD unsigned getRequiredSize(const Record& record, const FormattingSettings& sink_settings) {
+  NO_DISCARD unsigned getRequiredSize(const Record& record, const FormattingSettings& sink_settings) const {
     if constexpr (N == sizeof...(Types)) {
       return literals_[N].size();
     }
@@ -1316,7 +1316,6 @@ class MsgFormatter : public BaseMessageFormatter {
       else {
         required_size = std::get<N>(formatters_).RequiredSize(record.Attributes(), sink_settings);
       }
-      required_sizes_[N] = required_size;
       return literals_[N].size()
           + required_size
           + getRequiredSize < N + 1 > (record, sink_settings);
@@ -1324,7 +1323,7 @@ class MsgFormatter : public BaseMessageFormatter {
   }
 
   template <std::size_t N>
-  char* format(char*& buffer, const Record& record, const FormattingSettings& sink_settings) {
+  char* format(char*& buffer, const Record& record, const FormattingSettings& sink_settings) const {
     // First, the literal.
     std::copy(literals_[N].begin(), literals_[N].end(), buffer);
     buffer += literals_[N].size();
@@ -1332,10 +1331,11 @@ class MsgFormatter : public BaseMessageFormatter {
     if constexpr (N != sizeof...(Types)) {
       // Then the formatter from the slot.
       if constexpr (std::is_same_v<MSG_t, std::tuple_element_t<N, decltype(formatters_)>>) {
-        buffer = record.Bundle().FmtString(sink_settings, buffer, buffer + required_sizes_[N]);
+        auto required_size = record.Bundle().SizeRequired(sink_settings);
+        buffer = record.Bundle().FmtString(sink_settings, buffer, buffer + required_size);
       }
       else {
-        auto required_size = required_sizes_[N];
+        auto required_size = std::get<N>(formatters_).RequiredSize(record.Attributes(), sink_settings);
         std::get<N>(formatters_).AddToBuffer(record.Attributes(), sink_settings, buffer, buffer + required_size);
         buffer += required_size;
       }
@@ -1348,7 +1348,6 @@ class MsgFormatter : public BaseMessageFormatter {
 
   std::tuple<Types...> formatters_;
   std::vector<std::string> literals_;
-  std::vector<unsigned> required_sizes_;
 };
 
 //! \brief Helper function to create a unique pointer to a MsgFormatter
@@ -1364,12 +1363,11 @@ class RecordFormatter : public BaseMessageFormatter {
     AddMsgSegment();
   }
 
-  NO_DISCARD std::string Format(const Record& record, const FormattingSettings& sink_settings) override {
+  NO_DISCARD std::string Format(const Record& record, const FormattingSettings& sink_settings) const override {
     std::optional<unsigned> msg_size{};
 
     unsigned required_size = 0;
-    for (auto i = 0u; i < formatters_.size(); ++i) {
-      auto& formatter = formatters_[i];
+    for (const auto & formatter : formatters_) {
       unsigned size = 0;
       switch (formatter.index()) {
         case 0: {
@@ -1388,7 +1386,6 @@ class RecordFormatter : public BaseMessageFormatter {
       }
 
       required_size += size;
-      required_sizes_[i] = size;
     }
 
     // Account for message terminator.
@@ -1397,25 +1394,28 @@ class RecordFormatter : public BaseMessageFormatter {
     std::string buffer(required_size, ' ');
     char* c = &buffer[0], * end = c + required_size;
 
-    for (auto i = 0u; i < formatters_.size(); ++i) {
-      auto& formatter = formatters_[i];
+    for (const auto & formatter : formatters_) {
+      unsigned segment_size = 0;
       switch (formatter.index()) {
         case 0: {
           // TODO: Update for LogNewLine type alignment.
+          segment_size = record.Bundle().SizeRequired(sink_settings);
           record.Bundle().FmtString(sink_settings, c, end);
           break;
         }
         case 1: {
+          segment_size = std::get<1>(formatter)->RequiredSize(record.Attributes(), sink_settings);
           std::get<1>(formatter)->AddToBuffer(record.Attributes(), sink_settings, c, end);
           break;
         }
         case 2: {
+          segment_size = std::get<2>(formatter).size();
           std::copy(std::get<2>(formatter).begin(), std::get<2>(formatter).end(), c);
           break;
         }
       }
 
-      c += required_sizes_[i];
+      c += segment_size;
     }
     // Add terminator.
     std::copy(sink_settings.message_terminator.begin(), sink_settings.message_terminator.end(), c);
@@ -1429,26 +1429,22 @@ class RecordFormatter : public BaseMessageFormatter {
   }
 
   RecordFormatter& AddMsgSegment() {
-    required_sizes_.emplace_back(0);
     formatters_.emplace_back(MSG);
     return *this;
   }
 
   RecordFormatter& AddAttributeFormatter(std::shared_ptr<AttributeFormatter> formatter) {
-    required_sizes_.emplace_back(0);
     formatters_.emplace_back(std::move(formatter));
     return *this;
   }
 
   RecordFormatter& AddLiteralSegment(std::string literal) {
-    required_sizes_.emplace_back(literal.size());
     formatters_.emplace_back(std::move(literal));
     return *this;
   }
 
   RecordFormatter& ClearSegments() {
     formatters_.clear();
-    required_sizes_.clear();
     return *this;
   }
 
@@ -1458,7 +1454,6 @@ class RecordFormatter : public BaseMessageFormatter {
 
  private:
   std::vector<std::variant<MSG_t, std::shared_ptr<AttributeFormatter>, std::string>> formatters_;
-  std::vector<unsigned> required_sizes_;
 };
 
 } // namespace formatting
@@ -1493,14 +1488,18 @@ class Sink {
   }
 
  protected:
-
+  //! \brief The sink formatting settings.
   FormattingSettings settings_;
 
+  //! \brief The Sink's attribute filters.
   filter::AttributeFilter filter_;
 
+  //! \brief The sink's formatter.
   std::unique_ptr<formatting::BaseMessageFormatter> formatter_;
 };
 
+//! \brief  Object that can receive records from multiple loggers, and dispatches them to multiple sinks.
+//!         The core has its own filter, which is checked before any of the individual sinks' filters.
 class Core {
  public:
   bool WillAccept(const RecordAttributes& attributes) {
@@ -1644,6 +1643,12 @@ class Logger {
 
   //! \brief Attributes associated with a specific logger.
   std::vector<Attribute> logger_attributes_;
+};
+
+//! \brief A sink, used for testing, that does nothing.
+class EmptySink : public Sink {
+ public:
+  void Dispatch(const Record&) override {}
 };
 
 //! \brief A simple sink that writes to a file via an ofstream.
