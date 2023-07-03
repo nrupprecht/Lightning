@@ -35,6 +35,29 @@ std::string Format(long long x) {
   return stream.str();
 }
 
+namespace std {
+
+//! \brief Exception logstream formatter.
+void format_logstream(const exception& ex, lightning::RefBundle& handler) {
+  using namespace lightning::formatting;
+
+  handler << NewLineIndent
+          << AnsiColor8Bit(R"(""")", AnsiForegroundColor::Red)
+          << AnsiColorSegment(AnsiForegroundColor::Yellow); // Exception in yellow.
+  const char* begin = ex.what(), * end = ex.what();
+  while (*end) {
+    for (; *end && *end != '\n'; ++end); // Find next newline.
+    handler << NewLineIndent << string_view(begin, end - begin);
+    while (*end && *end == '\n') ++end; // Pass any number of newlines.
+    begin = end;
+  }
+  handler << AnsiResetSegment
+          << NewLineIndent // Reset colors to default.
+          << AnsiColor8Bit(R"(""")", AnsiForegroundColor::Red);
+}
+
+} // namespace std
+
 std::string Format(const time::DateTime& x) {
   return lightning::formatting::Format(
       "[%-%-% %:%:%.%]", x.GetYear(), x.GetMonthInt(), x.GetDay(), x.GetHour(), x.GetMinute(), x.GetSecond(), x.GetMicrosecond());
@@ -67,10 +90,10 @@ int main() {
   auto iters = 250'000;
   auto num_threads = 4;
 
-  LOG_SEV(Info) << AnsiColorSegment(formatting::AnsiForegroundColor::Yellow) << "Starting" << AnsiResetSegment() << " now.";
-  LOG_SEV(Info) << AnsiColorObject("Starting", formatting::AnsiForegroundColor::Yellow)
+  LOG_SEV(Info) << AnsiColorSegment(formatting::AnsiForegroundColor::Yellow) << "Starting" << AnsiResetSegment << " now.";
+  LOG_SEV(Info) << AnsiColor8Bit("Starting", formatting::AnsiForegroundColor::Yellow)
                 << " now, again, "
-                << AnsiColorObject(12, formatting::AnsiForegroundColor::Blue) << "!";
+                << AnsiColor8Bit(12, formatting::AnsiForegroundColor::Blue) << "!";
 
   LOG_SEV(Info) << "**************************************************************";
   LOG_SEV(Info) << "Single threaded: " << Format(iters) << " messages";
@@ -288,6 +311,17 @@ void bench_st_types(int howmany) {
     LOG_SEV(Info) << "Long C-string:    Elapsed: " << delta_d << " secs " << Format(static_cast<int>(howmany / delta_d)) << "/sec";
   }
 
+  // Many CStrings
+  {
+    auto logger = make_logger();
+    auto start = high_resolution_clock::now();
+    for (auto i = 0; i < howmany; ++i) {
+      LOG_SEV_TO(logger, Info) << "1" << "2" << "3" << "4" << "5" << "6" << "7" << "8" << "9" << "10" << "11" << "12" << "13" << "14" << "15";
+    }
+    auto delta_d = duration_cast<duration<double>>(high_resolution_clock::now() - start).count();
+    LOG_SEV(Info) << "Many C-strings:    Elapsed: " << delta_d << " secs " << Format(static_cast<int>(howmany / delta_d)) << "/sec";
+  }
+
   // String
   {
     auto logger = make_logger();
@@ -316,7 +350,7 @@ void bench_st_types(int howmany) {
     auto logger = make_logger();
     auto start = high_resolution_clock::now();
     for (auto i = 0; i < howmany; ++i) {
-      LOG_SEV_TO(logger, Info) << "Hello logger: writing data " << AnsiColorObject(i, formatting::AnsiForegroundColor::Blue);
+      LOG_SEV_TO(logger, Info) << "Hello logger: writing data " << AnsiColor8Bit(i, formatting::AnsiForegroundColor::Blue);
     }
     auto delta_d = duration_cast<duration<double>>(high_resolution_clock::now() - start).count();
     LOG_SEV(Info) << "Colored Integer:    Elapsed: " << delta_d << " secs " << Format(static_cast<int>(howmany / delta_d)) << "/sec";
@@ -368,6 +402,18 @@ void bench_st_types(int howmany) {
     }
     auto delta_d = duration_cast<duration<double>>(high_resolution_clock::now() - start).count();
     LOG_SEV(Info) << "Combo:    Elapsed: " << delta_d << " secs " << Format(static_cast<int>(howmany / delta_d)) << "/sec";
+  }
+
+  // Exception
+  {
+    auto logger = make_logger();
+    std::runtime_error my_error("This is my error.\nIt is a big one!");
+    auto start = high_resolution_clock::now();
+    for (auto i = 0; i < howmany; ++i) {
+      LOG_SEV_TO(logger, Info) << my_error;
+    }
+    auto delta_d = duration_cast<duration<double>>(high_resolution_clock::now() - start).count();
+    LOG_SEV(Info) << "Exception:    Elapsed: " << delta_d << " secs " << Format(static_cast<int>(howmany / delta_d)) << "/sec";
   }
 }
 

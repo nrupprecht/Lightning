@@ -98,8 +98,7 @@ TEST(Logger, SeverityLogger) {
                                     formatting::SeverityAttributeFormatter{},
                                     formatting::MSG));
 
-  Logger logger;
-  logger.GetCore()->AddSink(std::move(sink));
+  Logger logger(std::move(sink));
 
   LOG_SEV_TO(logger, Debug) << "Goodbye, my friends.";
   EXPECT_EQ(stream.str(), "[Debug  ]: Goodbye, my friends.\n");
@@ -120,6 +119,16 @@ TEST(Logger, SeverityLogger) {
   LOG_SEV_TO(logger, Fatal) << "Goodbye, my friends.";
   EXPECT_EQ(stream.str(), "[Fatal  ]: Goodbye, my friends.\n");
   stream.str("");
+}
+
+TEST(GeneralFormatting, MoreThanInitialBuffer) {
+  std::ostringstream stream;
+  auto sink = std::make_shared<OstreamSink>(stream);
+  sink->SetFormatter(formatting::MakeMsgFormatter("{}", formatting::MSG));
+  Logger logger(sink);
+
+  LOG_SEV_TO(logger, Info) << "1" << "2" << "3" << "4" << "5" << "6" << "7" << "8" << "9" << "10" << "11" << "12" << "13" << "14" << "15";
+  EXPECT_EQ(stream.str(), "123456789101112131415\n");
 }
 
 TEST(Logger, BlockAttributes) {

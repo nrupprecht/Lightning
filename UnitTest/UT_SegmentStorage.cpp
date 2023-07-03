@@ -27,11 +27,11 @@ TEST(SegmentStorage, StackVsHeap) {
   }
   { // Object too large to go on the stack.
     SegmentStorage container;
-    container.Create<AnsiColorObject<int>>(55, formatting::AnsiForegroundColor::Green);
+    container.Create<AnsiColor8Bit<int>>(55, formatting::AnsiForegroundColor::Green);
 
     EXPECT_FALSE(container.IsUsingBuffer());
 
-    EXPECT_EQ(sizeof(AnsiColorObject<int>), 48u);
+    EXPECT_EQ(sizeof(AnsiColor8Bit<int>), 48u);
 
     FormattingSettings sink_settings;
     sink_settings.has_virtual_terminal_processing = true;

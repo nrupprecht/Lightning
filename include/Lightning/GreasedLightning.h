@@ -700,10 +700,27 @@ struct BaseSegment {
 //!         on the stack.
 class SegmentStorage {
  public:
+  //! \brief Default construct an empty SegmentStorage object.
   SegmentStorage() = default;
 
+  //! \brief SegmentStorage is like a unique_ptr<BaseSegment>, so its copy operator is deleted.
+  SegmentStorage(const SegmentStorage&) = delete;
+
+  //! \brief Move SegmentStorage.
+  SegmentStorage(SegmentStorage&& storage) {
+    if (storage.IsUsingBuffer()) {
+      // TODO: BaseSegment should have a MoveTo function, and call that.
+      std::memcpy(buffer_, storage.buffer_, sizeof(buffer_));
+      segment_pointer_ = reinterpret_cast<BaseSegment*>(buffer_);
+    }
+    else {
+      segment_pointer_ = storage.segment_pointer_;
+    }
+    storage.segment_pointer_ = nullptr;
+  }
+
   ~SegmentStorage() {
-    if (!IsUsingBuffer()) {
+    if (segment_pointer_ && !IsUsingBuffer()) {
       delete segment_pointer_;
       segment_pointer_ = nullptr;
     }
@@ -736,8 +753,8 @@ class SegmentStorage {
  private:
   //! \brief Pointer to the data that is either on the stack or heap. Allows for polymorphically accessing the data.
   BaseSegment* segment_pointer_{};
-  //! \brief The internal buffer for data.
-  unsigned char buffer_[2 * sizeof(void*)] = {0};
+  //! \brief The internal buffer for data. Note that all BaseSegments have a vptr, so that takes up sizeof(void*) bytes by itself.
+  unsigned char buffer_[3 * sizeof(void*)] = {0};
 };
 
 //! \brief Formatting segment that changes the coloration of a terminal.
@@ -767,13 +784,13 @@ struct AnsiColorSegment : public BaseSegment {
 };
 
 //! \brief Formatting segment that resets the style.
-struct AnsiResetSegment : public AnsiColorSegment {
-  AnsiResetSegment() noexcept : AnsiColorSegment(formatting::AnsiForegroundColor::Reset) {}
+struct AnsiResetSegment_t : public AnsiColorSegment {
+  AnsiResetSegment_t() noexcept : AnsiColorSegment(formatting::AnsiForegroundColor::Reset) {}
 };
 
 //! \brief  Prototypical AnsiResetSegment object. There is no customization possible, so there
 //!         is no reason to explicitly create more.
-const inline AnsiResetSegment AnsiResetSeg{};
+const inline AnsiResetSegment_t AnsiResetSegment{};
 
 //! \brief Inject spaces until the message length reaches a specified length.
 struct PadTill : public BaseSegment {
@@ -998,10 +1015,10 @@ struct Segment<time::DateTime> : public BaseSegment {
 
 //! \brief Formatting segment that colors a single piece of data.
 template <typename T>
-struct AnsiColorObject : public BaseSegment {
-  explicit AnsiColorObject(const T& data,
-                           std::optional<formatting::AnsiForegroundColor> foreground,
-                           std::optional<formatting::AnsiBackgroundColor> background = {})
+struct AnsiColor8Bit : public BaseSegment {
+  explicit AnsiColor8Bit(const T& data,
+                         std::optional<formatting::AnsiForegroundColor> foreground,
+                         std::optional<formatting::AnsiBackgroundColor> background = {})
       : set_formatting_string_(SetAnsiColorFmt(foreground, background)), segment_(data, nullptr, nullptr) {}
 
   char* AddToBuffer(const FormattingSettings& settings, const formatting::MessageInfo& msg_info, char* start, [[maybe_unused]] char* end) const override {
@@ -1010,19 +1027,19 @@ struct AnsiColorObject : public BaseSegment {
       start += set_formatting_string_.size();
     }
     start = segment_.AddToBuffer(settings, msg_info, start, end);
-    start = AnsiResetSeg.AddToBuffer(settings, msg_info, start, end);
+    start = AnsiResetSegment.AddToBuffer(settings, msg_info, start, end);
     return start;
   }
 
   NO_DISCARD unsigned SizeRequired(const FormattingSettings& settings, const formatting::MessageInfo& msg_info) const override {
     auto required_size = settings.has_virtual_terminal_processing ? set_formatting_string_.size() : 0;
     required_size += segment_.SizeRequired(settings, msg_info);
-    required_size += AnsiResetSeg.SizeRequired(settings, msg_info);
+    required_size += AnsiResetSegment.SizeRequired(settings, msg_info);
     return required_size;
   }
 
   void CopyTo(class SegmentStorage& storage) const override {
-    storage.Create<AnsiColorObject<T>>(*this);
+    storage.Create<AnsiColor8Bit<T >> (*this);
   }
 
  private:
@@ -1356,14 +1373,14 @@ class SeverityAttributeFormatter : public AttributeFormatter {
       auto& str = getString(attributes.basic_attributes.level.value());
       std::copy(str.begin(), str.end(), start);
       start += str.size();
-      AnsiResetSeg.AddToBuffer(settings, msg_info, start, end);
+      AnsiResetSegment.AddToBuffer(settings, msg_info, start, end);
     }
   }
 
   NO_DISCARD unsigned RequiredSize(const RecordAttributes& attributes, const FormattingSettings& settings, const formatting::MessageInfo& msg_info) const override {
     if (attributes.basic_attributes.level) {
       unsigned required_size = colorSegment(attributes.basic_attributes.level.value()).SizeRequired(settings, msg_info);
-      required_size += AnsiResetSeg.SizeRequired(settings, msg_info);
+      required_size += AnsiResetSegment.SizeRequired(settings, msg_info);
       return required_size + getString(attributes.basic_attributes.level.value()).size();
     }
     return 0u;
