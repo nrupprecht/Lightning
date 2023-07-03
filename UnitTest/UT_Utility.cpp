@@ -2,10 +2,6 @@
 // Created by Nathaniel Rupprecht on 6/26/23.
 //
 
-//
-// Created by Nathaniel Rupprecht on 4/15/23.
-//
-
 #include <gtest/gtest.h>
 // Other files.
 #include "Lightning/GreasedLightning.h"
@@ -23,6 +19,8 @@ TEST(Utility, NumberOfDigits_ULL) {
   EXPECT_EQ(formatting::NumberOfDigits(100ull), 3);
   EXPECT_EQ(formatting::NumberOfDigits(101ull), 3);
   EXPECT_EQ(formatting::NumberOfDigits(100'002ull), 6);
+
+  EXPECT_EQ(formatting::NumberOfDigits(12'235'938'546'972'340'928ull), 20);
 }
 
 TEST(Utility, NumberOfDigits_LL) {

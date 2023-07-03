@@ -13,9 +13,9 @@ namespace Testing {
 
 TEST(MessageStringFormatter, Basic) {
   formatting::RecordFormatter record_formatter;
-  EXPECT_EQ(record_formatter.NumSegments(), 1);
+  EXPECT_EQ(record_formatter.NumSegments(), 1u);
   record_formatter.ClearSegments();
-  EXPECT_EQ(record_formatter.NumSegments(), 0);
+  EXPECT_EQ(record_formatter.NumSegments(), 0u);
 
   Record record;
   record.Attributes().basic_attributes.level = Severity::Info;
