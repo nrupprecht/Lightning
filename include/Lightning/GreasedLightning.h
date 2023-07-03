@@ -1432,7 +1432,7 @@ class LoggerNameAttributeFormatter final : public AttributeFormatter {
 };
 
 //! \brief Function to
-unsigned CalculateMessageIndentation(char* buffer_end, const MessageInfo& msg_info) {
+inline unsigned CalculateMessageIndentation(char* buffer_end, const MessageInfo& msg_info) {
   if (msg_info.total_length == 0) {
     return 0;
   }
