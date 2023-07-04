@@ -150,8 +150,6 @@ class ImplBase {
   explicit ImplBase(std::shared_ptr<Impl> impl) : impl_(std::move(impl)) {}
 };
 
-// ...
-
 // ==============================================================================
 //  Date / time support.
 // ==============================================================================
@@ -779,6 +777,11 @@ struct AnsiColorSegment : public BaseSegment {
     storage.Create<AnsiColorSegment>(*this);
   }
 
+  void SetColors(std::optional<formatting::AnsiForegroundColor> foreground,
+                 std::optional<formatting::AnsiBackgroundColor> background = {}) {
+    fmt_string_ = SetAnsiColorFmt(foreground, background);
+  }
+
  private:
   std::string fmt_string_;
 };
@@ -792,9 +795,14 @@ struct AnsiResetSegment_t : public AnsiColorSegment {
 //!         is no reason to explicitly create more.
 const inline AnsiResetSegment_t AnsiResetSegment{};
 
-//! \brief Inject spaces until the message length reaches a specified length.
+//! \brief Inject spaces until the message length or total formatted length reaches a specified length.
 struct PadTill : public BaseSegment {
-  explicit PadTill(unsigned pad_length) : pad_length_(pad_length) {}
+  //! \brief  Specifies whether the pad should be for the message part of the formatted string, or the entire
+  //!         length of the formatted string.
+  enum class PadType : unsigned char { MESSAGE_LENGTH, TOTAL_LENGTH };
+
+  explicit PadTill(unsigned pad_length, PadType pad_type = PadType::MESSAGE_LENGTH)
+      : pad_length_(pad_length), pad_type_(pad_type) {}
 
   char* AddToBuffer(const FormattingSettings& settings, const formatting::MessageInfo& msg_info, char* start, [[maybe_unused]] char* end) const override {
     auto num_chars = SizeRequired(settings, msg_info);
@@ -803,7 +811,12 @@ struct PadTill : public BaseSegment {
   }
 
   NO_DISCARD unsigned SizeRequired(const FormattingSettings&, const formatting::MessageInfo& msg_info) const override {
-    return std::min(msg_info.message_length, pad_length_);
+    if (pad_type_ == PadType::MESSAGE_LENGTH) {
+      return pad_length_ - std::min(msg_info.message_length, pad_length_);
+    }
+    else { // TOTAL_LENGTH
+      return pad_length_ - std::min(msg_info.total_length, pad_length_);
+    }
   }
 
   void CopyTo(class SegmentStorage& storage) const override {
@@ -812,6 +825,29 @@ struct PadTill : public BaseSegment {
 
  private:
   unsigned pad_length_{};
+  PadType pad_type_;
+};
+
+//! \brief Segment that repeats a character N times.
+struct RepeatChar : public BaseSegment {
+  RepeatChar(unsigned repeat_length, char c) : repeat_length_(repeat_length), c_(c) {}
+
+  char* AddToBuffer(const FormattingSettings&, const formatting::MessageInfo&, char* start, char*) const override {
+    std::fill_n(start, repeat_length_, c_);
+    return start + repeat_length_;
+  }
+
+  NO_DISCARD unsigned SizeRequired(const FormattingSettings&, const formatting::MessageInfo&) const override {
+    return repeat_length_;
+  }
+
+  void CopyTo(class SegmentStorage& storage) const override {
+    storage.Create<RepeatChar>(*this);
+  }
+
+ private:
+  unsigned repeat_length_{};
+  char c_{};
 };
 
 struct NewLineIndent_t : public BaseSegment {
@@ -835,6 +871,10 @@ struct NewLineIndent_t : public BaseSegment {
 //! \brief Prototypical NewLineIndent_t object.
 const inline NewLineIndent_t NewLineIndent;
 
+// ==============================================================================
+//  Ordinary data formatting segments.
+// ==============================================================================
+
 //! \brief Base template for formatting Segment<T>'s. Has a slot to allow for enable_if-ing.
 template <typename T, typename Enable = void>
 struct Segment;
@@ -852,7 +892,7 @@ struct Segment<std::string> : public BaseSegment {
   explicit Segment(std::string s, const char* fmt_begin, const char* fmt_end)
       : BaseSegment(fmt_begin, fmt_end), str_(std::move(s)) {}
 
-  char* AddToBuffer([[maybe_unused]] const FormattingSettings& settings, const formatting::MessageInfo&, char* start, char* end) const override {
+  char* AddToBuffer(const FormattingSettings&, const formatting::MessageInfo&, char* start, char* end) const override {
     for (auto c: str_) {
       if (start == end) break;
       *start = c;
@@ -1170,7 +1210,7 @@ enum class Severity {
 struct BasicAttributes {
   BasicAttributes() = default;
 
-  explicit BasicAttributes(Severity lvl, bool do_timestamp = false)
+  explicit BasicAttributes(std::optional<Severity> lvl, bool do_timestamp = false)
       : level(lvl) {
     if (do_timestamp) time_stamp = time::DateTime::Now();
   }
@@ -1198,6 +1238,11 @@ class BasicSeverityFilter {
   BasicSeverityFilter& SetAcceptance(Severity severity, bool does_accept) {
     if (does_accept) mask_ |= static_cast<int>(severity);
     else mask_ &= (0b11111 & ~static_cast<int>(severity));
+    return *this;
+  }
+
+  BasicSeverityFilter& AcceptNoSeverity(bool flag) {
+    allow_if_no_severity_ = flag;
     return *this;
   }
 
@@ -1253,6 +1298,11 @@ struct AttributeFilter {
     for (auto sev: {Severity::Debug, Severity::Info, Severity::Warning, Severity::Error, Severity::Fatal}) {
       severity_filter_.SetAcceptance(sev, acceptable.contains(sev));
     }
+    return *this;
+  }
+
+  AttributeFilter& AcceptNoSeverity(bool flag) {
+    severity_filter_.AcceptNoSeverity(flag);
     return *this;
   }
 
@@ -1386,6 +1436,19 @@ class SeverityAttributeFormatter : public AttributeFormatter {
     return 0u;
   }
 
+  SeverityAttributeFormatter& SeverityName(Severity severity, const std::string& name) {
+    getString(severity) = name;
+    return *this;
+  }
+
+  SeverityAttributeFormatter& SeverityFormatting(Severity severity,
+                                                 std::optional<AnsiForegroundColor> foreground,
+                                                 std::optional<AnsiBackgroundColor> background = {}) {
+    auto& color_formatting = colorSegment(severity);
+    color_formatting.SetColors(foreground, background);
+    return *this;
+  }
+
  private:
   NO_DISCARD const std::string& getString(Severity severity) const {
     switch (severity) {
@@ -1398,7 +1461,29 @@ class SeverityAttributeFormatter : public AttributeFormatter {
     }
   }
 
+  NO_DISCARD std::string& getString(Severity severity) {
+    switch (severity) {
+      case Severity::Debug: return debug_;
+      case Severity::Info: return info_;
+      case Severity::Warning: return warn_;
+      case Severity::Error: return error_;
+      case Severity::Fatal: return fatal_;
+      default: LL_FAIL("unrecognized severity attribute");
+    }
+  }
+
   NO_DISCARD const AnsiColorSegment& colorSegment(Severity severity) const {
+    switch (severity) {
+      case Severity::Debug: return debug_colors_;
+      case Severity::Info: return info_colors_;
+      case Severity::Warning: return warn_colors_;
+      case Severity::Error: return error_colors_;
+      case Severity::Fatal: return fatal_colors_;
+      default: LL_FAIL("unrecognized severity attribute");
+    }
+  }
+
+  NO_DISCARD AnsiColorSegment& colorSegment(Severity severity) {
     switch (severity) {
       case Severity::Debug: return debug_colors_;
       case Severity::Info: return info_colors_;
@@ -1880,11 +1965,11 @@ class Logger {
   }
 
   template <typename ...Attrs_t>
-  RecordDispatcher Log(Severity severity, Attrs_t&& ...attrs) {
+  RecordDispatcher Log(std::optional<Severity> severity, Attrs_t&& ...attrs) {
     return Log(BasicAttributes(severity), attrs...);
   }
 
-  bool WillAccept(Severity severity) {
+  bool WillAccept(std::optional<Severity> severity) {
     if (!core_) return false;
     return core_->WillAccept(severity);
   }
@@ -1944,7 +2029,7 @@ class FileSink : public Sink {
   void Dispatch(const Record& record) override {
     auto message = formatter_->Format(record, settings_);
     std::lock_guard guard(out_mtx_);
-    fout_ << message;
+    fout_.write(message.c_str(), static_cast<std::streamsize>(message.size()));
   }
 
  private:
@@ -1964,7 +2049,7 @@ class OstreamSink : public Sink {
 
   void Dispatch(const Record& record) override {
     auto message = formatter_->Format(record, settings_);
-    out_ << message;
+    out_.write(message.c_str(), static_cast<std::streamsize>(message.size()));
   }
 
   std::ostream& out_;
@@ -2013,6 +2098,13 @@ class Global {
 
 //! \brief Log with a severity attribute to the global logger.
 #define LOG_SEV(severity) LOG_SEV_TO(::lightning::Global::GetLogger(), severity)
+
+#define LOG_TO(logger) \
+  if ((logger).WillAccept(::std::nullopt)) \
+    if (auto handler = (logger).Log(::std::nullopt)) \
+      handler.GetRecord().Bundle()
+
+#define LOG() LOG_TO(::lightning::Global::GetLogger())
 
 namespace formatting {
 

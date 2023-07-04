@@ -41,4 +41,59 @@ TEST(Lightning, NewLineIndent) {
   EXPECT_EQ(stream.str(), "[Top]: A is for apple.\n       B is for bear.\n[Repeated]: A is for apple.\n            B is for bear.\n");
 }
 
+TEST(Lightning, PadTill) {
+  // Set up logger.
+  std::ostringstream stream;
+  auto sink = std::make_shared<OstreamSink>(stream);
+  sink->SetFormatter(MakeMsgFormatter("{}", formatting::MSG));
+  lightning::Logger logger({sink});
+
+  sink->GetFilter().AcceptNoSeverity(true);
+  logger.GetCore()->GetFilter().AcceptNoSeverity(true);
+
+  {
+    LOG_TO(logger) << PadTill(10) << "X";
+    EXPECT_EQ(stream.str(), "          X\n");
+    stream.str("");
+  }
+  {
+    LOG_TO(logger) << "1234" << PadTill(10) << "X";
+    EXPECT_EQ(stream.str(), "1234      X\n");
+    stream.str("");
+  }
+  {
+    LOG_TO(logger) << "1234567" << PadTill(10) << "X";
+    EXPECT_EQ(stream.str(), "1234567   X\n");
+    stream.str("");
+  }
+  {
+    LOG_TO(logger) << "123456789AB" << PadTill(10) << "X";
+    EXPECT_EQ(stream.str(), "123456789ABX\n");
+    stream.str("");
+  }
 }
+
+TEST(Lightning, RepeatChar) {
+  // Set up logger.
+  std::ostringstream stream;
+  auto sink = std::make_shared<OstreamSink>(stream);
+  sink->SetFormatter(MakeMsgFormatter("{}", formatting::MSG));
+  lightning::Logger logger({sink});
+
+  sink->GetFilter().AcceptNoSeverity(true);
+  logger.GetCore()->GetFilter().AcceptNoSeverity(true);
+
+  {
+    LOG_TO(logger) << RepeatChar(5, 'a') << "X";
+    EXPECT_EQ(stream.str(), "aaaaaX\n");
+    stream.str("");
+  }
+  {
+    LOG_TO(logger) << "A" << RepeatChar(5, 'x') << "B" << RepeatChar(3, 'c');
+    EXPECT_EQ(stream.str(), "AxxxxxBccc\n");
+    stream.str("");
+  }
+
+}
+
+} // namespace Testing

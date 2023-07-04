@@ -44,11 +44,11 @@ void format_logstream(const exception& ex, lightning::RefBundle& handler) {
   handler << NewLineIndent
           << AnsiColor8Bit(R"(""")", AnsiForegroundColor::Red)
           << AnsiColorSegment(AnsiForegroundColor::Yellow); // Exception in yellow.
-  const char* begin = ex.what(), * end = ex.what();
+  const char* begin = ex.what(), *end = ex.what();
   while (*end) {
     for (; *end && *end != '\n'; ++end); // Find next newline.
     handler << NewLineIndent << string_view(begin, end - begin);
-    while (*end && *end == '\n') ++end; // Pass any number of newlines.
+    for (; *end && *end == '\n'; ++end); // Pass any number of newlines.
     begin = end;
   }
   handler << AnsiResetSegment
@@ -58,32 +58,29 @@ void format_logstream(const exception& ex, lightning::RefBundle& handler) {
 
 } // namespace std
 
-std::string Format(const time::DateTime& x) {
-  return lightning::formatting::Format(
-      "[%-%-% %:%:%.%]", x.GetYear(), x.GetMonthInt(), x.GetDay(), x.GetHour(), x.GetMinute(), x.GetSecond(), x.GetMicrosecond());
-}
+constexpr unsigned pad_width = 45;
+constexpr unsigned header_length = 90;
 
 void bench_st(int howmany);
 void bench_st_types(int howmany);
-void bench_nonacceptingseverity_sink(int howmany);
-void bench_nonacceptingseverity_core(int howmany);
+void bench_nonaccepting(int howmany);
 
-void bench_fastdatetimegen(int howmany);
-void bench_datetimenow(int howmany);
-void bench_systemclock(int howmany);
+void bench_datetime(int howmany);
+
 void bench_recordformatting(int howmany);
 void bench_segments(int howmany);
 
 void bench_fmtdatetime(int howmany);
 
 void bench_mt(int howmany, std::size_t thread_count);
-void bench_mt_multiple_loggers(int howmany, std::size_t thread_count);
 
 int main() {
   // Set up global logger.
   auto sink = std::make_shared<OstreamSink>();
   Global::GetCore()->AddSink(sink)
-      .SetAllFormatters(formatting::MakeMsgFormatter("[{}] [{}] {}", formatting::SeverityAttributeFormatter{},
+      .SetAllFormatters(formatting::MakeMsgFormatter("[{}] [{}] {}",
+                                                     formatting::SeverityAttributeFormatter{}
+                                                         .SeverityName(Severity::Info, "Info"),
                                                      formatting::DateTimeAttributeFormatter{},
                                                      formatting::MSG));
 
@@ -93,79 +90,59 @@ int main() {
   LOG_SEV(Info) << AnsiColorSegment(formatting::AnsiForegroundColor::Yellow) << "Starting" << AnsiResetSegment << " now.";
   LOG_SEV(Info) << AnsiColor8Bit("Starting", formatting::AnsiForegroundColor::Yellow)
                 << " now, again, "
-                << AnsiColor8Bit(12, formatting::AnsiForegroundColor::Blue) << "!";
+                << AnsiColor8Bit(12, formatting::AnsiForegroundColor::Blue) << "!\n";
 
-  LOG_SEV(Info) << "**************************************************************";
+  // ========================================================
+  //  Profiling functions.
+  // ========================================================
+
+  LOG_SEV(Info) << RepeatChar(header_length, '*');
   LOG_SEV(Info) << "Single threaded: " << Format(iters) << " messages";
-  LOG_SEV(Info) << "**************************************************************";
+  LOG_SEV(Info) << RepeatChar(header_length, '*');
   bench_st(iters);
-  LOG_SEV(Info) << "\n";
+  LOG_SEV(Info) << RepeatChar(header_length, '*')<< "\n";
 
-  LOG_SEV(Info) << "**************************************************************";
+  LOG_SEV(Info) << RepeatChar(header_length, '*');
   LOG_SEV(Info) << "Single threaded, Types: " << Format(iters) << " messages";
-  LOG_SEV(Info) << "**************************************************************";
+  LOG_SEV(Info) << RepeatChar(header_length, '*');
   bench_st_types(iters);
-  LOG_SEV(Info) << "\n";
+  LOG_SEV(Info) << RepeatChar(header_length, '*')<< "\n";
 
-  LOG_SEV(Info) << "**************************************************************";
-  LOG_SEV(Info) << "Single threaded: " << Format(iters) << " messages, sink non-accepting";
-  LOG_SEV(Info) << "**************************************************************";
-  bench_nonacceptingseverity_sink(iters);
-  LOG_SEV(Info) << "\n";
+  LOG_SEV(Info) << RepeatChar(header_length, '*');
+  LOG_SEV(Info) << "Single threaded: " << Format(iters) << " messages, non-acceptance";
+  LOG_SEV(Info) << RepeatChar(header_length, '*');
+  bench_nonaccepting(iters);
+  LOG_SEV(Info) << RepeatChar(header_length, '*')<< "\n";
 
-  LOG_SEV(Info) << "**************************************************************";
-  LOG_SEV(Info) << "Single threaded: " << Format(iters) << " messages, core non-accepting";
-  LOG_SEV(Info) << "**************************************************************";
-  bench_nonacceptingseverity_core(iters);
-  LOG_SEV(Info) << "\n";
+  LOG_SEV(Info) << RepeatChar(header_length, '*');
+  LOG_SEV(Info) << "Date/time generation";
+  LOG_SEV(Info) << RepeatChar(header_length, '*');
+  bench_datetime(iters);
+  LOG_SEV(Info) << RepeatChar(header_length, '*')<< "\n";
 
-  LOG_SEV(Info) << "**************************************************************";
-  LOG_SEV(Info) << "Fast date generator";
-  LOG_SEV(Info) << "**************************************************************";
-  bench_fastdatetimegen(iters);
-  LOG_SEV(Info) << "\n";
-
-  LOG_SEV(Info) << "**************************************************************";
-  LOG_SEV(Info) << "DateTime::Now";
-  LOG_SEV(Info) << "**************************************************************";
-  bench_datetimenow(iters);
-  LOG_SEV(Info) << "\n";
-
-  LOG_SEV(Info) << "**************************************************************";
-  LOG_SEV(Info) << "System clock";
-  LOG_SEV(Info) << "**************************************************************";
-  bench_systemclock(iters);
-  LOG_SEV(Info) << "\n";
-
-  LOG_SEV(Info) << "**************************************************************";
+  LOG_SEV(Info) << RepeatChar(header_length, '*');
   LOG_SEV(Info) << "Record formatting";
-  LOG_SEV(Info) << "**************************************************************";
+  LOG_SEV(Info) << RepeatChar(header_length, '*');
   bench_recordformatting(iters);
-  LOG_SEV(Info) << "\n";
+  LOG_SEV(Info) << RepeatChar(header_length, '*')<< "\n";
 
-  LOG_SEV(Info) << "**************************************************************";
+  LOG_SEV(Info) << RepeatChar(header_length, '*');
   LOG_SEV(Info) << "Segments";
-  LOG_SEV(Info) << "**************************************************************";
+  LOG_SEV(Info) << RepeatChar(header_length, '*');
   bench_segments(iters);
-  LOG_SEV(Info) << "\n";
+  LOG_SEV(Info) << RepeatChar(header_length, '*')<< "\n";
 
-  LOG_SEV(Info) << "**************************************************************";
+  LOG_SEV(Info) << RepeatChar(header_length, '*');
   LOG_SEV(Info) << "DateTime formatting time comparison";
-  LOG_SEV(Info) << "**************************************************************";
+  LOG_SEV(Info) << RepeatChar(header_length, '*');
   bench_fmtdatetime(iters);
-  LOG_SEV(Info) << "\n";
+  LOG_SEV(Info) << RepeatChar(header_length, '*')<< "\n";
 
-  LOG_SEV(Info) << "**************************************************************";
+  LOG_SEV(Info) << RepeatChar(header_length, '*');
   LOG_SEV(Info) << "Multi threaded (" << num_threads << " threads): " << Format(iters) << " messages";
-  LOG_SEV(Info) << "**************************************************************";
+  LOG_SEV(Info) << RepeatChar(header_length, '*');
   bench_mt(iters, num_threads);
-  LOG_SEV(Info) << "\n";
-
-  LOG_SEV(Info) << "**************************************************************";
-  LOG_SEV(Info) << "Multi threaded (" << num_threads << " threads), multiple loggers: " << Format(iters) << " messages";
-  LOG_SEV(Info) << "**************************************************************";
-  bench_mt_multiple_loggers(iters, num_threads);
-  LOG_SEV(Info) << "\n";
+  LOG_SEV(Info) << RepeatChar(header_length, '*')<< "\n";
 
   return 0;
 }
@@ -192,7 +169,7 @@ void bench_st(int howmany) {
       LOG_SEV_TO(logger, Info) << "Hello logger: msg number " << i;
     }
     auto delta_d = duration_cast<duration<double>>(high_resolution_clock::now() - start).count();
-    LOG_SEV(Info) << "RecordFormatter: Elapsed: " << delta_d << " secs " << Format(static_cast<int>(howmany / delta_d)) << "/sec";
+    LOG_SEV(Info) << "RecordFormatter:" << PadTill(pad_width) << "Elapsed: " << delta_d << " secs " << Format(static_cast<int>(howmany / delta_d)) << "/sec";
   }
 
   { // Benchmark using MsgFormatter
@@ -210,14 +187,72 @@ void bench_st(int howmany) {
       LOG_SEV_TO(logger, Info) << "Hello logger: msg number " << i;
     }
     auto delta_d = duration_cast<duration<double>>(high_resolution_clock::now() - start).count();
-    LOG_SEV(Info) << "MsgFormatter:    Elapsed: " << delta_d << " secs " << Format(static_cast<int>(howmany / delta_d)) << "/sec";
+    LOG_SEV(Info) << "MsgFormatter:" << PadTill(pad_width) << "Elapsed: " << delta_d << " secs " << Format(static_cast<int>(howmany / delta_d)) << "/sec";
+  }
+  { // Benchmark using MsgFormatter, but no message.
+    auto fs = std::make_shared<FileSink>("logs/greased_lightning_basic_st-3.log");
+    Logger logger(fs);
+    logger.SetName("basic_st/backtrace-off");
+    fs->SetFormatter(MakeMsgFormatter("[{}] [{}] [{}] {}",
+                                      formatting::DateTimeAttributeFormatter{},
+                                      formatting::LoggerNameAttributeFormatter{},
+                                      formatting::SeverityAttributeFormatter{},
+                                      formatting::MSG));
+
+    auto start = high_resolution_clock::now();
+    for (auto i = 0; i < howmany; ++i) {
+      LOG_SEV_TO(logger, Info);
+    }
+    auto delta_d = duration_cast<duration<double>>(high_resolution_clock::now() - start).count();
+    LOG_SEV(Info) << "MsgFormatter, no message:" << PadTill(pad_width) << "Elapsed: " << delta_d << " secs " << Format(static_cast<int>(howmany / delta_d)) << "/sec";
+  }
+
+  { // Benchmark using MsgFormatter, without the message and without a header.
+    auto fs = std::make_shared<FileSink>("logs/greased_lightning_basic_st-4.log");
+    Logger logger(fs);
+    logger.SetName("basic_st/backtrace-off");
+    fs->SetFormatter(MakeMsgFormatter("{}", formatting::MSG));
+
+    auto start = high_resolution_clock::now();
+    for (auto i = 0; i < howmany; ++i) {
+      LOG_SEV_TO(logger, Info);
+    }
+    auto delta_d = duration_cast<duration<double>>(high_resolution_clock::now() - start).count();
+    LOG_SEV(Info) << "MsgFormatter, no msg, no header:" << PadTill(pad_width) << "Elapsed: " << delta_d << " secs " << Format(static_cast<int>(howmany / delta_d)) << "/sec";
+  }
+
+  { // Benchmark using MsgFormatter, with the message, but without the header.
+    auto fs = std::make_shared<FileSink>("logs/greased_lightning_basic_st-5.log");
+    Logger logger(fs);
+    logger.SetName("basic_st/backtrace-off");
+    fs->SetFormatter(MakeMsgFormatter("{}", formatting::MSG));
+
+    auto start = high_resolution_clock::now();
+    for (auto i = 0; i < howmany; ++i) {
+      LOG_SEV_TO(logger, Info) << "Hello logger: msg number " << i;;
+    }
+    auto delta_d = duration_cast<duration<double>>(high_resolution_clock::now() - start).count();
+    LOG_SEV(Info) << "MsgFormatter, with msg, no header:" << PadTill(pad_width) << "Elapsed: " << delta_d << " secs " << Format(static_cast<int>(howmany / delta_d)) << "/sec";
+  }
+
+  { // Benchmark using just an ofstream
+    std::ofstream fout("logs/greased_lightning_basic_st-ofstream.log");
+
+    auto start = high_resolution_clock::now();
+    for (auto i = 0; i < howmany; ++i) {
+      fout << "[2023-07-04 12:00:00.000000] [basic_st/backtrace-off] [Info   ] Hello logger: msg number " << i << "\n";
+    }
+    auto delta_d = duration_cast<duration<double>>(high_resolution_clock::now() - start).count();
+    LOG_SEV(Info) << "std::ofstream, with message, static header:" << PadTill(pad_width) << "Elapsed: " << delta_d << " secs " << Format(static_cast<int>(howmany / delta_d)) << "/sec";
   }
 
   { // Benchmark using EmptySink
     auto fs = std::make_shared<EmptySink>();
     Logger logger(fs);
-    fs->SetFormatter(MakeMsgFormatter("[{}] [basic_st/backtrace-off] [{}] {}",
+    logger.SetName("basic_st/backtrace-off");
+    fs->SetFormatter(MakeMsgFormatter("[{}] [{}] [{}] {}",
                                       formatting::DateTimeAttributeFormatter{},
+                                      formatting::LoggerNameAttributeFormatter{},
                                       formatting::SeverityAttributeFormatter{},
                                       formatting::MSG));
 
@@ -226,14 +261,16 @@ void bench_st(int howmany) {
       LOG_SEV_TO(logger, Info) << "Hello logger: msg number " << i;
     }
     auto delta_d = duration_cast<duration<double>>(high_resolution_clock::now() - start).count();
-    LOG_SEV(Info) << "EmptySink:    Elapsed: " << delta_d << " secs " << Format(static_cast<int>(howmany / delta_d)) << "/sec";
+    LOG_SEV(Info) << "EmptySink:" << PadTill(pad_width) << "Elapsed: " << delta_d << " secs " << Format(static_cast<int>(howmany / delta_d)) << "/sec";
   }
 
   { // Benchmark using TrivialDispatchSink
     auto fs = std::make_shared<TrivialDispatchSink>();
     Logger logger(fs);
-    fs->SetFormatter(MakeMsgFormatter("[{}] [basic_st/backtrace-off] [{}] {}",
+    logger.SetName("basic_st/backtrace-off");
+    fs->SetFormatter(MakeMsgFormatter("[{}] [{}] [{}] {}",
                                       formatting::DateTimeAttributeFormatter{},
+                                      formatting::LoggerNameAttributeFormatter{},
                                       formatting::SeverityAttributeFormatter{},
                                       formatting::MSG));
 
@@ -242,7 +279,7 @@ void bench_st(int howmany) {
       LOG_SEV_TO(logger, Info) << "Hello logger: msg number " << i;
     }
     auto delta_d = duration_cast<duration<double>>(high_resolution_clock::now() - start).count();
-    LOG_SEV(Info) << "TrivialDispatchSink:    Elapsed: " << delta_d << " secs " << Format(static_cast<int>(howmany / delta_d)) << "/sec";
+    LOG_SEV(Info) << "TrivialDispatchSink:" << PadTill(pad_width) << "Elapsed: " << delta_d << " secs " << Format(static_cast<int>(howmany / delta_d)) << "/sec";
   }
 
   { // Benchmark using MsgFormatter, not really formatting.
@@ -256,7 +293,7 @@ void bench_st(int howmany) {
       LOG_SEV_TO(logger, Info) << i;
     }
     auto delta_d = duration_cast<duration<double>>(high_resolution_clock::now() - start).count();
-    LOG_SEV(Info) << "MsgFormatter, not formatting:    Elapsed: " << delta_d << " secs " << Format(static_cast<int>(howmany / delta_d)) << "/sec";
+    LOG_SEV(Info) << "MsgFormatter, not formatting:" << PadTill(pad_width) << "Elapsed: " << delta_d << " secs " << Format(static_cast<int>(howmany / delta_d)) << "/sec";
   }
 
   { // Benchmark using MsgFormatter, not really formatting.
@@ -271,7 +308,7 @@ void bench_st(int howmany) {
       LOG_SEV_TO(logger, Info) << "Hello logger: msg number " << i;
     }
     auto delta_d = duration_cast<duration<double>>(high_resolution_clock::now() - start).count();
-    LOG_SEV(Info) << "MsgFormatter, format only Date:    Elapsed: " << delta_d << " secs " << Format(static_cast<int>(howmany / delta_d)) << "/sec";
+    LOG_SEV(Info) << "MsgFormatter, format only Date:" << PadTill(pad_width) << "Elapsed: " << delta_d << " secs " << Format(static_cast<int>(howmany / delta_d)) << "/sec";
   }
 
 }
@@ -280,10 +317,12 @@ void bench_st_types(int howmany) {
   auto make_logger = []() {
     auto fs = std::make_shared<FileSink>("logs/greased_lightning_basic_st-types.log");
     Logger logger(fs);
-    fs->SetFormatter(formatting::MakeMsgFormatter("[{}] [basic_st/backtrace-off] [{}] {}",
-                                                  formatting::DateTimeAttributeFormatter{},
-                                                  formatting::SeverityAttributeFormatter{},
-                                                  formatting::MSG));
+    logger.SetName("basic_st/backtrace-off");
+    fs->SetFormatter(MakeMsgFormatter("[{}] [{}] [{}] {}",
+                                      formatting::DateTimeAttributeFormatter{},
+                                      formatting::LoggerNameAttributeFormatter{},
+                                      formatting::SeverityAttributeFormatter{},
+                                      formatting::MSG));
     return logger;
   };
 
@@ -296,7 +335,7 @@ void bench_st_types(int howmany) {
       LOG_SEV_TO(logger, Info) << "Hello logger: writing data " << message;
     }
     auto delta_d = duration_cast<duration<double>>(high_resolution_clock::now() - start).count();
-    LOG_SEV(Info) << "C-string:    Elapsed: " << delta_d << " secs " << Format(static_cast<int>(howmany / delta_d)) << "/sec";
+    LOG_SEV(Info) << "C-string:" << PadTill(pad_width) << "Elapsed: " << delta_d << " secs " << Format(static_cast<int>(howmany / delta_d)) << "/sec";
   }
 
   // Long CString
@@ -308,7 +347,7 @@ void bench_st_types(int howmany) {
                                   "vain? The answer may suprise you. The answer is 20.";
     }
     auto delta_d = duration_cast<duration<double>>(high_resolution_clock::now() - start).count();
-    LOG_SEV(Info) << "Long C-string:    Elapsed: " << delta_d << " secs " << Format(static_cast<int>(howmany / delta_d)) << "/sec";
+    LOG_SEV(Info) << "Long C-string:" << PadTill(pad_width) << "Elapsed: " << delta_d << " secs " << Format(static_cast<int>(howmany / delta_d)) << "/sec";
   }
 
   // Many CStrings
@@ -319,7 +358,7 @@ void bench_st_types(int howmany) {
       LOG_SEV_TO(logger, Info) << "1" << "2" << "3" << "4" << "5" << "6" << "7" << "8" << "9" << "10" << "11" << "12" << "13" << "14" << "15";
     }
     auto delta_d = duration_cast<duration<double>>(high_resolution_clock::now() - start).count();
-    LOG_SEV(Info) << "Many C-strings:    Elapsed: " << delta_d << " secs " << Format(static_cast<int>(howmany / delta_d)) << "/sec";
+    LOG_SEV(Info) << "Many C-strings:" << PadTill(pad_width) << "Elapsed: " << delta_d << " secs " << Format(static_cast<int>(howmany / delta_d)) << "/sec";
   }
 
   // String
@@ -331,7 +370,7 @@ void bench_st_types(int howmany) {
       LOG_SEV_TO(logger, Info) << "Hello logger: writing data " << message;
     }
     auto delta_d = duration_cast<duration<double>>(high_resolution_clock::now() - start).count();
-    LOG_SEV(Info) << "String:    Elapsed: " << delta_d << " secs " << Format(static_cast<int>(howmany / delta_d)) << "/sec";
+    LOG_SEV(Info) << "String:" << PadTill(pad_width) << "Elapsed: " << delta_d << " secs " << Format(static_cast<int>(howmany / delta_d)) << "/sec";
   }
 
   // Integer
@@ -342,7 +381,18 @@ void bench_st_types(int howmany) {
       LOG_SEV_TO(logger, Info) << "Hello logger: writing data " << i;
     }
     auto delta_d = duration_cast<duration<double>>(high_resolution_clock::now() - start).count();
-    LOG_SEV(Info) << "Integer:    Elapsed: " << delta_d << " secs " << Format(static_cast<int>(howmany / delta_d)) << "/sec";
+    LOG_SEV(Info) << "Integer:" << PadTill(pad_width) << "Elapsed: " << delta_d << " secs " << Format(static_cast<int>(howmany / delta_d)) << "/sec";
+  }
+
+  // Many integers
+  {
+    auto logger = make_logger();
+    auto start = high_resolution_clock::now();
+    for (auto i = 0; i < howmany; ++i) {
+      LOG_SEV_TO(logger, Info) << "Hello logger: writing data " << i << i + 1 << i + 2 << i + 3 << i + 4 << i + 5 << i + 6 << i + 7 << i + 8 << i + 9 << i + 10;
+    }
+    auto delta_d = duration_cast<duration<double>>(high_resolution_clock::now() - start).count();
+    LOG_SEV(Info) << "Many integers:" << PadTill(pad_width) << "Elapsed: " << delta_d << " secs " << Format(static_cast<int>(howmany / delta_d)) << "/sec";
   }
 
   // Colored Integer
@@ -353,7 +403,7 @@ void bench_st_types(int howmany) {
       LOG_SEV_TO(logger, Info) << "Hello logger: writing data " << AnsiColor8Bit(i, formatting::AnsiForegroundColor::Blue);
     }
     auto delta_d = duration_cast<duration<double>>(high_resolution_clock::now() - start).count();
-    LOG_SEV(Info) << "Colored Integer:    Elapsed: " << delta_d << " secs " << Format(static_cast<int>(howmany / delta_d)) << "/sec";
+    LOG_SEV(Info) << "Colored Integer:" << PadTill(pad_width) << "Elapsed: " << delta_d << " secs " << Format(static_cast<int>(howmany / delta_d)) << "/sec";
   }
 
   // Bool
@@ -364,7 +414,7 @@ void bench_st_types(int howmany) {
       LOG_SEV_TO(logger, Info) << "Hello logger: writing data " << (i % 2 == 0);
     }
     auto delta_d = duration_cast<duration<double>>(high_resolution_clock::now() - start).count();
-    LOG_SEV(Info) << "Bool:    Elapsed: " << delta_d << " secs " << Format(static_cast<int>(howmany / delta_d)) << "/sec";
+    LOG_SEV(Info) << "Bool:" << PadTill(pad_width) << "Elapsed: " << delta_d << " secs " << Format(static_cast<int>(howmany / delta_d)) << "/sec";
   }
 
   // Float
@@ -376,7 +426,7 @@ void bench_st_types(int howmany) {
       LOG_SEV_TO(logger, Info) << "Hello logger: writing data " << x;
     }
     auto delta_d = duration_cast<duration<double>>(high_resolution_clock::now() - start).count();
-    LOG_SEV(Info) << "Double:    Elapsed: " << delta_d << " secs " << Format(static_cast<int>(howmany / delta_d)) << "/sec";
+    LOG_SEV(Info) << "Double:" << PadTill(pad_width) << "Elapsed: " << delta_d << " secs " << Format(static_cast<int>(howmany / delta_d)) << "/sec";
   }
 
   // Thread ID
@@ -387,7 +437,7 @@ void bench_st_types(int howmany) {
       LOG_SEV_TO(logger, Info) << "Hello logger: writing data " << std::this_thread::get_id();
     }
     auto delta_d = duration_cast<duration<double>>(high_resolution_clock::now() - start).count();
-    LOG_SEV(Info) << "ThreadID:    Elapsed: " << delta_d << " secs " << Format(static_cast<int>(howmany / delta_d)) << "/sec";
+    LOG_SEV(Info) << "ThreadID: " << PadTill(pad_width) << "Elapsed: " << delta_d << " secs " << Format(static_cast<int>(howmany / delta_d)) << "/sec";
   }
 
   // Combo
@@ -401,7 +451,7 @@ void bench_st_types(int howmany) {
                                << "% of messages.";
     }
     auto delta_d = duration_cast<duration<double>>(high_resolution_clock::now() - start).count();
-    LOG_SEV(Info) << "Combo:    Elapsed: " << delta_d << " secs " << Format(static_cast<int>(howmany / delta_d)) << "/sec";
+    LOG_SEV(Info) << "Combo:" << PadTill(pad_width) << "Elapsed: " << delta_d << " secs " << Format(static_cast<int>(howmany / delta_d)) << "/sec";
   }
 
   // Exception
@@ -413,83 +463,83 @@ void bench_st_types(int howmany) {
       LOG_SEV_TO(logger, Info) << my_error;
     }
     auto delta_d = duration_cast<duration<double>>(high_resolution_clock::now() - start).count();
-    LOG_SEV(Info) << "Exception:    Elapsed: " << delta_d << " secs " << Format(static_cast<int>(howmany / delta_d)) << "/sec";
+    LOG_SEV(Info) << "Special exception formatting:" << PadTill(pad_width) << "Elapsed: " << PadTill(pad_width) << delta_d << " secs " << Format(static_cast<int>(howmany / delta_d)) << "/sec";
   }
 }
 
-void bench_nonacceptingseverity_sink(int howmany) {
-  auto fs = std::make_shared<FileSink>("logs/greased_lightning_basic_st_nonaccepting.log");
-  fs->GetFilter().Accept({Severity::Error});
-  Logger logger(fs);
-  fs->SetFormatter(formatting::MakeMsgFormatter("[{}] [basic_st/backtrace-off] [{}] {}",
-                                                formatting::DateTimeAttributeFormatter{},
-                                                formatting::SeverityAttributeFormatter{},
-                                                formatting::MSG));
+void bench_nonaccepting(int howmany) {
+  {
+    auto fs = std::make_shared<FileSink>("logs/greased_lightning_basic_st_nonaccepting.log");
+    fs->GetFilter().Accept({Severity::Error});
+    Logger logger(fs);
+    logger.SetName("basic_st/backtrace-off");
+    fs->SetFormatter(MakeMsgFormatter("[{}] [{}] [{}] {}",
+                                      formatting::DateTimeAttributeFormatter{},
+                                      formatting::LoggerNameAttributeFormatter{},
+                                      formatting::SeverityAttributeFormatter{},
+                                      formatting::MSG));
 
-  auto start = high_resolution_clock::now();
-  for (auto i = 0; i < howmany; ++i) {
-    LOG_SEV_TO(logger, Info) << "[{DateTime}] [basic_mt/backtrace-off] [{Severity}] " << "Hello logger: msg number " << i;
+    auto start = high_resolution_clock::now();
+    for (auto i = 0; i < howmany; ++i) {
+      LOG_SEV_TO(logger, Info) << "Hello logger: msg number " << i;
+    }
+    auto delta_d = duration_cast<duration<double>>(high_resolution_clock::now() - start).count();
+
+    LOG_SEV(Info) << "Nonaccepting sink:" << PadTill(pad_width) << "Elapsed: " << delta_d << " secs " << Format(static_cast<int>(howmany / delta_d)) << "/sec";
   }
-  auto delta_d = duration_cast<duration<double>>(high_resolution_clock::now() - start).count();
+  {
+    auto fs = std::make_shared<FileSink>("logs/greased_lightning_basic_st_nonaccepting.log");
+    Logger logger(fs);
+    logger.GetCore()->GetFilter().Accept({Severity::Error});
+    logger.SetName("basic_st/backtrace-off");
+    fs->SetFormatter(MakeMsgFormatter("[{}] [{}] [{}] {}",
+                                      formatting::DateTimeAttributeFormatter{},
+                                      formatting::LoggerNameAttributeFormatter{},
+                                      formatting::SeverityAttributeFormatter{},
+                                      formatting::MSG));
 
-  LOG_SEV(Info) << "Elapsed: " << delta_d << " secs " << Format(static_cast<int>(howmany / delta_d)) << "/sec";
+    auto start = high_resolution_clock::now();
+    for (auto i = 0; i < howmany; ++i) {
+      LOG_SEV_TO(logger, Info) << "[{DateTime}] [basic_mt/backtrace-off] [{Severity}] " << "Hello logger: msg number " << i;
+    }
+    auto delta_d = duration_cast<duration<double>>(high_resolution_clock::now() - start).count();
+
+    LOG_SEV(Info) << "Non-accepting core:" << PadTill(pad_width) << "Elapsed: " << delta_d << " secs " << Format(static_cast<int>(howmany / delta_d)) << "/sec";
+  }
 }
 
-void bench_nonacceptingseverity_core(int howmany) {
-  using std::chrono::duration;
-  using std::chrono::duration_cast;
-  using std::chrono::high_resolution_clock;
+void bench_datetime(int howmany) {
+  {
+    time::DateTime dt;
 
-  auto fs = std::make_shared<FileSink>("logs/greased_lightning_basic_st_nonaccepting.log");
-  Logger logger(fs);
-  logger.GetCore()->GetFilter().Accept({Severity::Error});
-  fs->SetFormatter(formatting::MakeMsgFormatter("[{}] [basic_st/backtrace-off] [{}] {}",
-                                                formatting::DateTimeAttributeFormatter{},
-                                                formatting::SeverityAttributeFormatter{},
-                                                formatting::MSG));
+    auto start = high_resolution_clock::now();
+    for (auto i = 0; i < howmany; ++i) {
+      dt = time::DateTime::Now();
+    }
+    auto delta_d = duration_cast<duration<double>>(high_resolution_clock::now() - start).count();
 
-  auto start = high_resolution_clock::now();
-  for (auto i = 0; i < howmany; ++i) {
-    LOG_SEV_TO(logger, Info) << "[{DateTime}] [basic_mt/backtrace-off] [{Severity}] " << "Hello logger: msg number " << i;
+    LOG_SEV(Info) << "DateTime::Now" << PadTill(pad_width) << "Elapsed: " << delta_d << " secs " << Format(static_cast<int>(howmany / delta_d)) << "/sec";
   }
-  auto delta_d = duration_cast<duration<double>>(high_resolution_clock::now() - start).count();
+  {
+    time::FastDateGenerator generator;
 
-  LOG_SEV(Info) << "Elapsed: " << delta_d << " secs " << Format(static_cast<int>(howmany / delta_d)) << "/sec";
-}
+    auto start = high_resolution_clock::now();
+    for (auto i = 0; i < howmany; ++i) {
+      [[maybe_unused]] auto dt = generator.CurrentTime();
+    }
+    auto delta_d = duration_cast<duration<double>>(high_resolution_clock::now() - start).count();
 
-void bench_fastdatetimegen(int howmany) {
-  time::DateTime dt;
-  time::FastDateGenerator generator;
-
-  auto start = high_resolution_clock::now();
-  for (auto i = 0; i < howmany; ++i) {
-    dt = generator.CurrentTime();
+    LOG_SEV(Info) << "Fast datetime generator:" << PadTill(pad_width) << "Elapsed: " << delta_d << " secs " << Format(static_cast<int>(howmany / delta_d)) << "/sec";
   }
-  auto delta_d = duration_cast<duration<double>>(high_resolution_clock::now() - start).count();
+  {
+    auto start = high_resolution_clock::now();
+    for (auto i = 0; i < howmany; ++i) {
+      [[maybe_unused]] auto current_time = std::chrono::system_clock::now();
+    }
+    auto delta_d = duration_cast<duration<double>>(high_resolution_clock::now() - start).count();
 
-  LOG_SEV(Info) << "Elapsed: " << delta_d << " secs " << Format(static_cast<int>(howmany / delta_d)) << "/sec";
-}
-
-void bench_datetimenow(int howmany) {
-  time::DateTime dt;
-
-  auto start = high_resolution_clock::now();
-  for (auto i = 0; i < howmany; ++i) {
-    dt = time::DateTime::Now();
+    LOG_SEV(Info) << "SystemClock:" << PadTill(pad_width) << "Elapsed: " << delta_d << " secs " << Format(static_cast<int>(howmany / delta_d)) << "/sec";
   }
-  auto delta_d = duration_cast<duration<double>>(high_resolution_clock::now() - start).count();
-
-  LOG_SEV(Info) << "Elapsed: " << delta_d << " secs " << Format(static_cast<int>(howmany / delta_d)) << "/sec";
-}
-
-void bench_systemclock(int howmany) {
-  auto start = high_resolution_clock::now();
-  for (auto i = 0; i < howmany; ++i) {
-    [[maybe_unused]] auto current_time = std::chrono::system_clock::now();
-  }
-  auto delta_d = duration_cast<duration<double>>(high_resolution_clock::now() - start).count();
-
-  LOG_SEV(Info) << "Elapsed: " << delta_d << " secs " << Format(static_cast<int>(howmany / delta_d)) << "/sec";
 }
 
 void bench_recordformatting(int howmany) {
@@ -497,6 +547,7 @@ void bench_recordformatting(int howmany) {
 
   Record record;
   record.Attributes().basic_attributes.level = Severity::Info;
+  record.Attributes().basic_attributes.logger_name = "basic_st/backtrace-off";
   record.Bundle() << "Hello, world!";
 
   FormattingSettings sink_settings;
@@ -506,7 +557,9 @@ void bench_recordformatting(int howmany) {
     record_formatter.ClearSegments()
         .AddLiteralSegment("[")
         .AddAttributeFormatter(std::make_shared<formatting::DateTimeAttributeFormatter>())
-        .AddLiteralSegment("] [basic_st/backtrace-off] [")
+        .AddLiteralSegment("] [")
+        .AddAttributeFormatter(std::make_shared<formatting::LoggerNameAttributeFormatter>())
+        .AddLiteralSegment("] [")
         .AddAttributeFormatter(std::make_shared<formatting::SeverityAttributeFormatter>())
         .AddLiteralSegment("] ")
         .AddMsgSegment();
@@ -516,12 +569,13 @@ void bench_recordformatting(int howmany) {
       auto message = record_formatter.Format(record, sink_settings);
     }
     auto delta_d = duration_cast<duration<double>>(high_resolution_clock::now() - start).count();
-    LOG_SEV(Info) << "RecordFormatter:     Elapsed: " << delta_d << " secs " << Format(static_cast<int>(howmany / delta_d)) << "/sec";
+    LOG_SEV(Info) << "RecordFormatter:" << PadTill(pad_width) << "Elapsed: " << delta_d << " secs " << Format(static_cast<int>(howmany / delta_d)) << "/sec";
   }
 
   {
-    formatting::MsgFormatter record_formatter("[{}] [basic_st/backtrace-off] [{}] {}",
+    formatting::MsgFormatter record_formatter("[{}] [{}] [{}] {}",
                                               formatting::DateTimeAttributeFormatter{},
+                                              formatting::LoggerNameAttributeFormatter{},
                                               formatting::SeverityAttributeFormatter{},
                                               formatting::MSG);
     auto start = high_resolution_clock::now();
@@ -529,13 +583,14 @@ void bench_recordformatting(int howmany) {
       auto message = record_formatter.Format(record, sink_settings);
     }
     auto delta_d = duration_cast<duration<double>>(high_resolution_clock::now() - start).count();
-    LOG_SEV(Info) << "MsgFormatter:        Elapsed: " << delta_d << " secs " << Format(static_cast<int>(howmany / delta_d)) << "/sec";
+    LOG_SEV(Info) << "MsgFormatter:" << PadTill(pad_width) << "Elapsed: " << delta_d << " secs " << Format(static_cast<int>(howmany / delta_d)) << "/sec";
   }
 
   {
     auto record_formatter = std::unique_ptr<formatting::BaseMessageFormatter>(
-        new formatting::MsgFormatter("[{}] [basic_st/backtrace-off] [{}] {}",
+        new formatting::MsgFormatter("[{}] [{}] [{}] {}",
                                      formatting::DateTimeAttributeFormatter{},
+                                     formatting::LoggerNameAttributeFormatter{},
                                      formatting::SeverityAttributeFormatter{},
                                      formatting::MSG));
     auto start = high_resolution_clock::now();
@@ -543,7 +598,7 @@ void bench_recordformatting(int howmany) {
       auto message = record_formatter->Format(record, sink_settings);
     }
     auto delta_d = duration_cast<duration<double>>(high_resolution_clock::now() - start).count();
-    LOG_SEV(Info) << "Ptr-to-MsgFormatter:    Elapsed: " << delta_d << " secs " << Format(static_cast<int>(howmany / delta_d)) << "/sec";
+    LOG_SEV(Info) << "Ptr-to-MsgFormatter:" << PadTill(pad_width) << "Elapsed: " << delta_d << " secs " << Format(static_cast<int>(howmany / delta_d)) << "/sec";
   }
 
 }
@@ -551,25 +606,6 @@ void bench_recordformatting(int howmany) {
 void bench_segments(int howmany) {
   AnsiColorSegment info_colors{formatting::AnsiForegroundColor::Green};
   formatting::MessageInfo msg_info{};
-  {
-    FormattingSettings settings{};
-    auto start = high_resolution_clock::now();
-    for (auto i = 0; i < howmany; ++i) {
-      [[maybe_unused]] auto result = info_colors.SizeRequired(settings, msg_info);
-    }
-    auto delta_d = duration_cast<duration<double>>(high_resolution_clock::now() - start).count();
-    LOG_SEV(Info) << "AnsiColorSegment, Size required (no colors):   Elapsed: " << delta_d << " secs " << Format(static_cast<int>(howmany / delta_d)) << "/sec";
-  }
-  {
-    FormattingSettings settings;
-    settings.has_virtual_terminal_processing = true;
-    auto start = high_resolution_clock::now();
-    for (auto i = 0; i < howmany; ++i) {
-      [[maybe_unused]] auto result = info_colors.SizeRequired(settings, msg_info);
-    }
-    auto delta_d = duration_cast<duration<double>>(high_resolution_clock::now() - start).count();
-    LOG_SEV(Info) << "AnsiColorSegment, Size required (with colors):   Elapsed: " << delta_d << " secs " << Format(static_cast<int>(howmany / delta_d)) << "/sec";
-  }
 
   {
     formatting::SeverityAttributeFormatter severity_formatter;
@@ -583,11 +619,11 @@ void bench_segments(int howmany) {
       severity_formatter.AddToBuffer(attributes, settings, msg_info, &buffer[0], &buffer[0] + 32);
     }
     auto delta_d = duration_cast<duration<double>>(high_resolution_clock::now() - start).count();
-    LOG_SEV(Info) << "Severity formatter:   Elapsed: " << delta_d << " secs " << Format(static_cast<int>(howmany / delta_d)) << "/sec";
+    LOG_SEV(Info) << "Severity formatter:" << PadTill(pad_width) << "Elapsed: " << delta_d << " secs " << Format(static_cast<int>(howmany / delta_d)) << "/sec";
   }
 
   {
-    std::string buffer(' ', 7);
+    std::string buffer(7, ' ');
     FormattingSettings settings;
     Segment<int> segment(4869244, nullptr, nullptr);
     auto start = high_resolution_clock::now();
@@ -595,44 +631,45 @@ void bench_segments(int howmany) {
       segment.AddToBuffer(settings, msg_info, &buffer[0], &buffer[0] + 7);
     }
     auto delta_d = duration_cast<duration<double>>(high_resolution_clock::now() - start).count();
-    LOG_SEV(Info) << "Segment<int>:   Elapsed: " << delta_d << " secs " << Format(static_cast<int>(howmany / delta_d)) << "/sec";
+    LOG_SEV(Info) << "Segment<int>:" << PadTill(pad_width) << "Elapsed: " << delta_d << " secs " << Format(static_cast<int>(howmany / delta_d)) << "/sec";
   }
 
   {
     FormattingSettings settings;
     Segment<double> segment(1.2345, nullptr, nullptr);
-    std::string buffer(' ', segment.SizeRequired(settings, msg_info));
+    std::string buffer(segment.SizeRequired(settings, msg_info), ' ');
 
     auto start = high_resolution_clock::now();
     for (auto i = 0; i < howmany; ++i) {
       segment.AddToBuffer(settings, msg_info, &buffer[0], &buffer[0] + 7);
     }
     auto delta_d = duration_cast<duration<double>>(high_resolution_clock::now() - start).count();
-    LOG_SEV(Info) << "Segment<double>:   Elapsed: " << delta_d << " secs " << Format(static_cast<int>(howmany / delta_d)) << "/sec";
+    LOG_SEV(Info) << "Segment<double>:" << PadTill(pad_width) << "Elapsed: " << delta_d << " secs " << Format(static_cast<int>(howmany / delta_d)) << "/sec";
   }
 
   {
-    std::string buffer(' ', 7);
+    std::string buffer(7, ' ');
     auto start = high_resolution_clock::now();
     for (auto i = 0; i < howmany; ++i) {
-       std::to_chars(&buffer[0], &buffer[0] + 7, 4869244);
+      std::to_chars(&buffer[0], &buffer[0] + 7, 4869244);
     }
     auto delta_d = duration_cast<duration<double>>(high_resolution_clock::now() - start).count();
-    LOG_SEV(Info) << "ToChars:   Elapsed: " << delta_d << " secs " << Format(static_cast<int>(howmany / delta_d)) << "/sec";
+    LOG_SEV(Info) << "ToChars:" << PadTill(pad_width) << "Elapsed: " << delta_d << " secs " << Format(static_cast<int>(howmany / delta_d)) << "/sec";
   }
 
   {
     auto start = high_resolution_clock::now();
     for (auto i = 0; i < howmany; ++i) {
-      std::string buffer(' ', i % 15 + 50);
+      std::string buffer(i % 15 + 50, ' ');
     }
     auto delta_d = duration_cast<duration<double>>(high_resolution_clock::now() - start).count();
-    LOG_SEV(Info) << "Allocate string:   Elapsed: " << delta_d << " secs " << Format(static_cast<int>(howmany / delta_d)) << "/sec";
+    LOG_SEV(Info) << "Allocate string:" << PadTill(pad_width) << "Elapsed: " << delta_d << " secs " << Format(static_cast<int>(howmany / delta_d)) << "/sec";
   }
 }
 
 void bench_fmtdatetime(int howmany) {
   auto x = time::DateTime(2023, 1, 3, 12, 34, 12, 34'567);
+
   {
     FormattingSettings settings;
     auto start = high_resolution_clock::now();
@@ -642,7 +679,7 @@ void bench_fmtdatetime(int howmany) {
                                                         x.GetHour(), x.GetMinute(), x.GetSecond(), x.GetMicrosecond());
     }
     auto delta_d = duration_cast<duration<double>>(high_resolution_clock::now() - start).count();
-    LOG_SEV(Info) << "Lightning no-pad: Elapsed: " << delta_d << " secs " << Format(static_cast<int>(howmany / delta_d)) << "/sec";
+    LOG_SEV(Info) << "Lightning no-pad:" << PadTill(pad_width) << "Elapsed: " << delta_d << " secs " << Format(static_cast<int>(howmany / delta_d)) << "/sec";
   }
 
   {
@@ -654,62 +691,62 @@ void bench_fmtdatetime(int howmany) {
       formatting::FormatDateTo(c, c + buffer.size(), x);
     }
     auto delta_d = duration_cast<duration<double>>(high_resolution_clock::now() - start).count();
-    LOG_SEV(Info) << "Lightning FormatDateTo: Elapsed: " << delta_d << " secs " << Format(static_cast<int>(howmany / delta_d)) << "/sec";
+    LOG_SEV(Info) << "Lightning FormatDateTo:" << PadTill(pad_width) << "Elapsed: " << delta_d << " secs " << Format(static_cast<int>(howmany / delta_d)) << "/sec";
   }
 }
 
 void bench_mt(int howmany, std::size_t thread_count) {
-  auto fs = std::make_shared<FileSink>("logs/greased_lightning_basic_mt.log");
-  Logger logger(fs);
-  fs->SetFormatter(formatting::MakeMsgFormatter("[{}] [basic_mt/backtrace-off] [{}] {}",
-                                                formatting::DateTimeAttributeFormatter{},
-                                                formatting::SeverityAttributeFormatter{},
-                                                formatting::MSG));
+  {
+    auto fs = std::make_shared<FileSink>("logs/greased_lightning_basic_mt.log");
+    Logger logger(fs);
+    fs->SetFormatter(formatting::MakeMsgFormatter("[{}] [basic_mt/backtrace-off] [{}] {}",
+                                                  formatting::DateTimeAttributeFormatter{},
+                                                  formatting::SeverityAttributeFormatter{},
+                                                  formatting::MSG));
 
-  std::vector<std::thread> threads;
-  threads.reserve(thread_count);
-  auto start = high_resolution_clock::now();
-  for (size_t t = 0; t < thread_count; ++t) {
-    threads.emplace_back([&]() {
-      for (int j = 0; j < howmany / static_cast<int>(thread_count); ++j) {
-        LOG_SEV_TO(logger, Info) << "Hello logger: msg number " << j;
-      }
-    });
+    std::vector<std::thread> threads;
+    threads.reserve(thread_count);
+    auto start = high_resolution_clock::now();
+    for (size_t t = 0; t < thread_count; ++t) {
+      threads.emplace_back([&]() {
+        for (int j = 0; j < howmany / static_cast<int>(thread_count); ++j) {
+          LOG_SEV_TO(logger, Info) << "Hello logger: msg number " << j;
+        }
+      });
+    }
+
+    for (auto& t: threads) {
+      t.join();
+    };
+
+    auto delta_d = duration_cast<duration<double>>(high_resolution_clock::now() - start).count();
+    LOG_SEV(Info) << "Lightning:" << PadTill(pad_width) << "Elapsed: " << delta_d << " secs " << Format(static_cast<int>(howmany / delta_d)) << "/sec";
   }
+  {
+    auto fs = std::make_shared<FileSink>("logs/greased_lightning_basic_mt_multiple_logger.log");
 
-  for (auto& t: threads) {
-    t.join();
-  };
+    std::vector<std::thread> threads;
+    threads.reserve(thread_count);
+    auto start = high_resolution_clock::now();
+    for (size_t t = 0; t < thread_count; ++t) {
+      threads.emplace_back([&, t]() {
+        Logger logger(fs);
+        fs->SetFormatter(formatting::MakeMsgFormatter("[{}] [basic_mt/logger-" + std::to_string(t) + "] [{}] {}",
+                                                      formatting::DateTimeAttributeFormatter{},
+                                                      formatting::SeverityAttributeFormatter{},
+                                                      formatting::MSG));
 
-  auto delta_d = duration_cast<duration<double>>(high_resolution_clock::now() - start).count();
-  LOG_SEV(Info) << "Lightning: Elapsed: " << delta_d << " secs " << Format(static_cast<int>(howmany / delta_d)) << "/sec";
-}
+        for (int j = 0; j < howmany / static_cast<int>(thread_count); ++j) {
+          LOG_SEV_TO(logger, Info) << "Hello logger " << std::this_thread::get_id() << ": msg number " << j;
+        }
+      });
+    }
 
-void bench_mt_multiple_loggers(int howmany, std::size_t thread_count) {
-  auto fs = std::make_shared<FileSink>("logs/greased_lightning_basic_mt_multiple_logger.log");
+    for (auto& t: threads) {
+      t.join();
+    };
 
-
-  std::vector<std::thread> threads;
-  threads.reserve(thread_count);
-  auto start = high_resolution_clock::now();
-  for (size_t t = 0; t < thread_count; ++t) {
-    threads.emplace_back([&, t]() {
-      Logger logger(fs);
-      fs->SetFormatter(formatting::MakeMsgFormatter("[{}] [basic_mt/logger-" + std::to_string(t) + "] [{}] {}",
-                                                    formatting::DateTimeAttributeFormatter{},
-                                                    formatting::SeverityAttributeFormatter{},
-                                                    formatting::MSG));
-
-      for (int j = 0; j < howmany / static_cast<int>(thread_count); ++j) {
-        LOG_SEV_TO(logger, Info) << "Hello logger " << std::this_thread::get_id() << ": msg number " << j;
-      }
-    });
+    auto delta_d = duration_cast<duration<double>>(high_resolution_clock::now() - start).count();
+    LOG_SEV(Info) << "Lightning:" << PadTill(pad_width) << "Elapsed: " << delta_d << " secs " << Format(static_cast<int>(howmany / delta_d)) << "/sec";
   }
-
-  for (auto& t: threads) {
-    t.join();
-  };
-
-  auto delta_d = duration_cast<duration<double>>(high_resolution_clock::now() - start).count();
-  LOG_SEV(Info) << "Lightning: Elapsed: " << delta_d << " secs " << Format(static_cast<int>(howmany / delta_d)) << "/sec";
 }
