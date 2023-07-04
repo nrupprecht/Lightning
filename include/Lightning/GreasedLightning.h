@@ -795,23 +795,23 @@ struct AnsiResetSegment_t : public AnsiColorSegment {
 //!         is no reason to explicitly create more.
 const inline AnsiResetSegment_t AnsiResetSegment{};
 
-//! \brief Inject spaces until the message length or total formatted length reaches a specified length.
-struct PadTill : public BaseSegment {
-  //! \brief  Specifies whether the pad should be for the message part of the formatted string, or the entire
-  //!         length of the formatted string.
-  enum class PadType : unsigned char { MESSAGE_LENGTH, TOTAL_LENGTH };
+//! \brief  How to count distance while formatting, Specifies whether the pad should be for the message
+//!         part of the formatted string, or the entire length of the formatted string.
+enum class FmtDistanceType : unsigned char { MESSAGE_LENGTH, TOTAL_LENGTH };
 
-  explicit PadTill(unsigned pad_length, PadType pad_type = PadType::MESSAGE_LENGTH)
-      : pad_length_(pad_length), pad_type_(pad_type) {}
+//! \brief Inject spaces until the message length or total formatted length reaches a specified length.
+struct FillUntil : public BaseSegment {
+  explicit FillUntil(unsigned pad_length, char fill_char, FmtDistanceType pad_type = FmtDistanceType::MESSAGE_LENGTH)
+      : pad_length_(pad_length), fill_char_(fill_char), pad_type_(pad_type) {}
 
   char* AddToBuffer(const FormattingSettings& settings, const formatting::MessageInfo& msg_info, char* start, [[maybe_unused]] char* end) const override {
     auto num_chars = SizeRequired(settings, msg_info);
-    std::fill_n(start, num_chars, ' ');
+    std::fill_n(start, num_chars, fill_char_);
     return start + num_chars;
   }
 
   NO_DISCARD unsigned SizeRequired(const FormattingSettings&, const formatting::MessageInfo& msg_info) const override {
-    if (pad_type_ == PadType::MESSAGE_LENGTH) {
+    if (pad_type_ == FmtDistanceType::MESSAGE_LENGTH) {
       return pad_length_ - std::min(msg_info.message_length, pad_length_);
     }
     else { // TOTAL_LENGTH
@@ -820,12 +820,23 @@ struct PadTill : public BaseSegment {
   }
 
   void CopyTo(class SegmentStorage& storage) const override {
-    storage.Create<PadTill>(*this);
+    storage.Create<FillUntil>(*this);
   }
 
  private:
   unsigned pad_length_{};
-  PadType pad_type_;
+  char fill_char_{};
+  FmtDistanceType pad_type_;
+};
+
+//! \brief Inject spaces until the message length or total formatted length reaches a specified length.
+struct PadUntil : public FillUntil {
+  explicit PadUntil(unsigned pad_length, FmtDistanceType pad_type = FmtDistanceType::MESSAGE_LENGTH)
+      : FillUntil(pad_length, ' ', pad_type) {}
+
+  void CopyTo(class SegmentStorage& storage) const override {
+    storage.Create<PadUntil>(*this);
+  }
 };
 
 //! \brief Segment that repeats a character N times.
@@ -1901,6 +1912,15 @@ class Core {
 
   NO_DISCARD const std::vector<std::shared_ptr<Sink>>& GetSinks() const { return sinks_; }
 
+  // TODO: Unit test.
+  template <typename Func>
+  Core& ApplyToAllSink(Func&& func) {
+    std::for_each(sinks_.begin(), sinks_.end(), [f = std::forward<Func>(func)](auto& sink) {
+      f(*sink);
+    });
+    return *this;
+  }
+
  private:
   //! \brief All sinks the core will dispatch messages to.
   std::vector<std::shared_ptr<Sink>> sinks_;
@@ -2025,6 +2045,7 @@ class TrivialDispatchSink : public Sink {
 class FileSink : public Sink {
  public:
   explicit FileSink(const std::string& file) : fout_(file) {}
+  ~FileSink() override { fout_.flush(); }
 
   void Dispatch(const Record& record) override {
     auto message = formatter_->Format(record, settings_);
@@ -2039,6 +2060,8 @@ class FileSink : public Sink {
 
 class OstreamSink : public Sink {
  public:
+  ~OstreamSink() override { out_.flush(); }
+
   explicit OstreamSink(std::ostringstream& stream) : out_(stream) {
     settings_.has_virtual_terminal_processing = false;
   }
@@ -2049,9 +2072,11 @@ class OstreamSink : public Sink {
 
   void Dispatch(const Record& record) override {
     auto message = formatter_->Format(record, settings_);
+    std::lock_guard guard(out_mtx_);
     out_.write(message.c_str(), static_cast<std::streamsize>(message.size()));
   }
-
+ private:
+  std::mutex out_mtx_;
   std::ostream& out_;
 };
 

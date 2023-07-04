@@ -52,22 +52,22 @@ TEST(Lightning, PadTill) {
   logger.GetCore()->GetFilter().AcceptNoSeverity(true);
 
   {
-    LOG_TO(logger) << PadTill(10) << "X";
+    LOG_TO(logger) << PadUntil(10) << "X";
     EXPECT_EQ(stream.str(), "          X\n");
     stream.str("");
   }
   {
-    LOG_TO(logger) << "1234" << PadTill(10) << "X";
+    LOG_TO(logger) << "1234" << PadUntil(10) << "X";
     EXPECT_EQ(stream.str(), "1234      X\n");
     stream.str("");
   }
   {
-    LOG_TO(logger) << "1234567" << PadTill(10) << "X";
+    LOG_TO(logger) << "1234567" << PadUntil(10) << "X";
     EXPECT_EQ(stream.str(), "1234567   X\n");
     stream.str("");
   }
   {
-    LOG_TO(logger) << "123456789AB" << PadTill(10) << "X";
+    LOG_TO(logger) << "123456789AB" << PadUntil(10) << "X";
     EXPECT_EQ(stream.str(), "123456789ABX\n");
     stream.str("");
   }
