@@ -5,7 +5,7 @@
 #include <gtest/gtest.h>
 
 // Includes
-#include "Lightning/GreasedLightning.h"
+#include "Lightning/Lightning.h"
 #include <string>
 
 using namespace lightning;

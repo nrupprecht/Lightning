@@ -4,7 +4,7 @@
 
 #include <gtest/gtest.h>
 // Other files.
-#include "Lightning/GreasedLightning.h"
+#include "Lightning/Lightning.h"
 
 using namespace lightning;
 using namespace std::string_literals;
@@ -27,7 +27,7 @@ TEST(MessageStringFormatter, Basic) {
   }
 
   record_formatter.AddMsgSegment();
-  EXPECT_EQ(record_formatter.NumSegments(), 1);
+  EXPECT_EQ(record_formatter.NumSegments(), 1u);
   {
     auto result = record_formatter.Format(record, {});
     EXPECT_EQ(result, "Hello, world!\n");
@@ -38,7 +38,7 @@ TEST(MessageStringFormatter, Basic) {
   record_formatter.AddAttributeFormatter(std::make_shared<formatting::SeverityAttributeFormatter>());
   record_formatter.AddLiteralSegment("] ");
   record_formatter.AddMsgSegment();
-  EXPECT_EQ(record_formatter.NumSegments(), 4);
+  EXPECT_EQ(record_formatter.NumSegments(), 4u);
 
   { // With colors
     FormattingSettings settings;

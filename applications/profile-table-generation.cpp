@@ -7,7 +7,7 @@
 //
 
 
-#include "Lightning/GreasedLightning.h"
+#include "Lightning/Lightning.h"
 #include <cmath>
 #include <sstream>
 #include <iostream>
