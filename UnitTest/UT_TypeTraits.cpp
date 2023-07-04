@@ -38,25 +38,23 @@ TEST(Lightning, IsOstreamable) {
 }
 
 TEST(Lightning, Unconst_t) {
-  EXPECT_TRUE((std::is_same_v<formatting::Unconst_t<const char*>, char*>));
-  EXPECT_TRUE((std::is_same_v<formatting::Unconst_t<char*>, char*>));
-  EXPECT_TRUE((std::is_same_v<formatting::Unconst_t<char const* const>, char*>));
-  EXPECT_TRUE((std::is_same_v<formatting::Unconst_t<const double>, double>));
+  EXPECT_TRUE((std::is_same_v<typetraits::Unconst_t<const char*>, char*>));
+  EXPECT_TRUE((std::is_same_v<typetraits::Unconst_t<char*>, char*>));
+  EXPECT_TRUE((std::is_same_v<typetraits::Unconst_t<char const* const>, char*>));
+  EXPECT_TRUE((std::is_same_v<typetraits::Unconst_t<const double>, double>));
 }
 
 TEST(Lightning, IsCstrRelated_v) {
-  EXPECT_TRUE(formatting::IsCstrRelated_v<char*>);
-  EXPECT_TRUE(formatting::IsCstrRelated_v<const char*>);
-  EXPECT_TRUE(formatting::IsCstrRelated_v<char[5]>);
-  EXPECT_TRUE(formatting::IsCstrRelated_v<char[]>);
+  EXPECT_TRUE(typetraits::IsCstrRelated_v<char*>);
+  EXPECT_TRUE(typetraits::IsCstrRelated_v<const char*>);
+  EXPECT_TRUE(typetraits::IsCstrRelated_v<char[5]>);
+  EXPECT_TRUE(typetraits::IsCstrRelated_v<char[]>);
 
-  EXPECT_FALSE(formatting::IsCstrRelated_v<int>);
-  EXPECT_FALSE(formatting::IsCstrRelated_v<double>);
+  EXPECT_FALSE(typetraits::IsCstrRelated_v<int>);
+  EXPECT_FALSE(typetraits::IsCstrRelated_v<double>);
 }
 
 TEST(Lightning, HasToString) {
-//  EXPECT_TRUE(lightning::typetraits::has_to_string_v<double>);
-//  EXPECT_TRUE(lightning::typetraits::has_to_string_v<bool>);
   EXPECT_TRUE(lightning::typetraits::has_to_string_v<ToStringable>);
 
   EXPECT_FALSE(lightning::typetraits::has_to_string_v<std::string>);

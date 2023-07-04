@@ -16,26 +16,84 @@ namespace Testing {
 TEST(Lightning, NewLineIndent) {
   // Set up logger.
   std::ostringstream stream;
-  auto sink = MakeSink<UnsynchronizedFrontend, OstreamSink>(stream);
+  auto sink = std::make_shared<OstreamSink>(stream);
   lightning::Logger logger({sink});
 
+  EXPECT_TRUE((std::is_base_of_v<BaseSegment, decltype(NewLineIndent)>));
+
   // Usual type of formatting, header is on one line, contains a single {Message}.
-  logger.GetCore()->SetAllFormats("[Ready:] {Message}");
-  logger() << "Bop." << NewLineIndent << "Should align.";
+  sink->SetFormatter(MakeMsgFormatter("[Ready:] {}", formatting::MSG));
+
+  LOG_SEV_TO(logger, Info) << "Bop." << NewLineIndent_t{} << "Should align.";
   EXPECT_EQ(stream.str(), "[Ready:] Bop.\n         Should align.\n");
   stream.str("");
 
   // Message formatting is multiple lines long.
-  logger.GetCore()->SetAllFormats("[First]\n[Second] {Message}");
-  logger() << "Bop." << NewLineIndent << "Should align.";
+  sink->SetFormatter(MakeMsgFormatter("[First]\n[Second] {}", formatting::MSG));
+  LOG_SEV_TO(logger, Info) << "Bop." << NewLineIndent_t{} << "Should align.";
   EXPECT_EQ(stream.str(), "[First]\n[Second] Bop.\n         Should align.\n");
   stream.str("");
 
   // Header contains multiple lines and {Message} parts.
-  logger.GetCore()->SetAllFormats("[Top]: {Message}\n[Repeated]: {Message}");
-  logger() << "A is for apple." << NewLineIndent << "B is for bear.";
+  sink->SetFormatter(MakeMsgFormatter("[Top]: {}\n[Repeated]: {}", formatting::MSG, formatting::MSG));
+  LOG_SEV_TO(logger, Info) << "A is for apple." << NewLineIndent_t{} << "B is for bear.";
 
   EXPECT_EQ(stream.str(), "[Top]: A is for apple.\n       B is for bear.\n[Repeated]: A is for apple.\n            B is for bear.\n");
 }
 
+TEST(Lightning, PadTill) {
+  // Set up logger.
+  std::ostringstream stream;
+  auto sink = std::make_shared<OstreamSink>(stream);
+  sink->SetFormatter(MakeMsgFormatter("{}", formatting::MSG));
+  lightning::Logger logger({sink});
+
+  sink->GetFilter().AcceptNoSeverity(true);
+  logger.GetCore()->GetFilter().AcceptNoSeverity(true);
+
+  {
+    LOG_TO(logger) << PadUntil(10) << "X";
+    EXPECT_EQ(stream.str(), "          X\n");
+    stream.str("");
+  }
+  {
+    LOG_TO(logger) << "1234" << PadUntil(10) << "X";
+    EXPECT_EQ(stream.str(), "1234      X\n");
+    stream.str("");
+  }
+  {
+    LOG_TO(logger) << "1234567" << PadUntil(10) << "X";
+    EXPECT_EQ(stream.str(), "1234567   X\n");
+    stream.str("");
+  }
+  {
+    LOG_TO(logger) << "123456789AB" << PadUntil(10) << "X";
+    EXPECT_EQ(stream.str(), "123456789ABX\n");
+    stream.str("");
+  }
 }
+
+TEST(Lightning, RepeatChar) {
+  // Set up logger.
+  std::ostringstream stream;
+  auto sink = std::make_shared<OstreamSink>(stream);
+  sink->SetFormatter(MakeMsgFormatter("{}", formatting::MSG));
+  lightning::Logger logger({sink});
+
+  sink->GetFilter().AcceptNoSeverity(true);
+  logger.GetCore()->GetFilter().AcceptNoSeverity(true);
+
+  {
+    LOG_TO(logger) << RepeatChar(5, 'a') << "X";
+    EXPECT_EQ(stream.str(), "aaaaaX\n");
+    stream.str("");
+  }
+  {
+    LOG_TO(logger) << "A" << RepeatChar(5, 'x') << "B" << RepeatChar(3, 'c');
+    EXPECT_EQ(stream.str(), "AxxxxxBccc\n");
+    stream.str("");
+  }
+
+}
+
+} // namespace Testing

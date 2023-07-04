@@ -15,10 +15,10 @@ namespace Testing {
 
 TEST(Core, AddSink) {
   std::ostringstream stream1;
-  auto sink1 = MakeSink<UnsynchronizedFrontend, OstreamSink>(stream1);
+  auto sink1 = std::make_shared<OstreamSink>(stream1);
 
   std::ostringstream stream2;
-  auto sink2 = MakeSink<UnsynchronizedFrontend, OstreamSink>(stream2);
+  auto sink2 = std::make_shared<OstreamSink>(stream2);
 
   auto core = std::make_shared<Core>();
   core->AddSink(sink1);

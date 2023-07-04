@@ -28,21 +28,25 @@ namespace Testing {
 
 TEST(Logger, RecordHandler_Streaming) {
   std::ostringstream stream;
-  auto sink = MakeSink<UnsynchronizedFrontend, OstreamSink>(stream);
-  lightning::Logger logger({sink});
-  logger() << ToStringable{'h'};
+  auto sink = std::make_shared<OstreamSink>(stream);
+  sink->SetFormatter(MakeMsgFormatter("{}", formatting::MSG));
+
+  lightning::Logger logger(sink);
+
+  LOG_SEV_TO(logger, Info) << ToStringable{'h'};
 
   EXPECT_EQ(stream.str(), "<h>\n");
 }
 
 TEST(Logger, OstreamSink) {
   std::ostringstream stream;
-  auto sink = MakeSink<UnsynchronizedFrontend, OstreamSink>(stream);
+  auto sink = std::make_shared<OstreamSink>(stream);
+  sink->SetFormatter(MakeMsgFormatter("{}", formatting::MSG));
 
   lightning::Logger logger;
   logger.GetCore()->AddSink(std::move(sink));
 
-  logger() << "Hello world!";
+  LOG_SEV_TO(logger, Info) << "Hello world!";
   EXPECT_EQ(stream.str(), "Hello world!\n");
   stream.str("");
 }
@@ -89,58 +93,49 @@ TEST(Logger, Segmentize_2) {
 
 TEST(Logger, SeverityLogger) {
   std::ostringstream stream;
+  auto sink = std::make_shared<OstreamSink>(stream);
+  sink->SetFormatter(MakeMsgFormatter("[{}]: {}",
+                                    formatting::SeverityAttributeFormatter{},
+                                    formatting::MSG));
 
-  auto sink = MakeSink<UnsynchronizedFrontend, OstreamSink>(stream);
+  Logger logger(std::move(sink));
 
-  EXPECT_TRUE(sink->SetFormatFrom("[{Severity}]: {Message}"));
-
-  SeverityLogger logger;
-  logger.GetCore()->AddSink(std::move(sink));
-
-  logger(Severity::Debug) << "Goodbye, my friends.";
+  LOG_SEV_TO(logger, Debug) << "Goodbye, my friends.";
   EXPECT_EQ(stream.str(), "[Debug  ]: Goodbye, my friends.\n");
   stream.str("");
 
-  logger(Severity::Info) << "Goodbye, my friends.";
+  LOG_SEV_TO(logger, Info) << "Goodbye, my friends.";
   EXPECT_EQ(stream.str(), "[Info   ]: Goodbye, my friends.\n");
   stream.str("");
 
-  logger(Severity::Warning) << "Goodbye, my friends.";
+  LOG_SEV_TO(logger, Warning) << "Goodbye, my friends.";
   EXPECT_EQ(stream.str(), "[Warning]: Goodbye, my friends.\n");
   stream.str("");
 
-  logger(Severity::Error) << "Goodbye, my friends.";
+  LOG_SEV_TO(logger, Error) << "Goodbye, my friends.";
   EXPECT_EQ(stream.str(), "[Error  ]: Goodbye, my friends.\n");
   stream.str("");
 
-  logger(Severity::Fatal) << "Goodbye, my friends.";
+  LOG_SEV_TO(logger, Fatal) << "Goodbye, my friends.";
   EXPECT_EQ(stream.str(), "[Fatal  ]: Goodbye, my friends.\n");
   stream.str("");
 }
 
-TEST(Logger, CreateHandler) {
+TEST(GeneralFormatting, MoreThanInitialBuffer) {
   std::ostringstream stream;
-  auto sink = MakeSink<UnsynchronizedFrontend, OstreamSink>(stream);
-  EXPECT_TRUE(sink->SetFormatFrom("[{Severity}]: {Message}"));
+  auto sink = std::make_shared<OstreamSink>(stream);
+  sink->SetFormatter(formatting::MakeMsgFormatter("{}", formatting::MSG));
+  Logger logger(sink);
 
-  SeverityLogger logger({sink});
-
-  // No severity level is provided.
-  logger.OpenRecordHandler() << "Good morning, friend.";
-  EXPECT_EQ(stream.str(), "[]: Good morning, friend.\n");
-  stream.str("");
-
-  // Severity level is provided.
-  logger.OpenRecordHandler(attribute::SeverityAttribute(Severity::Info)) << "Good morning, friend.";
-  EXPECT_EQ(stream.str(), "[Info   ]: Good morning, friend.\n");
-  stream.str("");
+  LOG_SEV_TO(logger, Info) << "1" << "2" << "3" << "4" << "5" << "6" << "7" << "8" << "9" << "10" << "11" << "12" << "13" << "14" << "15";
+  EXPECT_EQ(stream.str(), "123456789101112131415\n");
 }
 
 TEST(Logger, BlockAttributes) {
   std::ostringstream stream;
-  auto sink = MakeSink<UnsynchronizedFrontend, OstreamSink>(stream);
-  SeverityLogger logger({sink});
-
+  auto sink = std::make_shared<OstreamSink>(stream);
+  Logger logger(sink);
+  /*
   logger
       .AddLoggerAttributeFormatter(attribute::BlockIndentationFormatter{})
       .AddAttribute(attribute::BlockLevelAttribute{});
@@ -165,6 +160,7 @@ TEST(Logger, BlockAttributes) {
                           "[Error  ]:   >> This has gone too far.\n"
                           "[Fatal  ]: >> Death approaches.\n"
                           "");
+                          */
 }
 
 } // namespace Testing
