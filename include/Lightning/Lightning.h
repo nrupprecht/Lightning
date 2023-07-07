@@ -978,7 +978,7 @@ struct Segment<bool> : public BaseSegment {
   char* AddToBuffer([[maybe_unused]] const FormattingSettings& settings, const formatting::MessageInfo&, char* start, [[maybe_unused]] char* end) const override {
     if (value_) {
 #if defined _MSC_VER
-      strcpy_s(start, 4, "true");
+      strcpy_s(start, 5, "true");
 #else
       strcpy(start, "true");
 #endif
@@ -986,7 +986,7 @@ struct Segment<bool> : public BaseSegment {
     }
     else {
 #if defined _MSC_VER
-      strcpy_s(start, 5, "false");
+      strcpy_s(start, 6, "false");
 #else
       strcpy(start, "false");
 #endif
@@ -1019,7 +1019,7 @@ struct Segment<Floating_t, std::enable_if_t<std::is_floating_point_v<Floating_t>
   char* AddToBuffer([[maybe_unused]] const FormattingSettings& settings, const formatting::MessageInfo&, char* start, [[maybe_unused]] char* end) const override {
     // std::to_chars(start, end, number_, std::chars_format::fixed);
 #if defined _MSC_VER
-    strcpy_s(start, serialized_number_.size(), &serialized_number_[0]);
+    strcpy_s(start, serialized_number_.size() + 1, &serialized_number_[0]);
 #else
     std::strcpy(start, &serialized_number_[0]);
 #endif
