@@ -19,6 +19,8 @@
 #include <chrono>
 #include <map>
 #include <charconv>
+#include <variant>
+#include <mutex>
 
 namespace lightning {
 
@@ -87,6 +89,10 @@ NEW_TYPE_TRAIT(is_ostreamable_v, std::declval<std::ostream&>() << std::declval<V
 //! \brief  Type trait that determines whether a type has a to_string function.
 NEW_TYPE_TRAIT(has_to_string_v, to_string(std::declval<Value_t>()));
 
+//! \brief Define remove_cvref_t, which is not available everywhere.
+template<typename T>
+using remove_cvref_t = typename std::remove_cv_t<std::remove_reference_t<T>>;
+
 namespace detail_always_false {
 
 template <typename T>
@@ -117,7 +123,7 @@ template <typename T>
 using Unconst_t = typename detail_unconst::Unconst<T>::type;
 
 template <typename T>
-constexpr inline bool IsCstrRelated_v = std::is_same_v<Unconst_t<std::decay_t<T>>, char*> || std::is_same_v<std::remove_cvref_t<T>, std::string>;
+constexpr inline bool IsCstrRelated_v = std::is_same_v<Unconst_t<std::decay_t<T>>, char*> || std::is_same_v<remove_cvref_t<T>, std::string>;
 
 }; // namespace typetraits.
 
@@ -218,15 +224,21 @@ class DateTime {
   //!
   explicit DateTime(const std::chrono::time_point<std::chrono::system_clock>& time_point) {
     // Get number of milliseconds for the current second (remainder after division into seconds)
-    int ms = static_cast<int>((duration_cast<std::chrono::microseconds>(time_point.time_since_epoch()) % 1'000'000).count());
+    int ms = static_cast<int>((std::chrono::duration_cast<std::chrono::microseconds>(time_point.time_since_epoch()) % 1'000'000).count());
     // convert to std::time_t in order to convert to std::tm (broken time)
     auto t = std::chrono::system_clock::to_time_t(time_point);
 
     // Convert time - this is expensive.
-    std::tm* now = std::localtime(&t);
+    std::tm now{};
+#if defined _MSC_VER
+    localtime_s(&now, &t);
+#else
+//    std::tm* now = std::localtime(&t);
+    localtime_r(&t, &now);
+#endif
 
-    setYMD(now->tm_year + 1900, now->tm_mon + 1, now->tm_mday, false);
-    setHMSUS(now->tm_hour, now->tm_min, now->tm_sec, ms, false);
+    setYMD(now.tm_year + 1900, now.tm_mon + 1, now.tm_mday, false);
+    setHMSUS(now.tm_hour, now.tm_min, now.tm_sec, ms, false);
   }
 
   explicit DateTime(int yyyymmdd) : DateTime(yyyymmdd / 10000, (yyyymmdd / 100) % 100, yyyymmdd % 100) {}
@@ -291,25 +303,25 @@ class DateTime {
     // Zero previous y-m-d.
     y_m_d_h_m_s_um_ = (y_m_d_h_m_s_um_ << 32) >> 32;
     y_m_d_h_m_s_um_ |=
-        (static_cast<long>(year) << shift_year_)
-            | (static_cast<long>(month) << shift_month_)
-            | (static_cast<long>(day) << shift_day_);
+        (static_cast<std::uint64_t>(year) << shift_year_)
+            | (static_cast<std::uint64_t>(month) << shift_month_)
+            | (static_cast<std::uint64_t>(day) << shift_day_);
   }
 
   void setHMSUS(int hour, int minute, int second, int microseconds, bool validate = true) {
     if (validate) validateHMSUS(hour, minute, second, microseconds);
     // Zero previous h-m-s-us.
     y_m_d_h_m_s_um_ = (y_m_d_h_m_s_um_ >> 32) << 32;
-    y_m_d_h_m_s_um_ |= (static_cast<long>(hour) << shift_hour_)
-        | (static_cast<long>(minute) << shift_minute_)
-        | (static_cast<long>(second) << shift_second_)
+    y_m_d_h_m_s_um_ |= (static_cast<std::uint64_t>(hour) << shift_hour_)
+        | (static_cast<std::uint64_t>(minute) << shift_minute_)
+        | (static_cast<std::uint64_t>(second) << shift_second_)
         | microseconds;
   }
 
   static void validateYMD(int year, int month, int day) {
     LL_REQUIRE(0 < year, "year must be > 0");
     LL_REQUIRE(0 < month && month <= 12, "month must be in the range [1, 12]")
-    LL_REQUIRE(0 < day < DaysInMonth(month, year), "there are only " << DaysInMonth(month, year) << " days in " << year << "-" << month);
+    LL_REQUIRE(0 < day && day <= DaysInMonth(month, year), "there are only " << DaysInMonth(month, year) << " days in " << year << "-" << month);
   }
 
   static void validateHMSUS(int hour, int minute, int second, int microseconds) {
@@ -330,7 +342,7 @@ class DateTime {
   //!         0 <= ms < 1'000'000  => 20 bits
   //!         Total: 64 bits
   //! yyyyyyyy-yyyymmmm-mmmddddd-dddhhhhh mmmmmmss-ssssuuuu-uuuuuuuu-uuuuuuuu
-  long y_m_d_h_m_s_um_{};
+  std::uint64_t y_m_d_h_m_s_um_{};
 
   static constexpr int shift_second_ = 20;
   static constexpr int shift_minute_ = 26;
@@ -407,7 +419,7 @@ class FastDateGenerator {
   NO_DISCARD DateTime CurrentTime() const {
     auto current_time = std::chrono::system_clock::now();
 
-    auto us = duration_cast<std::chrono::microseconds>(current_time - start_time_point_).count();
+    auto us = std::chrono::duration_cast<std::chrono::microseconds>(current_time - start_time_point_).count();
     return AddMicroseconds(base_date_time_, us);
   }
 
@@ -644,8 +656,8 @@ inline std::string SetAnsiRGBColorFmt(Ansi256Color r, Ansi256Color g, Ansi256Col
 inline std::string AnsiReset() { return SetAnsiColorFmt(AnsiForegroundColor::Default, AnsiBackgroundColor::Default); }
 
 //! \brief Count the number of characters in a range that are not part of an Ansi escape sequence.
-inline std::size_t CountNonAnsiSequenceCharacters(const char* begin, const char* end) {
-  std::size_t count = 0;
+inline unsigned CountNonAnsiSequenceCharacters(const char* begin, const char* end) {
+  unsigned count = 0;
   bool in_escape = false;
   for (auto it = begin; it != end; ++it) {
     if (*it == '\x1b') {
@@ -770,7 +782,7 @@ struct AnsiColorSegment : public BaseSegment {
   }
 
   NO_DISCARD unsigned SizeRequired(const FormattingSettings& settings, const formatting::MessageInfo&) const override {
-    return settings.has_virtual_terminal_processing ? fmt_string_.size() : 0;
+    return settings.has_virtual_terminal_processing ? static_cast<unsigned>(fmt_string_.size()) : 0u;
   }
 
   void CopyTo(class SegmentStorage& storage) const override {
@@ -892,8 +904,8 @@ struct Segment;
 
 //! \brief  Type trait that determines whether a type has a to_string function.
 NEW_TYPE_TRAIT(has_segment_formatter_v,
-               Segment<std::decay_t<std::remove_cvref_t<Value_t>>>(
-                   std::declval<std::decay_t<std::remove_cvref_t<Value_t>>>(),
+               Segment<std::decay_t<typetraits::remove_cvref_t<Value_t>>>(
+                   std::declval<std::decay_t<typetraits::remove_cvref_t<Value_t>>>(),
                    nullptr,
                    nullptr));
 
@@ -917,7 +929,7 @@ struct Segment<std::string> : public BaseSegment {
   }
 
   void CopyTo(class SegmentStorage& storage) const override {
-    storage.Create<Segment<std::string>>(*this);
+    storage.Create < Segment < std::string >> (*this);
   }
 
  private:
@@ -928,7 +940,7 @@ struct Segment<std::string> : public BaseSegment {
 template <>
 struct Segment<char*> : public BaseSegment {
   explicit Segment(const char* s, const char* fmt_begin, const char* fmt_end)
-      : BaseSegment(fmt_begin, fmt_end), cstr_(s), size_required_(std::strlen(s)) {}
+      : BaseSegment(fmt_begin, fmt_end), cstr_(s), size_required_(static_cast<unsigned>(std::strlen(s))) {}
 
   char* AddToBuffer([[maybe_unused]] const FormattingSettings& settings, const formatting::MessageInfo&, char* start, char* end) const override {
     for (auto i = 0u; i < size_required_; ++i, ++start) {
@@ -943,7 +955,7 @@ struct Segment<char*> : public BaseSegment {
   }
 
   void CopyTo(class SegmentStorage& storage) const override {
-    storage.Create<Segment<char*>>(*this);
+    storage.Create < Segment < char * >> (*this);
   }
 
  private:
@@ -965,11 +977,19 @@ struct Segment<bool> : public BaseSegment {
 
   char* AddToBuffer([[maybe_unused]] const FormattingSettings& settings, const formatting::MessageInfo&, char* start, [[maybe_unused]] char* end) const override {
     if (value_) {
+#if defined _MSC_VER
+      strcpy_s(start, 4, "true");
+#else
       strcpy(start, "true");
+#endif
       return start + 4;
     }
     else {
+#if defined _MSC_VER
+      strcpy_s(start, 5, "false");
+#else
       strcpy(start, "false");
+#endif
       return start + 5;
     }
   }
@@ -979,7 +999,7 @@ struct Segment<bool> : public BaseSegment {
   }
 
   void CopyTo(class SegmentStorage& storage) const override {
-    storage.Create<Segment<bool>>(*this);
+    storage.Create < Segment < bool >> (*this);
   }
 
  private:
@@ -993,12 +1013,16 @@ struct Segment<Floating_t, std::enable_if_t<std::is_floating_point_v<Floating_t>
       : BaseSegment(fmt_begin, fmt_end), number_(number), size_required_(10) {
     // TEMPORARY...? Wish that std::to_chars works for floating points.
     serialized_number_ = std::to_string(number);
-    size_required_ = serialized_number_.size();
+    size_required_ = static_cast<unsigned>(serialized_number_.size());
   }
 
   char* AddToBuffer([[maybe_unused]] const FormattingSettings& settings, const formatting::MessageInfo&, char* start, [[maybe_unused]] char* end) const override {
     // std::to_chars(start, end, number_, std::chars_format::fixed);
+#if defined _MSC_VER
+    strcpy_s(start, serialized_number_.size(), &serialized_number_[0]);
+#else
     std::strcpy(start, &serialized_number_[0]);
+#endif
     return start + serialized_number_.size();
   }
 
@@ -1007,7 +1031,7 @@ struct Segment<Floating_t, std::enable_if_t<std::is_floating_point_v<Floating_t>
   }
 
   void CopyTo(class SegmentStorage& storage) const override {
-    storage.Create<Segment<Floating_t>>(*this);
+    storage.Create < Segment < Floating_t >> (*this);
   }
 
  private:
@@ -1034,7 +1058,7 @@ struct Segment<Integral_t, std::enable_if_t<std::is_integral_v<Integral_t>>> : p
   }
 
   void CopyTo(class SegmentStorage& storage) const override {
-    storage.Create<Segment<Integral_t>>(*this);
+    storage.Create < Segment < Integral_t >> (*this);
   }
 
  private:
@@ -1057,7 +1081,7 @@ struct Segment<time::DateTime> : public BaseSegment {
   }
 
   void CopyTo(class SegmentStorage& storage) const override {
-    storage.Create<Segment<time::DateTime>>(*this);
+    storage.Create < Segment < time::DateTime >> (*this);
   }
 
  private:
@@ -1090,14 +1114,14 @@ struct AnsiColor8Bit : public BaseSegment {
   }
 
   void CopyTo(class SegmentStorage& storage) const override {
-    storage.Create<AnsiColor8Bit<T >> (*this);
+    storage.Create < AnsiColor8Bit < T >> (*this);
   }
 
  private:
   //! \brief
   std::string set_formatting_string_;
   //! \brief The object that should be colored.
-  Segment<std::decay_t<std::remove_cvref_t<T>>> segment_;
+  Segment<std::decay_t<typetraits::remove_cvref_t<T>>> segment_;
 };
 
 //! \brief An object that has a bundle of data, to be formatted.
@@ -1169,9 +1193,9 @@ NEW_TYPE_TRAIT(has_logstream_formatter_v, format_logstream(std::declval<const Va
 
 template <typename T>
 RefBundle& RefBundle::operator<<(T&& obj) {
-  using decay_t = std::decay_t<std::remove_cvref_t<T>>;
+  using decay_t = std::decay_t<typetraits::remove_cvref_t<T>>;
 
-  if constexpr (has_logstream_formatter_v<decay_t>) {
+  if constexpr (has_logstream_formatter_v < decay_t >) {
     format_logstream(obj, *this);
   }
   else if constexpr (std::is_base_of_v<BaseSegment, decay_t>) {
@@ -1307,7 +1331,7 @@ struct AttributeFilter {
 
   AttributeFilter& Accept(const std::set<Severity>& acceptable) {
     for (auto sev: {Severity::Debug, Severity::Info, Severity::Warning, Severity::Error, Severity::Fatal}) {
-      severity_filter_.SetAcceptance(sev, acceptable.contains(sev));
+      severity_filter_.SetAcceptance(sev, acceptable.count(sev) != 0);
     }
     return *this;
   }
@@ -1442,7 +1466,7 @@ class SeverityAttributeFormatter : public AttributeFormatter {
     if (attributes.basic_attributes.level) {
       unsigned required_size = colorSegment(attributes.basic_attributes.level.value()).SizeRequired(settings, msg_info);
       required_size += AnsiResetSegment.SizeRequired(settings, msg_info);
-      return required_size + getString(attributes.basic_attributes.level.value()).size();
+      return required_size + static_cast<unsigned>(getString(attributes.basic_attributes.level.value()).size());
     }
     return 0u;
   }
@@ -1540,7 +1564,7 @@ class LoggerNameAttributeFormatter final : public AttributeFormatter {
   }
 
   NO_DISCARD unsigned RequiredSize(const RecordAttributes& attributes, const FormattingSettings&, const formatting::MessageInfo&) const override {
-    return attributes.basic_attributes.logger_name.size();
+    return static_cast<unsigned>(attributes.basic_attributes.logger_name.size());
   }
 };
 
@@ -1614,7 +1638,7 @@ class MsgFormatter : public BaseMessageFormatter {
     msg_info.needs_message_indentation = needs_message_indentation;
 
     auto required_size = getRequiredSize<0>(record, sink_settings, msg_info);
-    required_size += sink_settings.message_terminator.size();
+    required_size += static_cast<unsigned>(sink_settings.message_terminator.size());
     std::string buffer(required_size, ' ');
 
     // Reset message info.
@@ -1646,12 +1670,14 @@ class MsgFormatter : public BaseMessageFormatter {
   template <std::size_t N>
   NO_DISCARD unsigned getRequiredSize(const Record& record, const FormattingSettings& sink_settings, MessageInfo& msg_info) const {
     if constexpr (N == sizeof...(Types)) {
-      msg_info.total_length += literals_[N].size();
-      return literals_[N].size();
+      auto usize = static_cast<unsigned>(literals_[N].size());
+      msg_info.total_length += usize;
+      return usize;
     }
     else {
       unsigned required_size{};
-      msg_info.total_length += literals_[N].size();
+      auto usize = static_cast<unsigned>(literals_[N].size());
+      msg_info.total_length += usize;
 
       if constexpr (std::is_same_v<MSG_t, std::tuple_element_t<N, decltype(formatters_)>>) {
         if (msg_info.needs_message_indentation) {
@@ -1671,7 +1697,7 @@ class MsgFormatter : public BaseMessageFormatter {
         required_size = std::get<N>(formatters_).RequiredSize(record.Attributes(), sink_settings, msg_info);
         msg_info.total_length += required_size;
       }
-      return literals_[N].size() + required_size + getRequiredSize < N + 1 > (record, sink_settings, msg_info);
+      return usize + required_size + getRequiredSize < N + 1 > (record, sink_settings, msg_info);
     }
   }
 
@@ -1679,7 +1705,7 @@ class MsgFormatter : public BaseMessageFormatter {
   char* format(char*& buffer, const Record& record, const FormattingSettings& sink_settings, MessageInfo& msg_info) const {
     // First, the literal.
     buffer = std::copy(literals_[N].begin(), literals_[N].end(), buffer);
-    msg_info.total_length += literals_[N].size();
+    msg_info.total_length += static_cast<unsigned>(literals_[N].size());
 
     if constexpr (N != sizeof...(Types)) {
       // Then the formatter from the slot.
@@ -1745,7 +1771,7 @@ class RecordFormatter : public BaseMessageFormatter {
           break;
         }
         case 2: {
-          size = std::get<2>(formatter).size();
+          size = static_cast<unsigned>(std::get<2>(formatter).size());
           break;
         }
       }
@@ -1754,7 +1780,7 @@ class RecordFormatter : public BaseMessageFormatter {
     }
 
     // Account for message terminator.
-    required_size += sink_settings.message_terminator.size();
+    required_size += static_cast<unsigned>(sink_settings.message_terminator.size());
 
     std::string buffer(required_size, ' ');
     char* c = &buffer[0], * end = c + required_size;
@@ -1776,7 +1802,7 @@ class RecordFormatter : public BaseMessageFormatter {
           break;
         }
         case 2: {
-          segment_size = std::get<2>(formatter).size();
+          segment_size = static_cast<unsigned>(std::get<2>(formatter).size());
           std::copy(std::get<2>(formatter).begin(), std::get<2>(formatter).end(), c);
           break;
         }
@@ -2203,7 +2229,7 @@ std::string Format(const FormattingSettings& settings, const char* fmt_string, c
   }
   ends[count_placed] = c;
 
-  auto segments = std::make_tuple(Segment<std::decay_t<std::remove_cvref_t<Args_t>>>(args, nullptr, nullptr)...);
+  auto segments = std::make_tuple(Segment<std::decay_t<typetraits::remove_cvref_t<Args_t>>>(args, nullptr, nullptr)...);
   MessageInfo msg_info;
   unsigned format_size = detail::sizeRequired<0>(segments, count_placed, settings, msg_info);
   std::string buffer(format_size + str_length, ' ');
@@ -2231,7 +2257,7 @@ std::string FormatTo(char* buffer, const char* end, const FormattingSettings& se
   }
   ends[count_placed] = std::min(c, end);
 
-  auto segments = std::make_tuple(Segment<std::decay_t<std::remove_cvref_t<Args_t>>>(args, nullptr, nullptr)...);
+  auto segments = std::make_tuple(Segment<std::decay_t<typetraits::remove_cvref_t<Args_t>>>(args, nullptr, nullptr)...);
   detail::formatHelper<0>(&buffer[0], starts, ends, count_placed, segments, settings, std::make_index_sequence<sizeof...(args)>{});
   return buffer;
 }

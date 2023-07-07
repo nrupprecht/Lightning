@@ -44,7 +44,7 @@ void format_logstream(const exception& ex, lightning::RefBundle& handler) {
   handler << NewLineIndent
           << AnsiColor8Bit(R"(""")", AnsiForegroundColor::Red)
           << AnsiColorSegment(AnsiForegroundColor::Yellow); // Exception in yellow.
-  const char* begin = ex.what(), *end = ex.what();
+  const char* begin = ex.what(), * end = ex.what();
   while (*end) {
     for (; *end && *end != '\n'; ++end); // Find next newline.
     handler << NewLineIndent << string_view(begin, end - begin);
@@ -85,7 +85,7 @@ int main() {
                                                      formatting::MSG));
 
   auto iters = 250'000;
-  auto num_threads = 4;
+  auto num_threads = 10;
 
   LOG_SEV(Info) << AnsiColorSegment(formatting::AnsiForegroundColor::Yellow) << "Starting" << AnsiResetSegment << " now.";
   LOG_SEV(Info) << AnsiColor8Bit("Starting", formatting::AnsiForegroundColor::Yellow)
@@ -100,49 +100,49 @@ int main() {
   LOG_SEV(Info) << "Single threaded: " << Format(iters) << " messages";
   LOG_SEV(Info) << RepeatChar(header_length, '*');
   bench_st(iters);
-  LOG_SEV(Info) << RepeatChar(header_length, '*')<< "\n";
+  LOG_SEV(Info) << RepeatChar(header_length, '*') << "\n";
 
   LOG_SEV(Info) << RepeatChar(header_length, '*');
   LOG_SEV(Info) << "Single threaded, Types: " << Format(iters) << " messages";
   LOG_SEV(Info) << RepeatChar(header_length, '*');
   bench_st_types(iters);
-  LOG_SEV(Info) << RepeatChar(header_length, '*')<< "\n";
+  LOG_SEV(Info) << RepeatChar(header_length, '*') << "\n";
 
   LOG_SEV(Info) << RepeatChar(header_length, '*');
   LOG_SEV(Info) << "Single threaded: " << Format(iters) << " messages, non-acceptance";
   LOG_SEV(Info) << RepeatChar(header_length, '*');
   bench_nonaccepting(iters);
-  LOG_SEV(Info) << RepeatChar(header_length, '*')<< "\n";
+  LOG_SEV(Info) << RepeatChar(header_length, '*') << "\n";
 
   LOG_SEV(Info) << RepeatChar(header_length, '*');
   LOG_SEV(Info) << "Date/time generation";
   LOG_SEV(Info) << RepeatChar(header_length, '*');
   bench_datetime(iters);
-  LOG_SEV(Info) << RepeatChar(header_length, '*')<< "\n";
+  LOG_SEV(Info) << RepeatChar(header_length, '*') << "\n";
 
   LOG_SEV(Info) << RepeatChar(header_length, '*');
   LOG_SEV(Info) << "Record formatting";
   LOG_SEV(Info) << RepeatChar(header_length, '*');
   bench_recordformatting(iters);
-  LOG_SEV(Info) << RepeatChar(header_length, '*')<< "\n";
+  LOG_SEV(Info) << RepeatChar(header_length, '*') << "\n";
 
   LOG_SEV(Info) << RepeatChar(header_length, '*');
   LOG_SEV(Info) << "Segments";
   LOG_SEV(Info) << RepeatChar(header_length, '*');
   bench_segments(iters);
-  LOG_SEV(Info) << RepeatChar(header_length, '*')<< "\n";
+  LOG_SEV(Info) << RepeatChar(header_length, '*') << "\n";
 
   LOG_SEV(Info) << RepeatChar(header_length, '*');
   LOG_SEV(Info) << "DateTime formatting time comparison";
   LOG_SEV(Info) << RepeatChar(header_length, '*');
   bench_fmtdatetime(iters);
-  LOG_SEV(Info) << RepeatChar(header_length, '*')<< "\n";
+  LOG_SEV(Info) << RepeatChar(header_length, '*') << "\n";
 
   LOG_SEV(Info) << RepeatChar(header_length, '*');
   LOG_SEV(Info) << "Multi threaded (" << num_threads << " threads): " << Format(iters) << " messages";
   LOG_SEV(Info) << RepeatChar(header_length, '*');
   bench_mt(iters, num_threads);
-  LOG_SEV(Info) << RepeatChar(header_length, '*')<< "\n";
+  LOG_SEV(Info) << RepeatChar(header_length, '*') << "\n";
 
   return 0;
 }
@@ -749,6 +749,37 @@ void bench_mt(int howmany, std::size_t thread_count) {
     };
 
     auto delta_d = duration_cast<duration<double>>(high_resolution_clock::now() - start).count();
-    LOG_SEV(Info) << "Lightning:" << PadUntil(pad_width) << "Elapsed: " << delta_d << " secs " << Format(static_cast<int>(howmany / delta_d)) << "/sec";
+    LOG_SEV(Info) << "Multiple loggers, same sink:" << PadUntil(pad_width) << "Elapsed: " << delta_d << " secs " << Format(static_cast<int>(howmany / delta_d)) << "/sec";
+  }
+  {
+
+    auto formatter = formatting::MakeMsgFormatter("[{}] [{}] [{}] {}",
+                                                  formatting::DateTimeAttributeFormatter{},
+                                                  formatting::LoggerNameAttributeFormatter{},
+                                                  formatting::SeverityAttributeFormatter{},
+                                                  formatting::MSG);
+
+    std::vector<std::thread> threads;
+    threads.reserve(thread_count);
+    auto start = high_resolution_clock::now();
+    for (size_t t = 0; t < thread_count; ++t) {
+      threads.emplace_back([&, t]() {
+        auto fs = std::make_shared<FileSink>("logs/greased_lightning_basic_mt_mt_" + std::to_string(t) + ".log");
+        fs->SetFormatter(formatter->Copy());
+        Logger logger(fs);
+        logger.SetName("basic_mt/logger-" + std::to_string(t));
+
+        for (int j = 0; j < howmany / static_cast<int>(thread_count); ++j) {
+          LOG_SEV_TO(logger, Info) << "Hello logger " << std::this_thread::get_id() << ": msg number " << j;
+        }
+      });
+    }
+
+    for (auto& t: threads) {
+      t.join();
+    };
+
+    auto delta_d = duration_cast<duration<double>>(high_resolution_clock::now() - start).count();
+    LOG_SEV(Info) << "Multiple threads, multiple loggers:" << PadUntil(pad_width) << "Elapsed: " << delta_d << " secs " << Format(static_cast<int>(howmany / delta_d)) << "/sec";
   }
 }
