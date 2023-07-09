@@ -17,7 +17,7 @@ TEST(Lightning, NewLineIndent) {
   // Set up logger.
   std::ostringstream stream;
   auto sink = std::make_shared<OstreamSink>(stream);
-  lightning::Logger logger({sink});
+  lightning::Logger logger(sink);
 
   EXPECT_TRUE((std::is_base_of_v<BaseSegment, decltype(NewLineIndent)>));
 
@@ -46,7 +46,7 @@ TEST(Lightning, PadTill) {
   std::ostringstream stream;
   auto sink = std::make_shared<OstreamSink>(stream);
   sink->SetFormatter(MakeMsgFormatter("{}", formatting::MSG));
-  lightning::Logger logger({sink});
+  lightning::Logger logger(sink);
 
   sink->GetFilter().AcceptNoSeverity(true);
   logger.GetCore()->GetFilter().AcceptNoSeverity(true);
@@ -78,7 +78,7 @@ TEST(Lightning, RepeatChar) {
   std::ostringstream stream;
   auto sink = std::make_shared<OstreamSink>(stream);
   sink->SetFormatter(MakeMsgFormatter("{}", formatting::MSG));
-  lightning::Logger logger({sink});
+  lightning::Logger logger(sink);
 
   sink->GetFilter().AcceptNoSeverity(true);
   logger.GetCore()->GetFilter().AcceptNoSeverity(true);

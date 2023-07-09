@@ -1668,7 +1668,9 @@ class MsgFormatter : public BaseMessageFormatter {
 
  private:
   template <std::size_t N>
-  NO_DISCARD unsigned getRequiredSize(const Record& record, const FormattingSettings& sink_settings, MessageInfo& msg_info) const {
+  NO_DISCARD unsigned getRequiredSize([[maybe_unused]] const Record& record,
+                                      [[maybe_unused]] const FormattingSettings& sink_settings,
+                                      [[maybe_unused]] MessageInfo& msg_info) const {
     if constexpr (N == sizeof...(Types)) {
       auto usize = static_cast<unsigned>(literals_[N].size());
       msg_info.total_length += usize;

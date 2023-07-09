@@ -3,24 +3,22 @@ from   conans.tools import download, unzip
 import os
 
 class Project(ConanFile):
-    name            = "Manta"
-    description     = "Conan package for Manta."
-    version         = "1.0.0"
-    url             = "PROJECT_URL_HERE"
+    name            = "Lightning"
+    description     = "Lightning logging"
+    version         = "0.0.1"
+    url             = "https://github.com/nrupprecht/Lightning.git"
     settings        = "arch", "build_type", "compiler", "os"
     generators      = "cmake"
-    options         = {"shared": [True, False]}
-    default_options = "shared=True"
+
+    options         = {"testing": [True, False]}
+    default_options = {"testing": True}
 
     def imports(self):
         self.copy("*.dylib*", dst="", src="lib")
         self.copy("*.dll"   , dst="", src="bin")
 
     def source(self):
-        zip_name = "%s.zip" % self.version
-        download ("%s/archive/%s" % (self.url, zip_name), zip_name, verify=False)
-        unzip    (zip_name)
-        os.unlink(zip_name)
+        pass
 
     def requirements(self):
         """ List all required conan packages here. """
@@ -28,9 +26,13 @@ class Project(ConanFile):
 
     def build(self):
         cmake          = CMake(self)
-        shared_options = "-DBUILD_SHARED_LIBS=ON" if self.options.shared else "-DBUILD_SHARED_LIBS=OFF"
-        self.run("cmake %s-%s %s %s" % (self.name, self.version, cmake.command_line, shared_options))
-        self.run("cmake --build . %s" % cmake.build_config)
+        cmake.definitions["BUILD_TESTS"] = self.options.testing
+
+        cmake.configure()
+        cmake.build()
+        if self.options.testing:
+            cmake.test()
+        cmake.install()
 
     def package(self):
         include_folder = "%s-%s/include" % (self.name, self.version)
