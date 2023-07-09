@@ -925,7 +925,7 @@ struct Segment<std::string> : public BaseSegment {
   }
 
   NO_DISCARD unsigned SizeRequired(const FormattingSettings&, const formatting::MessageInfo&) const override {
-    return str_.size();
+    return static_cast<unsigned>(str_.size());
   }
 
   void CopyTo(class SegmentStorage& storage) const override {
@@ -1107,7 +1107,7 @@ struct AnsiColor8Bit : public BaseSegment {
   }
 
   NO_DISCARD unsigned SizeRequired(const FormattingSettings& settings, const formatting::MessageInfo& msg_info) const override {
-    auto required_size = settings.has_virtual_terminal_processing ? set_formatting_string_.size() : 0;
+    auto required_size = settings.has_virtual_terminal_processing ? static_cast<unsigned>(set_formatting_string_.size()) : 0u;
     required_size += segment_.SizeRequired(settings, msg_info);
     required_size += AnsiResetSegment.SizeRequired(settings, msg_info);
     return required_size;
