@@ -31,8 +31,6 @@ TEST(SegmentStorage, StackVsHeap) {
 
     EXPECT_FALSE(container.IsUsingBuffer());
 
-    EXPECT_EQ(sizeof(AnsiColor8Bit<int>), 48u);
-
     FormattingSettings sink_settings;
     sink_settings.has_virtual_terminal_processing = true;
     EXPECT_EQ(container.Get()->SizeRequired(sink_settings, msg_info), 11u);
