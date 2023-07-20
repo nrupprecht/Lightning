@@ -85,13 +85,13 @@ template<typename Value_t> static constexpr bool trait_name                     
 namespace typetraits { // namespace lightning::typetraits
 
 //! \brief  Type trait that determines whether a type can be ostream'ed.
-NEW_TYPE_TRAIT(is_ostreamable_v, std::declval<std::ostream&>() << std::declval<Value_t>());
+NEW_TYPE_TRAIT(is_ostreamable_v, std::declval<std::ostream&>() << std::declval<Value_t>())
 //! \brief  Type trait that determines whether a type has a to_string function.
-NEW_TYPE_TRAIT(has_to_string_v, to_string(std::declval<Value_t>()));
+NEW_TYPE_TRAIT(has_to_string_v, to_string(std::declval<Value_t>()))
 
 //! \brief Define remove_cvref_t, which is not available everywhere.
-template<typename T>
-using remove_cvref_t = typename std::remove_cv_t<std::remove_reference_t<T>>;
+template <typename T>
+using remove_cvref_t = typename std::remove_cv_t<std::remove_reference_t < T>>;
 
 namespace detail_always_false {
 
@@ -123,9 +123,11 @@ template <typename T>
 using Unconst_t = typename detail_unconst::Unconst<T>::type;
 
 template <typename T>
-constexpr inline bool IsCstrRelated_v = std::is_same_v<Unconst_t<std::decay_t<T>>, char*> || std::is_same_v<remove_cvref_t<T>, std::string>;
+constexpr inline bool IsCstrRelated_v = std::is_same_v < Unconst_t<std::decay_t < T>>
+, char*> ||
+std::is_same_v<remove_cvref_t<T>, std::string>;
 
-}; // namespace typetraits.
+} // namespace typetraits.
 
 
 class ImplBase {
@@ -233,7 +235,7 @@ class DateTime {
 #if defined _MSC_VER
     localtime_s(&now, &t);
 #else
-//    std::tm* now = std::localtime(&t);
+    //    std::tm* now = std::localtime(&t);
     localtime_r(&t, &now);
 #endif
 
@@ -315,7 +317,7 @@ class DateTime {
     y_m_d_h_m_s_um_ |= (static_cast<std::uint64_t>(hour) << shift_hour_)
         | (static_cast<std::uint64_t>(minute) << shift_minute_)
         | (static_cast<std::uint64_t>(second) << shift_second_)
-        | microseconds;
+        | static_cast<std::uint64_t>(microseconds);
   }
 
   static void validateYMD(int year, int month, int day) {
@@ -363,7 +365,7 @@ inline DateTime AddMicroseconds(const DateTime& time, unsigned long long microse
   int new_years = time.GetYear(), new_months = time.GetMonthInt(), new_days = time.GetDay();
   int new_hours = time.GetHour(), new_minutes = time.GetMinute(), new_seconds = time.GetSecond(), new_us = time.GetMicrosecond();
 
-  auto new_us_overflow = time.GetMicrosecond() + microseconds;
+  auto new_us_overflow = static_cast<unsigned long long>(time.GetMicrosecond()) + microseconds;
   new_us = static_cast<int>(new_us_overflow % 1'000'000);
 
   auto carry_seconds = new_us_overflow / 1'000'000;
@@ -476,9 +478,10 @@ inline int NumberOfDigitsULL(unsigned long long x, int upper = 19) {
 }
 
 template <typename Integral_t,
-    typename = std::enable_if_t<std::is_integral_v<Integral_t> && !std::is_same_v<Integral_t, bool>>>
+    typename = std::enable_if_t<std::is_integral_v < Integral_t> && !std::is_same_v<Integral_t, bool>>>
 inline int NumberOfDigits(Integral_t x, int upper = 19) {
-  if constexpr (!std::is_signed_v<Integral_t>) {
+  if constexpr(!std::is_signed_v < Integral_t > )
+  {
     return NumberOfDigitsULL(x, upper);
   }
   else {
@@ -594,7 +597,7 @@ inline std::vector<std::variant<std::string, Fmt>> Segmentize(const std::string&
         fmt.attr_name.push_back(c);
         c = fmt_string[i];
       }
-      fmt.attr_name_hash = std::hash<std::string>{}(fmt.attr_name);
+      fmt.attr_name_hash = std::hash < std::string > {}(fmt.attr_name);
       fmt_segments.emplace_back(std::move(fmt));
       --i;
     }
@@ -702,8 +705,8 @@ struct BaseSegment {
   //!         needed, to save time, since it is rarely needed.
   NO_DISCARD virtual bool NeedsMessageIndentation() const { return false; }
 
-//  const char* fmt_begin{};
-//  const char* fmt_end{};
+  //  const char* fmt_begin{};
+  //  const char* fmt_end{};
 };
 
 //! \brief  Acts like a unique pointer for an object deriving from BaseSegment, but uses a SBO to put small segments
@@ -738,7 +741,8 @@ class SegmentStorage {
 
   template <typename Segment_t, typename ...Args, typename = std::enable_if_t<std::is_base_of_v<BaseSegment, Segment_t>>>
   SegmentStorage& Create(Args&& ... args) {
-    if constexpr (sizeof(Segment_t) <= sizeof(buffer_)) {
+    if constexpr(sizeof(Segment_t) <= sizeof(buffer_))
+    {
       // Use the internal buffer.
       segment_pointer_ = new(buffer_) Segment_t(std::forward<Args>(args)...);
     }
@@ -758,7 +762,8 @@ class SegmentStorage {
   }
 
   NO_DISCARD bool HasData() const { return segment_pointer_; }
-  static constexpr std::size_t BufferSize() { return sizeof(buffer_); }
+  static constexpr std::size_t
+  BufferSize() { return sizeof(buffer_); }
 
  private:
   //! \brief Pointer to the data that is either on the stack or heap. Allows for polymorphically accessing the data.
@@ -800,7 +805,8 @@ struct AnsiColorSegment : public BaseSegment {
 
 //! \brief Formatting segment that resets the style.
 struct AnsiResetSegment_t : public AnsiColorSegment {
-  AnsiResetSegment_t() noexcept : AnsiColorSegment(formatting::AnsiForegroundColor::Reset) {}
+  AnsiResetSegment_t()
+  noexcept : AnsiColorSegment(formatting::AnsiForegroundColor::Reset) {}
 };
 
 //! \brief  Prototypical AnsiResetSegment object. There is no customization possible, so there
@@ -904,7 +910,7 @@ struct Segment;
 
 //! \brief  Type trait that determines whether a type has a to_string function.
 NEW_TYPE_TRAIT(has_segment_formatter_v,
-               Segment<std::decay_t<typetraits::remove_cvref_t<Value_t>>>(
+               Segment<std::decay_t < typetraits::remove_cvref_t < Value_t>>>(
                    std::declval<std::decay_t<typetraits::remove_cvref_t<Value_t>>>(),
                    nullptr,
                    nullptr));
@@ -929,7 +935,7 @@ struct Segment<std::string> : public BaseSegment {
   }
 
   void CopyTo(class SegmentStorage& storage) const override {
-    storage.Create < Segment < std::string >> (*this);
+    storage.Create<Segment<std::string >>(*this);
   }
 
  private:
@@ -955,7 +961,7 @@ struct Segment<char*> : public BaseSegment {
   }
 
   void CopyTo(class SegmentStorage& storage) const override {
-    storage.Create < Segment < char * >> (*this);
+    storage.Create<Segment<char* >>(*this);
   }
 
  private:
@@ -999,7 +1005,7 @@ struct Segment<bool> : public BaseSegment {
   }
 
   void CopyTo(class SegmentStorage& storage) const override {
-    storage.Create < Segment < bool >> (*this);
+    storage.Create<Segment<bool >>(*this);
   }
 
  private:
@@ -1008,62 +1014,81 @@ struct Segment<bool> : public BaseSegment {
 
 //! \brief Template specialization for floating point number segments.
 template <typename Floating_t>
-struct Segment<Floating_t, std::enable_if_t<std::is_floating_point_v<Floating_t>>> : public BaseSegment {
-  explicit Segment(Floating_t number, const char* fmt_begin, const char* fmt_end)
-      : BaseSegment(fmt_begin, fmt_end), number_(number), size_required_(10) {
-    // TEMPORARY...? Wish that std::to_chars works for floating points.
-    serialized_number_ = std::to_string(number);
-    size_required_ = static_cast<unsigned>(serialized_number_.size());
-  }
+struct Segment<Floating_t, std::enable_if_t < std::is_floating_point_v < Floating_t>>> : public BaseSegment {
+explicit Segment(Floating_t number, const char* fmt_begin, const char* fmt_end)
+    : BaseSegment(fmt_begin, fmt_end), number_(number), size_required_(10) {
+  // TEMPORARY...? Wish that std::to_chars works for floating points.
+  serialized_number_ = std::to_string(number);
+  size_required_ = static_cast<unsigned>(serialized_number_.size());
+}
 
-  char* AddToBuffer([[maybe_unused]] const FormattingSettings& settings, const formatting::MessageInfo&, char* start, [[maybe_unused]] char* end) const override {
-    // std::to_chars(start, end, number_, std::chars_format::fixed);
+char* AddToBuffer([[maybe_unused]] const FormattingSettings& settings, const formatting::MessageInfo&, char* start, [[maybe_unused]] char* end) const
+override {
+// std::to_chars(start, end, number_, std::chars_format::fixed);
 #if defined _MSC_VER
-    strcpy_s(start, serialized_number_.size() + 1, &serialized_number_[0]);
+strcpy_s(start, serialized_number_.size() + 1, &serialized_number_[0]);
 #else
-    std::strcpy(start, &serialized_number_[0]);
+std::strcpy(start, & serialized_number_[0]
+);
 #endif
-    return start + serialized_number_.size();
-  }
+return start + serialized_number_.
+size();
+}
 
-  NO_DISCARD unsigned SizeRequired([[maybe_unused]] const FormattingSettings& settings, const formatting::MessageInfo&) const override {
-    return size_required_;
-  }
+NO_DISCARD unsigned SizeRequired([[maybe_unused]] const FormattingSettings& settings, const formatting::MessageInfo&) const
+override {
+return
+size_required_;
+}
 
-  void CopyTo(class SegmentStorage& storage) const override {
-    storage.Create < Segment < Floating_t >> (*this);
-  }
+void CopyTo(class SegmentStorage& storage) const
+override {
+storage.Create<Segment<Floating_t >> (*this);
+}
 
- private:
-  Floating_t number_;
-  unsigned size_required_{};
+private:
+Floating_t number_;
+unsigned size_required_{};
 
-  // TEMPORARY, hopefully.
-  std::string serialized_number_;
+// TEMPORARY, hopefully.
+std::string serialized_number_;
 };
 
 //! \brief Template specialization for integral value segments.
 template <typename Integral_t>
-struct Segment<Integral_t, std::enable_if_t<std::is_integral_v<Integral_t>>> : public BaseSegment {
-  explicit Segment(Integral_t number, const char* fmt_begin, const char* fmt_end)
-      : BaseSegment(fmt_begin, fmt_end), number_(number), size_required_(formatting::NumberOfDigits(number_) + (number < 0 ? 1 : 0)) {}
+struct Segment<Integral_t, std::enable_if_t < std::is_integral_v < Integral_t>>> : public BaseSegment {
+explicit Segment(Integral_t
+number,
+const char* fmt_begin,
+const char* fmt_end
+)
+:
+BaseSegment(fmt_begin, fmt_end
+),
+number_ (number), size_required_(formatting::NumberOfDigits(number_) + (number < 0 ? 1 : 0)) {}
 
-  char* AddToBuffer([[maybe_unused]] const FormattingSettings& settings, const formatting::MessageInfo&, char* start, char* end) const override {
-    std::to_chars(start, end, number_);
-    return start + size_required_;
-  }
+char* AddToBuffer([[maybe_unused]] const FormattingSettings& settings, const formatting::MessageInfo&, char* start, char* end) const
+override {
+std::to_chars(start, end, number_
+);
+return start +
+size_required_;
+}
 
-  NO_DISCARD unsigned SizeRequired(const FormattingSettings&, const formatting::MessageInfo&) const override {
-    return size_required_;
-  }
+NO_DISCARD unsigned SizeRequired(const FormattingSettings&, const formatting::MessageInfo&) const
+override {
+return
+size_required_;
+}
 
-  void CopyTo(class SegmentStorage& storage) const override {
-    storage.Create < Segment < Integral_t >> (*this);
-  }
+void CopyTo(class SegmentStorage& storage) const
+override {
+storage.Create<Segment<Integral_t >> (*this);
+}
 
- private:
-  Integral_t number_;
-  unsigned size_required_{};
+private:
+Integral_t number_;
+unsigned size_required_{};
 };
 
 //! \brief Template specialization for DateTime segments.
@@ -1081,7 +1106,7 @@ struct Segment<time::DateTime> : public BaseSegment {
   }
 
   void CopyTo(class SegmentStorage& storage) const override {
-    storage.Create < Segment < time::DateTime >> (*this);
+    storage.Create<Segment<time::DateTime >>(*this);
   }
 
  private:
@@ -1114,14 +1139,15 @@ struct AnsiColor8Bit : public BaseSegment {
   }
 
   void CopyTo(class SegmentStorage& storage) const override {
-    storage.Create < AnsiColor8Bit < T >> (*this);
+    storage.Create<AnsiColor8Bit<T >>(*this);
   }
 
  private:
   //! \brief
   std::string set_formatting_string_;
   //! \brief The object that should be colored.
-  Segment<std::decay_t<typetraits::remove_cvref_t<T>>> segment_;
+  Segment<std::decay_t < typetraits::remove_cvref_t < T>>>
+  segment_;
 };
 
 //! \brief An object that has a bundle of data, to be formatted.
@@ -1195,43 +1221,49 @@ template <typename T>
 RefBundle& RefBundle::operator<<(T&& obj) {
   using decay_t = std::decay_t<typetraits::remove_cvref_t<T>>;
 
-  if constexpr (has_logstream_formatter_v < decay_t >) {
+  if constexpr(has_logstream_formatter_v<decay_t>)
+  {
     format_logstream(obj, *this);
   }
-  else if constexpr (std::is_base_of_v<BaseSegment, decay_t>) {
+  else if constexpr(std::is_base_of_v < BaseSegment, decay_t > )
+  {
     obj.CopyTo(AddSegment());
   }
-  else if constexpr (has_segment_formatter_v<decay_t>) {
+  else if constexpr(has_segment_formatter_v<decay_t>)
+  {
     // Add a formatting segment.
-    CreateSegment<Segment<decay_t>>(obj, nullptr, nullptr);
+    CreateSegment<Segment<decay_t >>(obj, nullptr, nullptr);
   }
-  else if constexpr (typetraits::has_to_string_v<decay_t>) {
+  else if constexpr(typetraits::has_to_string_v < decay_t > )
+  {
     operator<<(to_string(std::forward<T>(obj)));
   }
-  else if constexpr (typetraits::is_ostreamable_v<decay_t>) {
+  else if constexpr(typetraits::is_ostreamable_v < decay_t > )
+  {
     std::ostringstream str;
     str << obj;
     operator<<(str.str());
   }
   else {
-    static_assert(typetraits::always_false_v<T>, "No streaming available for this type");
+    static_assert(typetraits::always_false_v < T > , "No streaming available for this type");
   }
   return *this;
 }
 
-class Attribute {
- protected:
-  class Impl {
+class Attribute : public ImplBase {
+ public:
+  class Impl : public ImplBase::Impl {
    public:
     virtual ~Impl() = default;
     NO_DISCARD virtual std::unique_ptr<Impl> Copy() const = 0;
   };
 
-  std::unique_ptr<Impl> impl_;
+  NO_DISCARD Attribute Copy() const {
+    return Attribute(impl<Attribute>()->Copy());
+  }
 
- public:
-  explicit Attribute(std::unique_ptr<Impl>&& impl) : impl_(std::move(impl)) {}
-  Attribute(const Attribute& other) : impl_(other.impl_->Copy()) {}
+  explicit Attribute(std::unique_ptr<Impl>&& impl) : ImplBase(std::move(impl)) {}
+  Attribute(const Attribute& other) : ImplBase(other.impl<Attribute>()->Copy()) {}
 };
 
 enum class Severity {
@@ -1593,14 +1625,16 @@ class BaseMessageFormatter {
 };
 
 struct MSG_t {};
-constexpr inline MSG_t MSG;
+constexpr inline MSG_t
+MSG;
 
 template <typename ...Types>
 class MsgFormatter : public BaseMessageFormatter {
  private:
   static_assert(
-      ((std::is_base_of_v<AttributeFormatter, Types> || std::is_same_v<MSG_t, Types>) && ...),
-      "All types must be AttributeFormatters or a MSG tag.");
+  ((std::is_base_of_v<AttributeFormatter, Types>
+  || std::is_same_v<MSG_t, Types>) && ...),
+  "All types must be AttributeFormatters or a MSG tag.");
 
  public:
   explicit MsgFormatter(const std::string& fmt_string, const Types& ...types) : formatters_(types...) {
@@ -1671,7 +1705,8 @@ class MsgFormatter : public BaseMessageFormatter {
   NO_DISCARD unsigned getRequiredSize([[maybe_unused]] const Record& record,
                                       [[maybe_unused]] const FormattingSettings& sink_settings,
                                       [[maybe_unused]] MessageInfo& msg_info) const {
-    if constexpr (N == sizeof...(Types)) {
+    if constexpr(N == sizeof...(Types))
+    {
       auto usize = static_cast<unsigned>(literals_[N].size());
       msg_info.total_length += usize;
       return usize;
@@ -1681,7 +1716,8 @@ class MsgFormatter : public BaseMessageFormatter {
       auto usize = static_cast<unsigned>(literals_[N].size());
       msg_info.total_length += usize;
 
-      if constexpr (std::is_same_v<MSG_t, std::tuple_element_t<N, decltype(formatters_)>>) {
+      if constexpr(std::is_same_v < MSG_t, std::tuple_element_t < N, decltype(formatters_) >> )
+      {
         if (msg_info.needs_message_indentation) {
           // Can't calculate the number of invisible characters (e.g. from a virtual terminal control sequence),
           // or if there were newlines in the header, so conservatively estimate that the indentation is the
@@ -1699,7 +1735,7 @@ class MsgFormatter : public BaseMessageFormatter {
         required_size = std::get<N>(formatters_).RequiredSize(record.Attributes(), sink_settings, msg_info);
         msg_info.total_length += required_size;
       }
-      return usize + required_size + getRequiredSize < N + 1 > (record, sink_settings, msg_info);
+      return usize + required_size + getRequiredSize<N + 1>(record, sink_settings, msg_info);
     }
   }
 
@@ -1709,9 +1745,11 @@ class MsgFormatter : public BaseMessageFormatter {
     buffer = std::copy(literals_[N].begin(), literals_[N].end(), buffer);
     msg_info.total_length += static_cast<unsigned>(literals_[N].size());
 
-    if constexpr (N != sizeof...(Types)) {
+    if constexpr(N != sizeof...(Types))
+    {
       // Then the formatter from the slot.
-      if constexpr (std::is_same_v<MSG_t, std::tuple_element_t<N, decltype(formatters_)>>) {
+      if constexpr(std::is_same_v < MSG_t, std::tuple_element_t < N, decltype(formatters_) >> )
+      {
         // Since this calculation can take some time, only calculate if needed.
         if (msg_info.needs_message_indentation) {
           // At this point, we can calculate the true message indentation by looking for the last newline
@@ -1731,7 +1769,7 @@ class MsgFormatter : public BaseMessageFormatter {
         msg_info.total_length += required_size;
         buffer += required_size;
       }
-      return format < N + 1 > (buffer, record, sink_settings, msg_info);
+      return format<N + 1>(buffer, record, sink_settings, msg_info);
     }
     else {
       return buffer;
@@ -1848,7 +1886,7 @@ class RecordFormatter : public BaseMessageFormatter {
   }
 
  private:
-  std::vector<std::variant<MSG_t, std::shared_ptr<AttributeFormatter>, std::string>> formatters_;
+  std::vector<std::variant<MSG_t, std::shared_ptr < AttributeFormatter>, std::string>> formatters_;
 };
 
 } // namespace formatting
@@ -2173,8 +2211,9 @@ unsigned sizeRequired(const std::tuple<Segment<Args_t>...>& segments,
   }
   msg_info.message_length = 0;
   unsigned size = std::get<I>(segments).SizeRequired(settings, msg_info);
-  if constexpr (I + 1 < sizeof...(Args_t)) {
-    size += sizeRequired < I + 1 > (segments, count_placed, settings, msg_info);
+  if constexpr(I + 1 < sizeof...(Args_t))
+  {
+    size += sizeRequired<I + 1>(segments, count_placed, settings, msg_info);
     msg_info.message_length += size;
   }
   return size;
@@ -2197,15 +2236,17 @@ void formatHelper(char* c,
   if (I == actual_substitutions) {
     return;
   }
-  if constexpr (I < sizeof...(Args_t)) {
+  if constexpr(I < sizeof...(Args_t))
+  {
     auto& segment = std::get<I>(segments);
     auto size = segment.SizeRequired(settings, msg_info);
     segment.AddToBuffer(settings, msg_info, c, c + size);
     msg_info.message_length += size;
     c += size;
   }
-  if constexpr (I < N) {
-    formatHelper < I + 1 > (c, starts, ends, actual_substitutions, segments, settings, msg_info, is);
+  if constexpr(I < N)
+  {
+    formatHelper<I + 1>(c, starts, ends, actual_substitutions, segments, settings, msg_info, is);
   }
 }
 
@@ -2231,11 +2272,11 @@ std::string Format(const FormattingSettings& settings, const char* fmt_string, c
   }
   ends[count_placed] = c;
 
-  auto segments = std::make_tuple(Segment<std::decay_t<typetraits::remove_cvref_t<Args_t>>>(args, nullptr, nullptr)...);
+  auto segments = std::make_tuple(Segment < std::decay_t < typetraits::remove_cvref_t < Args_t>>>(args, nullptr, nullptr)...);
   MessageInfo msg_info;
   unsigned format_size = detail::sizeRequired<0>(segments, count_placed, settings, msg_info);
   std::string buffer(format_size + str_length, ' ');
-  detail::formatHelper<0>(&buffer[0], starts, ends, count_placed, segments, settings, msg_info, std::make_index_sequence<sizeof...(args)>{});
+  detail::formatHelper<0>(&buffer[0], starts, ends, count_placed, segments, settings, msg_info, std::make_index_sequence < sizeof...(args) > {});
   return buffer;
 }
 
@@ -2259,8 +2300,8 @@ std::string FormatTo(char* buffer, const char* end, const FormattingSettings& se
   }
   ends[count_placed] = std::min(c, end);
 
-  auto segments = std::make_tuple(Segment<std::decay_t<typetraits::remove_cvref_t<Args_t>>>(args, nullptr, nullptr)...);
-  detail::formatHelper<0>(&buffer[0], starts, ends, count_placed, segments, settings, std::make_index_sequence<sizeof...(args)>{});
+  auto segments = std::make_tuple(Segment < std::decay_t < typetraits::remove_cvref_t < Args_t>>>(args, nullptr, nullptr)...);
+  detail::formatHelper<0>(&buffer[0], starts, ends, count_placed, segments, settings, std::make_index_sequence < sizeof...(args) > {});
   return buffer;
 }
 

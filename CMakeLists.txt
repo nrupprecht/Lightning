@@ -1,114 +1,63 @@
-##################################################    Project     ##################################################
-cmake_minimum_required(VERSION 3.12 FATAL_ERROR)
-project               (Lightning VERSION 1.0 LANGUAGES CXX)
-list                  (APPEND CMAKE_MODULE_PATH ${PROJECT_SOURCE_DIR}/cmake)
-set_property          (GLOBAL PROPERTY USE_FOLDERS ON)
-set                   (CMAKE_BUILD_TYPE Release)
-set                   (CMAKE_CXX_STANDARD 20)
+cmake_minimum_required(VERSION 3.14)
 
-if   (MSVC)
-    add_compile_options (/W4)
-else ()
-    add_compile_options (-Wall -Wextra -pedantic)
+include(cmake/prelude.cmake)
+
+project(
+    Lightning
+    VERSION 0.1.0
+    DESCRIPTION "Lightning logging library"
+    HOMEPAGE_URL "https://github.com/nrupprecht/Lightning"
+    LANGUAGES NONE
+)
+
+include(cmake/project-is-top-level.cmake)
+include(cmake/variables.cmake)
+
+# ---- Declare library ----
+
+add_library(Lightning_Lightning INTERFACE)
+add_library(Lightning::Lightning ALIAS Lightning_Lightning)
+
+set_property(
+    TARGET Lightning_Lightning PROPERTY
+    EXPORT_NAME Lightning
+)
+
+target_include_directories(
+    Lightning_Lightning ${warning_guard}
+    INTERFACE
+    "$<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/include>"
+)
+
+target_compile_features(Lightning_Lightning INTERFACE cxx_std_17)
+
+#find_package(fmt REQUIRED)
+#target_link_libraries(Lightning_Lightning INTERFACE fmt::fmt)
+
+#include(FetchContent)
+#FetchContent_Declare(
+#        googletest
+#        URL https://github.com/google/googletest/archive/03597a01ee50ed33e9dfd640b249b4be3799d395.zip
+#)
+## For Windows: Prevent overriding the parent project's compiler/linker settings
+#set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
+#FetchContent_MakeAvailable(googletest)
+
+# ---- Install rules ----
+
+if(NOT CMAKE_SKIP_INSTALL_RULES)
+  include(cmake/install-rules.cmake)
 endif()
 
-##################################################    Options     ##################################################
-option(BUILD_TESTS "Build tests." ON)
-option(BUILD_APPLICATIONS "Build applications." ON)
+# ---- Developer mode ----
 
-##################################################    Sources     ##################################################
-file(GLOB_RECURSE PROJECT_HEADERS include/*.h include/*.hpp include/*.ipp)
-file(GLOB_RECURSE PROJECT_CMAKE_UTILS cmake/*.cmake)
-file(GLOB_RECURSE PROJECT_MISC *.bat *.gitignore *.md *.py *.sh *.txt)
-set (PROJECT_FILES
-        ${PROJECT_HEADERS}
-        ${PROJECT_CMAKE_UTILS}
-        ${PROJECT_MISC})
-
-include            (assign_source_group)
-assign_source_group(${PROJECT_FILES})
-
-##################################################  Dependencies  ##################################################
-include(conan)
-include(conan_utility)
-include(import_library)
-
-add_conan_remote(bincrafter      https://api.bintray.com/conan/bincrafters/public-conan)
-add_conan_remote(conan-community https://api.bintray.com/conan/conan-community/conan   )
-
-# ADD NON-CONAN LIBRARIES HERE.
-# Examples:
-# - Header Only:
-#   find_package  (GLM REQUIRED)
-#   import_library(GLM_INCLUDE_DIRS)
-# - Identical Debug and Release:
-#   find_package  (OpenGL REQUIRED)
-#   import_library(OPENGL_INCLUDE_DIR OPENGL_LIBRARIES)
-# - Separate Debug and Release:
-#   find_package  (Boost REQUIRED iostreams)
-#   import_library(Boost_INCLUDE_DIRS Boost_IOSTREAMS_LIBRARY_DEBUG Boost_IOSTREAMS_LIBRARY_RELEASE)
-# - You may also set the PROJECT_INCLUDE_DIRS and PROJECT_LIBRARIES instead of using import_library.
-
-conan_cmake_run(CONANFILE conanfile.py BASIC_SETUP BUILD missing)
-list           (APPEND PROJECT_INCLUDE_DIRS ${CONAN_INCLUDE_DIRS_RELEASE})
-list           (APPEND PROJECT_COMPILE_DEFINITIONS ${CONAN_COMPILE_DEFINITIONS_RELEASE})
-foreach        (_LIB ${CONAN_LIBS_DEBUG})
-    message(STATUS "Adding library ${_LIB} as debug")
-    list         (APPEND PROJECT_LIBRARIES debug ${_LIB})
-endforeach     ()
-foreach        (_LIB ${CONAN_LIBS_RELEASE})
-    message(STATUS "Adding library ${_LIB} as release")
-    list         (APPEND PROJECT_LIBRARIES optimized ${_LIB})
-endforeach     ()
-foreach        (_LIB ${CONAN_LIBS})
-    message(STATUS "  * Adding library ${_LIB}")
-    list       (APPEND PROJECT_LIBRARIES ${_LIB})
-endforeach ()
-
-##################################################    Targets     ##################################################
-add_library(${PROJECT_NAME} INTERFACE)
-target_include_directories(${PROJECT_NAME} INTERFACE
-        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
-        $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}>
-        $<INSTALL_INTERFACE:include>)
-target_include_directories(${PROJECT_NAME} INTERFACE ${PROJECT_INCLUDE_DIRS})
-target_link_libraries     (${PROJECT_NAME} INTERFACE ${PROJECT_LIBRARIES})
-target_compile_definitions(${PROJECT_NAME} INTERFACE ${PROJECT_COMPILE_DEFINITIONS})
-target_compile_options    (${PROJECT_NAME} INTERFACE ${PROJECT_COMPILE_OPTIONS})
-
-##################################################    Testing     ##################################################
-if(BUILD_TESTS)
-    message(STATUS "Building tests...")
-    enable_testing       ()
-    set                  (TEST_MAIN_NAME test_main)
-    set                  (TEST_MAIN_SOURCES UnitTest/internal/main.cpp)
-    add_library          (${TEST_MAIN_NAME} OBJECT ${TEST_MAIN_SOURCES})
-    target_link_libraries(${TEST_MAIN_NAME} ${PROJECT_NAME})
-    set_property         (TARGET ${TEST_MAIN_NAME} PROPERTY FOLDER tests)
-    assign_source_group  (${TEST_MAIN_SOURCES})
-
-    # Find tests even in nexted directories.
-    file(GLOB_RECURSE PROJECT_TEST_CPPS UnitTest/**UT_*.cpp)
-
-    foreach(_SOURCE ${PROJECT_TEST_CPPS})
-        get_filename_component(_NAME ${_SOURCE} NAME_WE)
-        add_executable        (${_NAME} ${_SOURCE} $<TARGET_OBJECTS:${TEST_MAIN_NAME}>)
-        target_link_libraries (${_NAME} ${PROJECT_NAME})
-        # NOTE: I used to just have add_test(${_NAME} ${_NAME}) here, but then when I would try to run all CTests,
-        #       it couldn't find the executables.
-        add_test              (NAME ${_NAME} COMMAND ${_NAME})
-        set_property          (TARGET ${_NAME} PROPERTY FOLDER tests)
-        assign_source_group   (${_SOURCE})
-    endforeach()
+if(NOT Lightning_DEVELOPER_MODE)
+  return()
+elseif(NOT PROJECT_IS_TOP_LEVEL)
+  message(
+      AUTHOR_WARNING
+      "Developer mode is intended for developers of Lightning"
+  )
 endif()
 
-if (${BUILD_APPLICATIONS})
-    message(STATUS "Building applications...")
-    add_subdirectory("${PROJECT_SOURCE_DIR}/applications" "applications")
-endif()
-
-##################################################  Installation  ##################################################
-install(TARGETS ${PROJECT_NAME} EXPORT ${PROJECT_NAME}-config)
-install(DIRECTORY include/ DESTINATION include)
-install(EXPORT  ${PROJECT_NAME}-config DESTINATION cmake)
-export (TARGETS ${PROJECT_NAME}        FILE        ${PROJECT_NAME}-config.cmake)
+include(cmake/dev-mode.cmake)

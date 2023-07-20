@@ -153,3 +153,20 @@ Multi threaded (4 threads): 250,000 messages
 |--------------------------------------------|:----------------------:|-------------------|
 |One logger, multiple threads                |0.165496                |1,510,612/sec      |
 |Multiple loggers, same sink                 |0.195100                |1,281,393/sec      |
+
+
+# Building and installing
+
+See the [BUILDING](BUILDING.md) document.
+
+# Contributing
+
+See the [CONTRIBUTING](CONTRIBUTING.md) document.
+
+# Licensing
+
+<!--
+Please go to https://choosealicense.com/licenses/ and choose a license that
+fits your needs. The recommended license for a project of this type is the
+Boost Software License 1.0.
+-->
