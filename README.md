@@ -1,13 +1,13 @@
 # Lightning logging
 
-A small but powerful header-only logging library. Attempts to be a very fast streaming logging library without
-sacrificing too much performance.
+A small but powerful header-only logging library that depends only on standard C++17 features. Attempts to be a very
+fast streaming logging library without sacrificing too much performance.
 
 Easy to use, easy to customize, makes pretty logs (those are the goals, at least!).
 
-Still a work in progress.
-
 ## Quick start
+Lightning is a header only library that only depends on standard C++17 features. The entirety of the library is in a single header,
+so after setup (see [BUILDING.md](BUILDING.md)), simply ```#include <Lightning/Lightning.h>``` and you are ready to go.
 
 The simplest possible way to create a logger that writes to std::cout:
 ```C++
@@ -25,38 +25,40 @@ Global::GetCore()->AddSink(sink)
   .SetAllFormatters(formatting::MakeMsgFormatter("[{}] [{}] {}",
                                                  formatting::SeverityAttributeFormatter{},
                                                  formatting::DateTimeAttributeFormatter{},
-                                                 formatting::MSG));
+                                                 formatting::MSG /* Represents the message */ ));
 ```
 Global logging is most easily used via the logging macros LOG() and LOG_SEV(severity),
 ```C++
+// Log without severity.
 LOG() << "Starting run...";
 
+// Log with severity. The levels are Debug, Info, Warning, Error, and Fatal.
 LOG_SEV(Info) << "Done with workflow. Processing next item with name " << item.GetName() << ".";
 ```
 
-As usual, whatever is streamed using the logging macros (most importantly, function calls) will only be evaluated if the
+As usual, whatever is streamed using the logging macros (e.g., function calls) will only be evaluated if the
 logging record opens, which occurs if the set of core-level filters allow the message (given its attributes), and at
 least one sink accepts the message (again, given its attributes). Lightning has very fast message rejection time, in my
 benchmarks, if the message is rejected by its severity at the core level, it can reject around 1.5 billion messages a
 second, and if the message is accepted by the core, but rejected by (the single) sink, it can reject around 800 - 900
-million messages a second.
+million messages a second (see benchmarking at the bottom).
 
-Streaming into record handlers (in particular, using the macros like **LOG_SEV**) allows for formatting customization
-points, if you defined an ADL-findable *format_logstream(T&&, lightning::RefBundle&)* function, this will be used to
-format your object. If the type does not have a format-logstream function, similar to std::format, Lightning relies on
-formatting "segments," all deriving from the **BaseSegment** class to create a string representation of the logging
-message. If a format_logstream function cannot be found for a type **T** being streamed, it will be checked if a
-specialization of the template class **Segment** for the type. If this cannot be found, a **to_string** will be searched
-for (via ADL). If this does not work and **T** has a ostreaming operator available, this will be used to format the
-object into a string. If none of the aforementioned are available, streaming will fail at compile time.
+Streaming into record handlers (in particular, using the macros like ```LOG_SEV```) allows for formatting customization
+points, if you defined an ADL-findable ```format_logstream(T&&, lightning::RefBundle&)``` function, this will be used to
+format your object. If the type does not have a ```format_logstream``` function, similar to std::format, Lightning
+relies on formatting "segments," all deriving from the ```BaseSegment``` class to create a string representation of the
+logging message. If a ```format_logstream``` function cannot be found for a type ```T``` being streamed, it will be
+checked if a specialization of the template class ```Segment``` for the type. If this cannot be found, a ```to_string```
+will be searched for (via ADL). If this does not work and ```T``` has a ostreaming operator available, this will be used
+to format the object into a string. If none of the aforementioned are available, streaming will fail at compile time.
 
-The most powerful customization point of these are format_logstream functions. Since the function will be passes the
+The most powerful customization point of these are ```format_logstream``` functions. Since the function will be passes the
 (mutable) record handler itself, this allows you to execute operations on the object to log and add dispatch-time
-formatting whenever an object of type T is streamed into a RefBundle. Dispatch-time-formatting objects allow for
+formatting whenever an object of type ```T``` is streamed into a ```RefBundle```. Dispatch-time-formatting objects allow for
 decisions about the formatting to be made based on sink-specific settings, at the time that the message is *dispatched*
-to an actual sink (and is reevaluated for every sink). For example, the built in **AnsiColor8Bit** formatting type will
+to an actual sink (and is reevaluated for every sink). For example, the built in ```AnsiColor8Bit``` formatting type will
 use ansi escape sequences to color test *if* the sink that is dispatching the message supports color. Another example is
-the **NewLineIndent** formatting object, which knows how much to indent a message based on the width of the log "header"
+the ```NewLineIndent``` formatting object, which knows how much to indent a message based on the width of the log "header"
 so that the message aligns with the start of the message on the first line. The width of the log header depends on the
 formatting for the specific sink, so it cannot be decided until dispatch time.
 
