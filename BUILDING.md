@@ -80,6 +80,18 @@ target_link_libraries(
 )
 ```
 
+The above does not actually work for me, but the following does:
+```cmake
+FetchContent_Declare(
+        Lightning
+        GIT_REPOSITORY https://github.com/nrupprecht/Lightning.git
+        GIT_TAG        main
+)
+FetchContent_MakeAvailable(Lightning)
+include_directories(${Lightning_SOURCE_DIR}/include)
+```
+
+
 ### Note to packagers
 
 The `CMAKE_INSTALL_INCLUDEDIR` is set to a path other than just `include` if

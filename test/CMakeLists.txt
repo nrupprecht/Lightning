@@ -12,7 +12,6 @@ if(PROJECT_IS_TOP_LEVEL)
   enable_testing()
 endif()
 
-enable_testing()
 find_package(GTest REQUIRED)
 include(GoogleTest)
 
