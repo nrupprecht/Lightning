@@ -6,7 +6,6 @@
 // Created by Nathaniel Rupprecht on 6/6/23.
 //
 
-
 #include "Lightning/Lightning.h"
 #include <cmath>
 #include <sstream>

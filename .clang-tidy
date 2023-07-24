@@ -2,20 +2,35 @@
 # Enable ALL the things! Except not really
 # misc-non-private-member-variables-in-classes: the options don't do anything
 # modernize-use-nodiscard: too aggressive, attribute is situationally useful
-Checks: "*,\
-  -google-readability-todo,\
-  -altera-*,\
-  -fuchsia-*,\
-  fuchsia-multiple-inheritance,\
-  -llvm-header-guard,\
-  -llvm-include-order,\
-  -llvmlibc-*,\
-  -modernize-use-nodiscard,\
-  -misc-non-private-member-variables-in-classes"
+Checks:
+  *, # All checks
+  # Remove the following checks.
+  -google-readability-todo,
+  -altera-*,
+  -fuchsia-*,
+  -llvm-header-guard,
+  -llvm-include-order,
+  -llvmlibc-*,
+  -modernize-use-nodiscard,
+  -modernize-use-trailing-return-type,
+  -misc-non-private-member-variables-in-classes
+  -readability-braces-around-statements,
+  -readability-identifier-length,
+  -readability-magic-numbers,
+  -readability-named-parameter,
+  -readability-redundant-declaration,
+  -readability-function-cognitive-complexity,
+  -bugprone-narrowing-conversions,
+  -bugprone-easily-swappable-parameters,
+  -bugprone-implicit-widening-of-multiplication-result,
+  -bugprone-unchecked-optional-access
+
 WarningsAsErrors: ''
+
 CheckOptions:
   - key: 'bugprone-argument-comment.StrictMode'
     value: 'true'
+
 # Prefer using enum classes with 2 values for parameters instead of bools
   - key: 'bugprone-argument-comment.CommentBoolLiterals'
     value: 'true'
@@ -47,17 +62,17 @@ CheckOptions:
     value: 'true'
 # These seem to be the most common identifier styles
   - key: 'readability-identifier-naming.AbstractClassCase'
-    value: 'lower_case'
+    value: 'CamelCase'
   - key: 'readability-identifier-naming.ClassCase'
-    value: 'lower_case'
+    value: 'CamelCase'
   - key: 'readability-identifier-naming.ClassConstantCase'
-    value: 'lower_case'
+    value: 'CamelCase'
   - key: 'readability-identifier-naming.ClassMemberCase'
-    value: 'lower_case'
+    value: 'CamelCase'
   - key: 'readability-identifier-naming.ClassMethodCase'
-    value: 'lower_case'
+    value: 'CamelCase'
   - key: 'readability-identifier-naming.ConstantCase'
-    value: 'lower_case'
+    value: 'CamelCase'
   - key: 'readability-identifier-naming.ConstantMemberCase'
     value: 'lower_case'
   - key: 'readability-identifier-naming.ConstantParameterCase'
@@ -65,9 +80,9 @@ CheckOptions:
   - key: 'readability-identifier-naming.ConstantPointerParameterCase'
     value: 'lower_case'
   - key: 'readability-identifier-naming.ConstexprFunctionCase'
-    value: 'lower_case'
+    value: 'CamelCase'
   - key: 'readability-identifier-naming.ConstexprMethodCase'
-    value: 'lower_case'
+    value: 'CamelCase'
   - key: 'readability-identifier-naming.ConstexprVariableCase'
     value: 'lower_case'
   - key: 'readability-identifier-naming.EnumCase'
@@ -75,7 +90,7 @@ CheckOptions:
   - key: 'readability-identifier-naming.EnumConstantCase'
     value: 'lower_case'
   - key: 'readability-identifier-naming.FunctionCase'
-    value: 'lower_case'
+    value: 'CamelCase'
   - key: 'readability-identifier-naming.GlobalConstantCase'
     value: 'lower_case'
   - key: 'readability-identifier-naming.GlobalConstantPointerCase'
@@ -85,7 +100,7 @@ CheckOptions:
   - key: 'readability-identifier-naming.GlobalPointerCase'
     value: 'lower_case'
   - key: 'readability-identifier-naming.GlobalVariableCase'
-    value: 'lower_case'
+    value: 'CamelCase'
   - key: 'readability-identifier-naming.InlineNamespaceCase'
     value: 'lower_case'
   - key: 'readability-identifier-naming.LocalConstantCase'
@@ -101,7 +116,7 @@ CheckOptions:
   - key: 'readability-identifier-naming.MemberCase'
     value: 'lower_case'
   - key: 'readability-identifier-naming.MethodCase'
-    value: 'lower_case'
+    value: 'CamelCase'
   - key: 'readability-identifier-naming.NamespaceCase'
     value: 'lower_case'
   - key: 'readability-identifier-naming.ParameterCase'
@@ -112,14 +127,14 @@ CheckOptions:
     value: 'lower_case'
   - key: 'readability-identifier-naming.PrivateMemberCase'
     value: 'lower_case'
-  - key: 'readability-identifier-naming.PrivateMemberPrefix'
-    value: 'm_'
+  - key: 'readability-identifier-naming.PrivateMemberSuffix'
+    value: '_'
   - key: 'readability-identifier-naming.PrivateMethodCase'
     value: 'lower_case'
   - key: 'readability-identifier-naming.ProtectedMemberCase'
     value: 'lower_case'
-  - key: 'readability-identifier-naming.ProtectedMemberPrefix'
-    value: 'm_'
+  - key: 'readability-identifier-naming.ProtectedMemberSuffix'
+    value: '_'
   - key: 'readability-identifier-naming.ProtectedMethodCase'
     value: 'lower_case'
   - key: 'readability-identifier-naming.PublicMemberCase'
@@ -133,7 +148,7 @@ CheckOptions:
   - key: 'readability-identifier-naming.StaticVariableCase'
     value: 'lower_case'
   - key: 'readability-identifier-naming.StructCase'
-    value: 'lower_case'
+    value: 'CamelCase'
   - key: 'readability-identifier-naming.TemplateParameterCase'
     value: 'CamelCase'
   - key: 'readability-identifier-naming.TemplateTemplateParameterCase'
@@ -144,12 +159,17 @@ CheckOptions:
     value: 'lower_case'
   - key: 'readability-identifier-naming.TypeTemplateParameterCase'
     value: 'CamelCase'
+  - key: 'readability-identifier-naming.TypeTemplateParameterSuffix'
+    value: '_t'
   - key: 'readability-identifier-naming.UnionCase'
-    value: 'lower_case'
+    value: 'CamelCase'
   - key: 'readability-identifier-naming.ValueTemplateParameterCase'
     value: 'CamelCase'
+  - key: 'readability-identifier-naming.ValueTemplateParameterSuffix'
+    value: '_v'
   - key: 'readability-identifier-naming.VariableCase'
     value: 'lower_case'
   - key: 'readability-identifier-naming.VirtualMethodCase'
     value: 'lower_case'
 ...
+

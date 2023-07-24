@@ -2,10 +2,8 @@
 // Created by Nathaniel Rupprecht on 6/6/23.
 //
 
-
 #include "Lightning/Lightning.h"
 #include <cmath>
-#include <sstream>
 #include <iostream>
 
 using namespace std::string_literals;
@@ -84,13 +82,15 @@ int main() {
                                                      formatting::DateTimeAttributeFormatter{},
                                                      formatting::MSG));
 
-  auto iters = 250'000;
-  auto num_threads = 10;
+  constexpr auto iters = 250'000;
+  constexpr auto num_threads = 10;
 
   LOG_SEV(Info) << AnsiColorSegment(formatting::AnsiForegroundColor::Yellow) << "Starting" << AnsiResetSegment << " now.";
   LOG_SEV(Info) << AnsiColor8Bit("Starting", formatting::AnsiForegroundColor::Yellow)
                 << " now, again, "
                 << AnsiColor8Bit(12, formatting::AnsiForegroundColor::Blue) << "!\n";
+
+  LOG_SEV(Info) << "Current path is " << std::filesystem::current_path();
 
   // ========================================================
   //  Profiling functions.
@@ -421,7 +421,7 @@ void bench_st_types(int howmany) {
   {
     auto logger = make_logger();
     auto start = high_resolution_clock::now();
-    double x = 1.24525;
+    constexpr double x = 1.24525;
     for (auto i = 0; i < howmany; ++i) {
       LOG_SEV_TO(logger, Info) << "Hello logger: writing data " << x;
     }
