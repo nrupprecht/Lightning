@@ -1885,7 +1885,11 @@ class Sink {
   //! \brief
   Sink() : formatter_(std::unique_ptr<formatting::BaseMessageFormatter>(
       new formatting::MsgFormatter("[{}] [{}] {}", formatting::SeverityAttributeFormatter{}, formatting::DateTimeAttributeFormatter{}, formatting::MSG))) {}
-  virtual ~Sink() = default;
+
+  //! \brief Flush the sink upon deletion.
+  virtual ~Sink() {
+    Flush();
+  }
 
   NO_DISCARD bool WillAccept(const RecordAttributes& attributes) const {
     return filter_.WillAccept(attributes);
@@ -2049,6 +2053,11 @@ class Logger {
 
   //! \brief Create a logger with the specified logging core.
   explicit Logger(std::shared_ptr<Core> core) : core_(std::move(core)) {}
+
+  ~Logger() {
+    // Make sure all sinks that the logger is connected to is flushed.
+    Flush();
+  }
 
   template <typename ...Attrs_t>
   RecordDispatcher Log(BasicAttributes basic_attributes = {}, Attrs_t&& ...attrs) const {
