@@ -198,9 +198,9 @@ Note that this uses both color formatting and NewLineIndent formatting.
 I have tried to take a "profiling driven" approach to this version of Lightning logging, aimed to keep it competitive or
 faster than other commonly used logging frameworks such as spdlog and boost logging. At the present, I have mostly
 focused on single threaded logging performance. The code containing these experiments and generating this table can be
-found in *applications/profile-table-generation.cpp*, and there is more extensive profiling (that doesn't generate
+found in [applications/profile-table-generation.cpp](applications/profile-table-generation.cpp), and there is more extensive profiling (that doesn't generate
 markdown tables)
-in *applications/profile-greased-lightning.cpp*.
+in [applications/profile-lightning.cpp](applications/profile-lightning.cpp).
 
 ******************************************************************************************
 
