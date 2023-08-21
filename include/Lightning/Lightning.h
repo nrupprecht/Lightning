@@ -1474,6 +1474,7 @@ class AttributeFormatter {
   NO_DISCARD virtual unsigned RequiredSize(const RecordAttributes& attributes, const FormattingSettings& settings, const formatting::MessageInfo& msg_info) const = 0;
 };
 
+//! \brief Format the severity attribute.
 class SeverityAttributeFormatter : public AttributeFormatter {
  public:
   void AddToBuffer(const RecordAttributes& attributes, const FormattingSettings& settings, const formatting::MessageInfo& msg_info, char* start, char* end) const override {
@@ -2033,7 +2034,7 @@ void Record::Dispatch() {
 struct NoCore_t {};
 
 //! \brief Prototypical NoCore_t object.
-NoCore_t NoCore;
+inline constexpr NoCore_t NoCore;
 
 //! \brief Base logger class. Capable of creating logging records which route messages
 //! to the logger's logging core.
@@ -2078,7 +2079,7 @@ class Logger {
     return Log(BasicAttributes(severity), attrs...);
   }
 
-  bool WillAccept(std::optional<Severity> severity) const {
+  NO_DISCARD bool WillAccept(std::optional<Severity> severity) const {
     if (!core_) return false;
     return core_->WillAccept(severity);
   }
@@ -2132,6 +2133,8 @@ class EmptySink : public Sink {
 };
 
 //! \brief A sink, used for testing, that formats a record, but does not stream the result anywhere.
+//!
+//! Primarily for timing and testing.
 class TrivialDispatchSink : public Sink {
  public:
   void Dispatch(const Record& record) override {
@@ -2158,12 +2161,13 @@ class FileSink : public Sink {
   std::ofstream fout_;
 };
 
+//! \brief A sink that writes to any ostream.
 class OstreamSink : public Sink {
  public:
   ~OstreamSink() override { out_.flush(); }
 
   explicit OstreamSink(std::ostringstream& stream) : out_(stream) {
-    settings_.has_virtual_terminal_processing = false;
+    settings_.has_virtual_terminal_processing = false; // String streams do not support vterm.
   }
 
   explicit OstreamSink(std::ostream& stream = std::cout) : out_(stream) {
