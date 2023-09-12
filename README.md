@@ -100,7 +100,7 @@ The logger name can be set via the ```Logger::SetName``` function, e.g.
 ```C++
 logger.SetName("main-logger");
 ```
-There is a built-in attribute formatter ```LoggerNameAttributeFormatter``` that can write the logger name as a strin
+There is a built-in attribute formatter ```LoggerNameAttributeFormatter``` that can write the logger name as a string.
 
 ### Logging time
 The logging time is by default attached to every logging message, though this can be disabled by 

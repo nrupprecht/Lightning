@@ -2,14 +2,10 @@
 // Created by Nathaniel Rupprecht on 7/4/23.
 //
 
-//
-// Created by Nathaniel Rupprecht on 6/6/23.
-//
-
 #include "Lightning/Lightning.h"
 #include <cmath>
-#include <sstream>
 #include <iostream>
+#include <iomanip>
 
 using namespace std::string_literals;
 using namespace lightning;
@@ -88,11 +84,6 @@ int main() {
 
   auto iters = 250'000;
   auto num_threads = 4;
-
-  LOG_SEV(Info) << AnsiColorSegment(formatting::AnsiForegroundColor::Yellow) << "Starting" << AnsiResetSegment << " now.";
-  LOG_SEV(Info) << AnsiColor8Bit("Starting", formatting::AnsiForegroundColor::Yellow)
-                << " now, again, "
-                << AnsiColor8Bit(12, formatting::AnsiForegroundColor::Blue) << "!\n";
 
   // ========================================================
   //  Profiling functions.
