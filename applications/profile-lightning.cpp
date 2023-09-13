@@ -149,8 +149,11 @@ int main() {
 }
 
 void bench_st(int howmany) {
+  std::size_t count = 0;
+
   { // Benchmark using RecordFormatter
-    auto fs = std::make_shared<FileSink>("logs/greased_lightning_basic_st-1.log");
+    ++count;
+    auto fs = std::make_shared<FileSink>("logs/greased_lightning_basic_st-" + std::to_string(count) + ".log");
     Logger logger(fs);
     logger.SetName("basic_st/backtrace-off");
     auto formatter = std::make_unique<formatting::RecordFormatter>();
@@ -174,7 +177,8 @@ void bench_st(int howmany) {
   }
 
   { // Benchmark using MsgFormatter
-    auto fs = std::make_shared<FileSink>("logs/greased_lightning_basic_st-2.log");
+    ++count;
+    auto fs = std::make_shared<FileSink>("logs/greased_lightning_basic_st-" + std::to_string(count) + ".log");
     Logger logger(fs);
     logger.SetName("basic_st/backtrace-off");
     fs->SetFormatter(MakeMsgFormatter("[{}] [{}] [{}] {}",
@@ -190,8 +194,52 @@ void bench_st(int howmany) {
     auto delta_d = duration_cast<duration<double>>(high_resolution_clock::now() - start).count();
     LOG_SEV(Info) << "MsgFormatter:" << PadUntil(pad_width) << "Elapsed: " << delta_d << " secs " << Format(static_cast<int>(howmany / delta_d)) << "/sec";
   }
+
+  { // Benchmark using MsgFormatter and log the file name and line number
+    ++count;
+    auto fs = std::make_shared<FileSink>("logs/greased_lightning_basic_st-" + std::to_string(count) + ".log");
+    Logger logger(fs);
+    logger.SetName("basic_st/backtrace-off");
+    fs->SetFormatter(MakeMsgFormatter("[{}] [{}:{}] [{}] [{}] {}",
+                                      formatting::DateTimeAttributeFormatter{},
+                                      formatting::FileNameAttributeFormatter{false},
+                                      formatting::FileLineAttributeFormatter{},
+                                      formatting::LoggerNameAttributeFormatter{},
+                                      formatting::SeverityAttributeFormatter{},
+                                      formatting::MSG));
+
+    auto start = high_resolution_clock::now();
+    for (auto i = 0; i < howmany; ++i) {
+      LOG_SEV_TO(logger, Info) << "Hello logger: msg number " << i;
+    }
+    auto delta_d = duration_cast<duration<double>>(high_resolution_clock::now() - start).count();
+    LOG_SEV(Info) << "MsgFormatter, file and line:" << PadUntil(pad_width) << "Elapsed: " << delta_d << " secs " << Format(static_cast<int>(howmany / delta_d)) << "/sec";
+  }
+
+  { // Benchmark using MsgFormatter and log the file name and line number, compressing the file name
+    ++count;
+    auto fs = std::make_shared<FileSink>("logs/greased_lightning_basic_st-" + std::to_string(count) + ".log");
+    Logger logger(fs);
+    logger.SetName("basic_st/backtrace-off");
+    fs->SetFormatter(MakeMsgFormatter("[{}] [{}:{}] [{}] [{}] {}",
+                                      formatting::DateTimeAttributeFormatter{},
+                                      formatting::FileNameAttributeFormatter{true},
+                                      formatting::FileLineAttributeFormatter{},
+                                      formatting::LoggerNameAttributeFormatter{},
+                                      formatting::SeverityAttributeFormatter{},
+                                      formatting::MSG));
+
+    auto start = high_resolution_clock::now();
+    for (auto i = 0; i < howmany; ++i) {
+      LOG_SEV_TO(logger, Info) << "Hello logger: msg number " << i;
+    }
+    auto delta_d = duration_cast<duration<double>>(high_resolution_clock::now() - start).count();
+    LOG_SEV(Info) << "MsgFormatter, short file and line:" << PadUntil(pad_width) << "Elapsed: " << delta_d << " secs " << Format(static_cast<int>(howmany / delta_d)) << "/sec";
+  }
+
   { // Benchmark using MsgFormatter, but no message.
-    auto fs = std::make_shared<FileSink>("logs/greased_lightning_basic_st-3.log");
+    ++count;
+    auto fs = std::make_shared<FileSink>("logs/greased_lightning_basic_st-" + std::to_string(count) + ".log");
     Logger logger(fs);
     logger.SetName("basic_st/backtrace-off");
     fs->SetFormatter(MakeMsgFormatter("[{}] [{}] [{}] {}",
@@ -209,7 +257,8 @@ void bench_st(int howmany) {
   }
 
   { // Benchmark using MsgFormatter, without the message and without a header.
-    auto fs = std::make_shared<FileSink>("logs/greased_lightning_basic_st-4.log");
+    ++count;
+    auto fs = std::make_shared<FileSink>("logs/greased_lightning_basic_st-" + std::to_string(count) + ".log");
     Logger logger(fs);
     logger.SetName("basic_st/backtrace-off");
     fs->SetFormatter(MakeMsgFormatter("{}", formatting::MSG));
@@ -223,7 +272,8 @@ void bench_st(int howmany) {
   }
 
   { // Benchmark using MsgFormatter, with the message, but without the header.
-    auto fs = std::make_shared<FileSink>("logs/greased_lightning_basic_st-5.log");
+    ++count;
+    auto fs = std::make_shared<FileSink>("logs/greased_lightning_basic_st-" + std::to_string(count) + ".log");
     Logger logger(fs);
     logger.SetName("basic_st/backtrace-off");
     fs->SetFormatter(MakeMsgFormatter("{}", formatting::MSG));

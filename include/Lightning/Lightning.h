@@ -1048,8 +1048,7 @@ struct Segment<Floating_t, std::enable_if_t<std::is_floating_point_v<Floating_t>
 //! \brief Template specialization for integral value segments.
 template <typename Integral_t>
 struct Segment<Integral_t, std::enable_if_t<std::is_integral_v<Integral_t>>> : public BaseSegment {
-  explicit Segment(Integral_t
-                   number,
+  explicit Segment(Integral_t number,
                    const char* fmt_begin,
                    const char* fmt_end)
       : BaseSegment(fmt_begin, fmt_end), number_(number), size_required_(formatting::NumberOfDigits(number_) + (number < 0 ? 1 : 0)) {}
@@ -1267,6 +1266,14 @@ struct BasicAttributes {
     if (do_timestamp) time_stamp = time::DateTime::Now();
   }
 
+  explicit BasicAttributes(std::optional<Severity> lvl,
+                           const char* file_name,
+                           unsigned line_number,
+                           bool do_timestamp = false)
+      : level(lvl), file_name(file_name), line_number(line_number) {
+    if (do_timestamp) time_stamp = time::DateTime::Now();
+  }
+
   //! \brief The severity level of the record.
   std::optional<Severity> level{};
 
@@ -1275,6 +1282,10 @@ struct BasicAttributes {
 
   //! \brief The name of the logger which sent a message.
   std::string logger_name{};
+
+  const char* file_name{};
+
+  std::optional<unsigned> line_number{};
 };
 
 //! \brief A filter that checks whether a record should be accepted solely based on its severity.
@@ -1342,6 +1353,7 @@ class AttributeFilter {
     return severity_filter_.Check(severity);
   }
 
+  //! \brief Set the severity levels that will be accepted.
   AttributeFilter& Accept(const std::set<Severity>& acceptable) {
     for (auto sev: {Severity::Debug, Severity::Info, Severity::Warning, Severity::Error, Severity::Fatal}) {
       severity_filter_.SetAcceptance(sev, acceptable.count(sev) != 0);
@@ -1349,12 +1361,14 @@ class AttributeFilter {
     return *this;
   }
 
+  //! \brief Set whether a message with no severity level should be accepted.
   AttributeFilter& AcceptNoSeverity(bool flag) {
     severity_filter_.AcceptNoSeverity(flag);
     return *this;
   }
 
  private:
+  //! \brief Private implementation of whether a message should be accepted based on its attributes.
   NO_DISCARD virtual bool willAccept([[maybe_unused]] const std::vector<Attribute>& attributes) const {
     // TODO.
     return true;
@@ -1604,6 +1618,77 @@ class LoggerNameAttributeFormatter final : public AttributeFormatter {
 
   NO_DISCARD unsigned RequiredSize(const RecordAttributes& attributes, const FormattingSettings&, const formatting::MessageInfo&) const override {
     return static_cast<unsigned>(attributes.basic_attributes.logger_name.size());
+  }
+};
+
+//! \brief Formatter for the file name attribute.
+class FileNameAttributeFormatter final : public AttributeFormatter {
+ public:
+  explicit FileNameAttributeFormatter(bool only_file_name = false) : only_file_name_(only_file_name) {}
+
+  void AddToBuffer(const RecordAttributes& attributes,
+                   const FormattingSettings& settings,
+                   const formatting::MessageInfo& info,
+                   char* start,
+                   char*) const override {
+    if (attributes.basic_attributes.file_name) {
+      if (only_file_name_) {
+        auto [first, last] = getRange(attributes.basic_attributes.file_name);
+        std::copy(attributes.basic_attributes.file_name + first, attributes.basic_attributes.file_name + last, start);
+      }
+      else {
+        auto size = RequiredSize(attributes, settings, info);
+        std::copy(attributes.basic_attributes.file_name, attributes.basic_attributes.file_name + size, start);
+      }
+    }
+  }
+
+  NO_DISCARD unsigned RequiredSize(const RecordAttributes& attributes,
+                                   const FormattingSettings&,
+                                   const formatting::MessageInfo&) const override {
+    if (attributes.basic_attributes.file_name) {
+      if (only_file_name_) {
+        auto [first, last] = getRange(attributes.basic_attributes.file_name);
+        return last - first;
+      }
+      else {
+        return static_cast<unsigned>(std::strlen(attributes.basic_attributes.file_name));
+      }
+    }
+    return 0;
+  }
+
+ private:
+  std::pair<std::size_t, std::size_t> getRange(const char* str) const {
+    std::size_t first = 0, last = 0;
+    for (auto ptr = str; *ptr != '\0'; ++ptr, ++last) {
+      if (only_file_name_ && (*ptr == '/' || *ptr == '\\')) first = last + 1;
+    }
+    return {first, last};
+  }
+
+  //! \brief If true, only the file name is displayed, not the full path.
+  bool only_file_name_ = true;
+};
+
+//! \brief Formatter for the file name attribute.
+class FileLineAttributeFormatter final : public AttributeFormatter {
+ public:
+  void AddToBuffer(const RecordAttributes& attributes,
+                   const FormattingSettings& settings,
+                   const formatting::MessageInfo& info,
+                   char* start,
+                   char* end) const override {
+    if (attributes.basic_attributes.line_number) {
+      std::to_chars(start, end, *attributes.basic_attributes.line_number);
+    }
+  }
+
+  NO_DISCARD unsigned RequiredSize(const RecordAttributes& attributes, const FormattingSettings&, const formatting::MessageInfo&) const override {
+    if (attributes.basic_attributes.line_number) {
+      return formatting::NumberOfDigits(*attributes.basic_attributes.line_number);
+    }
+    return 0;
   }
 };
 
@@ -2098,6 +2183,14 @@ class Logger {
     return Log(BasicAttributes(severity), attrs...);
   }
 
+  template <typename ...Attrs_t>
+  RecordDispatcher LogWithLocation(std::optional<Severity> severity,
+                                   const char* file_name,
+                                   unsigned line_number,
+                                   Attrs_t&& ...attrs) {
+    return Log(BasicAttributes(severity, file_name, line_number), attrs...);
+  }
+
   NO_DISCARD bool WillAccept(std::optional<Severity> severity) const {
     if (!core_) return false;
     return core_->WillAccept(severity);
@@ -2107,8 +2200,9 @@ class Logger {
     return core_;
   }
 
-  void SetCore(std::shared_ptr<Core> core) {
+  Logger& SetCore(std::shared_ptr<Core> core) {
     core_ = std::move(core);
+    return *this;
   }
 
   Logger& SetDoTimeStamp(bool do_timestamp) {
@@ -2127,6 +2221,7 @@ class Logger {
   }
 
  private:
+  //! \brief Whether to generate a time stamp for the logs.
   bool do_time_stamp_ = true;
 
   //! \brief A generator to create the DateTime timestamps for records.
@@ -2137,9 +2232,6 @@ class Logger {
 
   //! \brief The logger's core.
   std::shared_ptr<Core> core_;
-
-  //! \brief Keep track of when the logger was created.
-  std::chrono::time_point<std::chrono::system_clock> start_time_point_;
 
   //! \brief Attributes associated with a specific logger.
   std::vector<Attribute> logger_attributes_;
@@ -2243,7 +2335,7 @@ class Global {
 //! If it will be, creates a handler, constructing the record in-place inside the handler.
 #define LOG_SEV_TO(logger, severity) \
   if ((logger).WillAccept(::lightning::Severity::severity)) \
-    if (auto handler = (logger).Log(::lightning::Severity::severity)) \
+    if (auto handler = (logger).LogWithLocation(::lightning::Severity::severity, __FILE__, __LINE__)) \
       handler.GetRecord().Bundle()
 
 //! \brief Log with a severity attribute to the global logger.
