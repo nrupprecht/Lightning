@@ -1209,15 +1209,15 @@ template <typename T>
 RefBundle& RefBundle::operator<<(T&& obj) {
   using decay_t = std::decay_t<typetraits::remove_cvref_t<T>>;
 
-  if constexpr(has_logstream_formatter_v < decay_t >) {
+  if constexpr(has_logstream_formatter_v<decay_t>) {
     format_logstream(obj, *this);
   }
   else if constexpr(std::is_base_of_v<BaseSegment, decay_t>) {
     obj.CopyTo(AddSegment());
   }
-  else if constexpr(has_segment_formatter_v < decay_t >) {
+  else if constexpr(has_segment_formatter_v<decay_t>) {
     // Add a formatting segment.
-    CreateSegment < Segment < decay_t >> (obj, nullptr, nullptr);
+    CreateSegment<Segment<decay_t >>(obj, nullptr, nullptr);
   }
   else if constexpr(typetraits::has_to_string_v<decay_t>) {
     operator<<(to_string(std::forward<T>(obj)));
@@ -1633,7 +1633,7 @@ class FileNameAttributeFormatter final : public AttributeFormatter {
                    char*) const override {
     if (attributes.basic_attributes.file_name) {
       if (only_file_name_) {
-        auto [first, last] = getRange(attributes.basic_attributes.file_name);
+        auto[first, last] = getRange(attributes.basic_attributes.file_name);
         std::copy(attributes.basic_attributes.file_name + first, attributes.basic_attributes.file_name + last, start);
       }
       else {
@@ -1648,7 +1648,7 @@ class FileNameAttributeFormatter final : public AttributeFormatter {
                                    const formatting::MessageInfo&) const override {
     if (attributes.basic_attributes.file_name) {
       if (only_file_name_) {
-        auto [first, last] = getRange(attributes.basic_attributes.file_name);
+        auto[first, last] = getRange(attributes.basic_attributes.file_name);
         return last - first;
       }
       else {
@@ -1719,6 +1719,7 @@ class BaseMessageFormatter {
 
 //! \brief Object used to represent a placeholder for the logging message.
 struct MSG_t {};
+
 //! \brief Global prototypical MSG_t object.
 constexpr inline MSG_t MSG;
 
@@ -1981,34 +1982,30 @@ class RecordFormatter : public BaseMessageFormatter {
 
 } // namespace formatting
 
-//! \brief Base class for logging sinks.
-class Sink {
+//! \brief  Base class for sink backends, which are responsible for actually handling the record and
+//!         doing something with it.
+//!         Not responsible for thread synchronization, this is the job of the frontend.
+class SinkBackend {
  public:
-  //! \brief
-  Sink() : formatter_(std::unique_ptr<formatting::BaseMessageFormatter>(
+  //! \brief Create a sink backend with a sensible default formatter.
+  //!
+  SinkBackend() : formatter_(std::unique_ptr<formatting::BaseMessageFormatter>(
       new formatting::MsgFormatter("[{}] [{}] {}",
                                    formatting::SeverityAttributeFormatter{},
                                    formatting::DateTimeAttributeFormatter{},
                                    formatting::MSG))) {}
 
   //! \brief Flush the sink upon deletion.
-  virtual ~Sink() {
-    Flush();
-  }
-
-  NO_DISCARD bool WillAccept(const RecordAttributes& attributes) const {
-    return filter_.WillAccept(attributes);
-  }
-
-  NO_DISCARD bool WillAccept(std::optional<Severity> severity) const {
-    return filter_.WillAccept(severity);
-  }
+  virtual ~SinkBackend() { Flush(); }
 
   //! \brief Dispatch a record.
   virtual void Dispatch(const Record& record) = 0;
 
-  //! \brief Get the AttributeFilter for the sink.
-  filter::AttributeFilter& GetFilter() { return filter_; }
+  //! \brief Flush the sink. This is implementation defined.
+  SinkBackend& Flush() {
+    flush();
+    return *this;
+  }
 
   //! \brief Get the record formatter.
   formatting::BaseMessageFormatter& GetFormatter() { return *formatter_; }
@@ -2018,11 +2015,8 @@ class Sink {
     formatter_ = std::move(formatter);
   }
 
-  //! \brief Flush the sink. This is implementation defined.
-  Sink& Flush() {
-    flush();
-    return *this;
-  }
+  //! \brief Get the sink formatting settings.
+  NO_DISCARD const FormattingSettings& GetFormattingSettings() const { return settings_; }
 
  protected:
   //! \brief Protected implementation of flushing the sink.
@@ -2031,18 +2025,109 @@ class Sink {
   //! \brief The sink formatting settings.
   FormattingSettings settings_;
 
-  //! \brief The Sink's attribute filters.
-  filter::AttributeFilter filter_;
 
   //! \brief The sink's formatter.
   std::unique_ptr<formatting::BaseMessageFormatter> formatter_;
 };
+
+//! \brief  Base class for sink frontends. These are responsible for common tasks, like filtering
+//!         and controlling access to the sink backend, i.e. synchronization.
+class Sink {
+ public:
+  //! \brief
+  explicit Sink(std::unique_ptr<SinkBackend>&& backend)
+      : sink_backend_(std::move(backend)) {}
+
+  virtual ~Sink() = default;
+
+  NO_DISCARD bool WillAccept(const RecordAttributes& attributes) const {
+    return filter_.WillAccept(attributes);
+  }
+
+  NO_DISCARD bool WillAccept(std::optional<Severity> severity) const {
+    return filter_.WillAccept(severity);
+  }
+
+  //! \brief Get the AttributeFilter for the sink.
+  filter::AttributeFilter& GetFilter() { return filter_; }
+
+  //! \brief Dispatch a record.
+  virtual void Dispatch(const Record& record) = 0;
+
+  // ==============================================================================================
+  //  Pass-through methods to the backend.
+  // ==============================================================================================
+
+    //! \brief Get the record formatter.
+  formatting::BaseMessageFormatter& GetFormatter() { return sink_backend_->GetFormatter(); }
+
+  //! \brief Set the sink's formatter.
+  void SetFormatter(std::unique_ptr<formatting::BaseMessageFormatter>&& formatter) {
+    sink_backend_->SetFormatter(std::move(formatter));
+  }
+
+  //! \brief 'Flush' the sink. This is implementation defined.
+  Sink& Flush() {
+    sink_backend_->Flush();
+    return *this;
+  }
+
+ protected:
+  //! \brief The sink backend, to which the frontend feeds record.
+  std::unique_ptr<SinkBackend> sink_backend_{};
+
+  //! \brief The Sink's attribute filters.
+  filter::AttributeFilter filter_;
+};
+
+//! \brief  Sink frontend that uses no synchronization methods.
+class UnlockedSink : public Sink {
+ public:
+  explicit UnlockedSink(std::unique_ptr<SinkBackend>&& backend) : Sink(std::move(backend)) {}
+  void Dispatch(const Record& record) override {
+    sink_backend_->Dispatch(record);
+  }
+
+  template <typename SinkBackend_t, typename ...Args_t>
+  static std::shared_ptr<UnlockedSink> From(Args_t&& ...args) {
+    static_assert(std::is_base_of_v<SinkBackend, SinkBackend_t>, "sink type must be a child of SinkBackend");
+    return std::make_shared<UnlockedSink>(std::make_unique<SinkBackend_t>(std::forward<Args_t>(args)...));
+  }
+};
+
+//! \brief  Sink frontend that uses a mutex to control access.
+class SynchronousSink : public Sink {
+ public:
+  explicit SynchronousSink(std::unique_ptr<SinkBackend>&& backend) : Sink(std::move(backend)) {}
+  void Dispatch(const Record& record) override {
+    std::lock_guard guard(lock_);
+    sink_backend_->Dispatch(record);
+  }
+
+  template <typename SinkBackend_t, typename ...Args_t>
+  static std::shared_ptr<SynchronousSink> From(Args_t&& ...args) {
+    static_assert(std::is_base_of_v<SinkBackend, SinkBackend_t>, "sink type must be a child of SinkBackend");
+    return std::make_shared<SynchronousSink>(std::make_unique<SinkBackend_t>(std::forward<Args_t>(args)...));
+  }
+ private:
+  std::mutex lock_;
+};
+
+//! \brief  Create a new sink frontend / backend pair.
+template <typename Frontend_t, typename Backend_t, typename... Args_t>
+std::shared_ptr<Sink> NewSink(Args_t&& ...args) {
+  return std::make_shared<Frontend_t>(std::make_unique<Backend_t>(std::forward<Args_t>(args)...));
+}
 
 //! \brief  Object that can receive records from multiple loggers, and dispatches them to multiple sinks.
 //!         The core has its own filter, which is checked before any of the individual sinks' filters.
 class Core {
  public:
   bool WillAccept(const RecordAttributes& attributes) {
+    // If there are no sinks, there are no things that *can* accept.
+    if (sinks_.empty()) {
+      return false;
+    }
     // Core level filtering.
     if (!core_filter_.WillAccept(attributes)) {
       return false;
@@ -2126,7 +2211,7 @@ Record::operator bool() const {
 void Record::Dispatch() {
   if (core_) {
     core_->Dispatch(*this);
-    core_ = nullptr;
+    core_ = nullptr; // One time use.
   }
 }
 
@@ -2160,8 +2245,7 @@ class Logger {
   explicit Logger(std::shared_ptr<Core> core) : core_(std::move(core)) {}
 
   ~Logger() {
-    // Make sure all sinks that the logger is connected to is flushed.
-    Flush();
+    Flush(); // Make sure all sinks that the logger is connected to is flushed.
   }
 
   template <typename ...Attrs_t>
@@ -2183,6 +2267,8 @@ class Logger {
     return Log(BasicAttributes(severity), attrs...);
   }
 
+  //! \brief  Create a record dispatcher, setting severity, file name, line number,
+  //!         and any other attributes.
   template <typename ...Attrs_t>
   RecordDispatcher LogWithLocation(std::optional<Severity> severity,
                                    const char* file_name,
@@ -2238,7 +2324,7 @@ class Logger {
 };
 
 //! \brief A sink, used for testing, that does nothing.
-class EmptySink : public Sink {
+class EmptySink : public SinkBackend {
  public:
   void Dispatch(const Record&) override {}
 };
@@ -2246,39 +2332,38 @@ class EmptySink : public Sink {
 //! \brief A sink, used for testing, that formats a record, but does not stream the result anywhere.
 //!
 //! Primarily for timing and testing.
-class TrivialDispatchSink : public Sink {
+class TrivialDispatchSink : public SinkBackend {
  public:
   void Dispatch(const Record& record) override {
-    auto message = formatter_->Format(record, settings_);
+    [[maybe_unused]] auto message = formatter_->Format(record, settings_);
   }
 };
 
 //! \brief A simple sink that writes to a file via an ofstream.
-class FileSink : public Sink {
+class FileSink : public SinkBackend {
  public:
   explicit FileSink(const std::string& file) : fout_(file) {}
   ~FileSink() override { fout_.flush(); }
 
   void Dispatch(const Record& record) override {
     auto message = formatter_->Format(record, settings_);
-    std::lock_guard guard(out_mtx_);
     fout_.write(message.c_str(), static_cast<std::streamsize>(message.size()));
   }
 
  private:
   void flush() override { fout_.flush(); }
 
-  std::mutex out_mtx_;
   std::ofstream fout_;
 };
 
 //! \brief A sink that writes to any ostream.
-class OstreamSink : public Sink {
+class OstreamSink : public SinkBackend {
  public:
   ~OstreamSink() override { out_.flush(); }
 
   explicit OstreamSink(std::ostringstream& stream) : out_(stream) {
-    settings_.has_virtual_terminal_processing = false; // String streams do not support vterm.
+    // By default, string streams do not support vterm.
+    settings_.has_virtual_terminal_processing = false;
   }
 
   explicit OstreamSink(std::ostream& stream = std::cout) : out_(stream) {
@@ -2287,13 +2372,12 @@ class OstreamSink : public Sink {
 
   void Dispatch(const Record& record) override {
     auto message = formatter_->Format(record, settings_);
-    std::lock_guard guard(out_mtx_);
     out_.write(message.c_str(), static_cast<std::streamsize>(message.size()));
   }
  private:
   void flush() override { out_.flush(); }
 
-  std::mutex out_mtx_;
+  //! \brief A reference to the stream to write to.
   std::ostream& out_;
 };
 
