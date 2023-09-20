@@ -302,7 +302,7 @@ void bench_st(int howmany) {
 
     auto start = high_resolution_clock::now();
     for (auto i = 0; i < howmany; ++i) {
-      fout << "[2023-07-04 12:00:00.000000] [basic_st/backtrace-off] [Info   ] Hello logger: msg number " << i << "\n";
+      fout << "[2023-07-04 12:00:00.000000] [basic_st/backtrace-off] [Info   ] Hello logger: msg number 0\n";
     }
     auto delta_d = duration_cast<duration<double>>(high_resolution_clock::now() - start).count();
     LOG_SEV(Info) << "std::ofstream, with message, static header:" << PadUntil(pad_width) << "Elapsed: "
@@ -582,13 +582,33 @@ void bench_nonaccepting(int howmany) {
 
     auto start = high_resolution_clock::now();
     for (auto i = 0; i < howmany; ++i) {
-      LOG_SEV_TO(logger, Info) << "[{DateTime}] [basic_mt/backtrace-off] [{Severity}] " << "Hello logger: msg number " << i;
+      LOG_SEV_TO(logger, Info) << "Hello logger: msg number " << i;
     }
     auto delta_d = duration_cast<duration<double>>(high_resolution_clock::now() - start).count();
 
     LOG_SEV(Info) << "Non-accepting core:" << PadUntil(pad_width) << "Elapsed: " << delta_d
                   << " secs " << Format(static_cast<int>(howmany / delta_d)) << "/sec";
   }
+  {
+    auto fs = NewSink<UnlockedSink, FileSink>("logs/greased_lightning_basic_st_nocore.log");
+    Logger logger(NoCore);
+    logger.SetName("basic_st/backtrace-off");
+    fs->SetFormatter(MakeMsgFormatter("[{}] [{}] [{}] {}",
+                                      formatting::DateTimeAttributeFormatter{},
+                                      formatting::LoggerNameAttributeFormatter{},
+                                      formatting::SeverityAttributeFormatter{},
+                                      formatting::MSG));
+
+    auto start = high_resolution_clock::now();
+    for (auto i = 0; i < howmany; ++i) {
+      LOG_SEV_TO(logger, Info) << "Hello logger: msg number " << i;
+    }
+    auto delta_d = duration_cast<duration<double>>(high_resolution_clock::now() - start).count();
+
+    LOG_SEV(Info) << "No core:" << PadUntil(pad_width) << "Elapsed: " << delta_d
+                  << " secs " << Format(static_cast<int>(howmany / delta_d)) << "/sec";
+  }
+
 }
 
 void bench_datetime(int howmany) {
@@ -770,7 +790,8 @@ void bench_fmtdatetime(int howmany) {
     for (auto i = 0; i < howmany; ++i) {
       [[maybe_unused]] auto result = formatting::Format(settings, "%-%-% %:%:%.%",
                                                         x.GetYear(), x.GetMonthInt(), x.GetDay(),
-                                                        x.GetHour(), x.GetMinute(), x.GetSecond(), x.GetMicrosecond());
+                                                        x.GetHour(), x.GetMinute(), x.GetSecond(),
+                                                        x.GetMicrosecond());
     }
     auto delta_d = duration_cast<duration<double>>(high_resolution_clock::now() - start).count();
     LOG_SEV(Info) << "Lightning no-pad:" << PadUntil(pad_width) << "Elapsed: "
@@ -816,7 +837,8 @@ void bench_mt(int howmany, std::size_t thread_count) {
     };
 
     auto delta_d = duration_cast<duration<double>>(high_resolution_clock::now() - start).count();
-    LOG_SEV(Info) << "Same logger:" << PadUntil(pad_width) << "Elapsed: " << delta_d << " secs " << Format(static_cast<int>(howmany / delta_d)) << "/sec";
+    LOG_SEV(Info) << "Same logger:" << PadUntil(pad_width) << "Elapsed: " << delta_d
+                  << " secs " << Format(static_cast<int>(howmany / delta_d)) << "/sec";
   }
   {
     auto fs = SynchronousSink::From<FileSink>("logs/greased_lightning_basic_mt_multiple_logger.log");
