@@ -1195,6 +1195,9 @@ class RefBundle {
 
   //! \brief Returns whether any segment needs the message indentation to be calculated.
   NO_DISCARD bool NeedsMessageIndentation() const {
+    if (segments_.empty()) {
+      return false;
+    }
     return std::any_of(segments_.begin(), segments_.end(), [](const SegmentStorage& ss) { return ss.Get()->NeedsMessageIndentation(); });
   }
 
@@ -1982,6 +1985,56 @@ class RecordFormatter : public BaseMessageFormatter {
 
 } // namespace formatting
 
+
+namespace flush {
+
+//! \brief Base class for objects that determine whether a sink should be flushed.
+class FlushHandler : public ImplBase {
+ public:
+  class Impl : public ImplBase::Impl {
+   public:
+    virtual bool DoFlush(const Record& record) = 0;
+  };
+
+  bool DoFlush(const Record& record) { return impl<FlushHandler>()->DoFlush(record); }
+  explicit FlushHandler(const std::shared_ptr<Impl>& impl) : ImplBase(impl) {}
+};
+
+//! \brief Flush after every message.
+class AutoFlush : public FlushHandler {
+ public:
+  class Impl : public FlushHandler::Impl {
+   public:
+    bool DoFlush(const Record&) override { return true; }
+  };
+
+  AutoFlush() : FlushHandler(std::make_shared<Impl>()) {}
+};
+
+//! \brief Flush after every N messages.
+class FlushEveryN : public FlushHandler {
+ public:
+  class Impl : public FlushHandler::Impl {
+   public:
+    explicit Impl(std::size_t N) : N_(N) {
+      LL_REQUIRE(0 < N, "N cannot be 0");
+    }
+
+    bool DoFlush(const Record&) override {
+      ++count_;
+      count_ %= N_;
+      return count_ == 0;
+    }
+
+   private:
+    std::size_t count_{}, N_;
+  };
+
+  explicit FlushEveryN(std::size_t N) : FlushHandler(std::make_shared<Impl>(N)) {}
+};
+
+};  // namespace flush
+
 //! \brief  Base class for sink backends, which are responsible for actually handling the record and
 //!         doing something with it.
 //!         Not responsible for thread synchronization, this is the job of the frontend.
@@ -1999,7 +2052,12 @@ class SinkBackend {
   virtual ~SinkBackend() { Flush(); }
 
   //! \brief Dispatch a record.
-  virtual void Dispatch(const Record& record) = 0;
+  void Dispatch(std::optional<std::string>&& formatted_message, const Record& record) {
+    dispatch(std::move(formatted_message), record);
+    if (flush_handler_ && flush_handler_->DoFlush(record)) {
+      Flush();
+    }
+  }
 
   //! \brief Flush the sink. This is implementation defined.
   SinkBackend& Flush() {
@@ -2018,16 +2076,33 @@ class SinkBackend {
   //! \brief Get the sink formatting settings.
   NO_DISCARD const FormattingSettings& GetFormattingSettings() const { return settings_; }
 
+  template <typename FlushHandler_t, typename ...Args_t>
+  SinkBackend& CreateFlushHandler(Args_t&& ... args) {
+    flush_handler_ = FlushHandler_t(std::forward<Args_t>(args)...);
+    return *this;
+  }
+
+  SinkBackend& ClearFlushHandler() {
+    flush_handler_ = std::nullopt;
+    return *this;
+  }
+
  protected:
+  virtual void dispatch(std::optional<std::string>&& formatted_message, const Record& record) = 0;
+
   //! \brief Protected implementation of flushing the sink.
   virtual void flush() {};
 
   //! \brief The sink formatting settings.
   FormattingSettings settings_;
 
-
   //! \brief The sink's formatter.
   std::unique_ptr<formatting::BaseMessageFormatter> formatter_;
+
+  std::optional<flush::FlushHandler> flush_handler_{};
+
+  //! \brief Whether to automatically flush the sink after each message.
+  bool auto_flush_ = false;
 };
 
 //! \brief  Base class for sink frontends. These are responsible for common tasks, like filtering
@@ -2052,13 +2127,15 @@ class Sink {
   filter::AttributeFilter& GetFilter() { return filter_; }
 
   //! \brief Dispatch a record.
-  virtual void Dispatch(const Record& record) = 0;
+  virtual void Dispatch(const Record& record) {
+    dispatch(record);
+  }
 
   // ==============================================================================================
   //  Pass-through methods to the backend.
   // ==============================================================================================
 
-    //! \brief Get the record formatter.
+  //! \brief Get the record formatter.
   formatting::BaseMessageFormatter& GetFormatter() { return sink_backend_->GetFormatter(); }
 
   //! \brief Set the sink's formatter.
@@ -2072,7 +2149,13 @@ class Sink {
     return *this;
   }
 
+  SinkBackend& GetBackend() {
+    return *sink_backend_;
+  }
+
  protected:
+  virtual void dispatch(const Record& record) = 0;
+
   //! \brief The sink backend, to which the frontend feeds record.
   std::unique_ptr<SinkBackend> sink_backend_{};
 
@@ -2084,14 +2167,16 @@ class Sink {
 class UnlockedSink : public Sink {
  public:
   explicit UnlockedSink(std::unique_ptr<SinkBackend>&& backend) : Sink(std::move(backend)) {}
-  void Dispatch(const Record& record) override {
-    sink_backend_->Dispatch(record);
-  }
 
   template <typename SinkBackend_t, typename ...Args_t>
   static std::shared_ptr<UnlockedSink> From(Args_t&& ...args) {
     static_assert(std::is_base_of_v<SinkBackend, SinkBackend_t>, "sink type must be a child of SinkBackend");
     return std::make_shared<UnlockedSink>(std::make_unique<SinkBackend_t>(std::forward<Args_t>(args)...));
+  }
+
+ private:
+  void dispatch(const Record& record) override {
+    sink_backend_->Dispatch({}, record);
   }
 };
 
@@ -2099,10 +2184,6 @@ class UnlockedSink : public Sink {
 class SynchronousSink : public Sink {
  public:
   explicit SynchronousSink(std::unique_ptr<SinkBackend>&& backend) : Sink(std::move(backend)) {}
-  void Dispatch(const Record& record) override {
-    std::lock_guard guard(lock_);
-    sink_backend_->Dispatch(record);
-  }
 
   template <typename SinkBackend_t, typename ...Args_t>
   static std::shared_ptr<SynchronousSink> From(Args_t&& ...args) {
@@ -2110,6 +2191,13 @@ class SynchronousSink : public Sink {
     return std::make_shared<SynchronousSink>(std::make_unique<SinkBackend_t>(std::forward<Args_t>(args)...));
   }
  private:
+  void dispatch(const Record& record) override {
+    {
+      std::lock_guard guard(lock_);
+      sink_backend_->Dispatch({}, record);
+    }
+  }
+
   std::mutex lock_;
 };
 
@@ -2325,16 +2413,16 @@ class Logger {
 
 //! \brief A sink, used for testing, that does nothing.
 class EmptySink : public SinkBackend {
- public:
-  void Dispatch(const Record&) override {}
+ private:
+  void dispatch(std::optional<std::string>&&, const Record&) override {}
 };
 
 //! \brief A sink, used for testing, that formats a record, but does not stream the result anywhere.
 //!
 //! Primarily for timing and testing.
 class TrivialDispatchSink : public SinkBackend {
- public:
-  void Dispatch(const Record& record) override {
+ private:
+  void dispatch(std::optional<std::string>&& formatted_message, const Record& record) override {
     [[maybe_unused]] auto message = formatter_->Format(record, settings_);
   }
 };
@@ -2345,12 +2433,12 @@ class FileSink : public SinkBackend {
   explicit FileSink(const std::string& file) : fout_(file) {}
   ~FileSink() override { fout_.flush(); }
 
-  void Dispatch(const Record& record) override {
+ private:
+  void dispatch(std::optional<std::string>&& formatted_message, const Record& record) override {
     auto message = formatter_->Format(record, settings_);
     fout_.write(message.c_str(), static_cast<std::streamsize>(message.size()));
   }
 
- private:
   void flush() override { fout_.flush(); }
 
   std::ofstream fout_;
@@ -2370,11 +2458,12 @@ class OstreamSink : public SinkBackend {
     settings_.has_virtual_terminal_processing = true; // Default this to true
   }
 
-  void Dispatch(const Record& record) override {
+ private:
+  void dispatch(std::optional<std::string>&& formatted_message, const Record& record) override {
     auto message = formatter_->Format(record, settings_);
     out_.write(message.c_str(), static_cast<std::streamsize>(message.size()));
   }
- private:
+
   void flush() override { out_.flush(); }
 
   //! \brief A reference to the stream to write to.
@@ -2427,7 +2516,7 @@ class Global {
 
 #define LOG_TO(logger) \
   if ((logger).WillAccept(::std::nullopt)) \
-    if (auto handler = (logger).Log(::std::nullopt)) \
+    if (auto handler = (logger).LogWithLocation(::std::nullopt, __FILE__, __LINE__)) \
       handler.GetRecord().Bundle()
 
 #define LOG() LOG_TO(::lightning::Global::GetLogger())
