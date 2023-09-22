@@ -1253,8 +1253,11 @@ class Attribute : public ImplBase {
   Attribute(const Attribute& other) : ImplBase(other.impl<Attribute>()->Copy()) {}
 };
 
-enum class Severity {
-  Debug = 0b1, Info = 0b10, Warning = 0b100, Error = 0b1000, Fatal = 0b10000
+//! \brief The integer type used for severity.
+using SeverityInt_t = int32_t;
+
+enum class Severity : SeverityInt_t {
+  Trace = 0b1, Debug = 0b10, Info = 0b100, Major = 0b000, Warning = 0b10000, Error = 0b100000, Fatal = 0b1000000
 };
 
 //! \brief  Structure storing very common attributes that a logging message will often have.
@@ -1483,7 +1486,11 @@ namespace formatting {
 class AttributeFormatter {
  public:
   virtual ~AttributeFormatter() = default;
-  virtual void AddToBuffer(const RecordAttributes& attributes, const FormattingSettings& settings, const formatting::MessageInfo& msg_info, char* start, char* end) const = 0;
+  virtual void AddToBuffer(const RecordAttributes& attributes,
+                           const FormattingSettings& settings,
+                           const formatting::MessageInfo& msg_info,
+                           char* start,
+                           char* end) const = 0;
   NO_DISCARD virtual unsigned RequiredSize(const RecordAttributes& attributes,
                                            const FormattingSettings& settings,
                                            const formatting::MessageInfo& msg_info) const = 0;
@@ -1619,7 +1626,9 @@ class LoggerNameAttributeFormatter final : public AttributeFormatter {
     std::copy(attributes.basic_attributes.logger_name.begin(), attributes.basic_attributes.logger_name.end(), start);
   }
 
-  NO_DISCARD unsigned RequiredSize(const RecordAttributes& attributes, const FormattingSettings&, const formatting::MessageInfo&) const override {
+  NO_DISCARD unsigned RequiredSize(const RecordAttributes& attributes,
+                                   const FormattingSettings&,
+                                   const formatting::MessageInfo&) const override {
     return static_cast<unsigned>(attributes.basic_attributes.logger_name.size());
   }
 };
@@ -1627,7 +1636,8 @@ class LoggerNameAttributeFormatter final : public AttributeFormatter {
 //! \brief Formatter for the file name attribute.
 class FileNameAttributeFormatter final : public AttributeFormatter {
  public:
-  explicit FileNameAttributeFormatter(bool only_file_name = false) : only_file_name_(only_file_name) {}
+  explicit FileNameAttributeFormatter(bool only_file_name = false)
+      : only_file_name_(only_file_name) {}
 
   void AddToBuffer(const RecordAttributes& attributes,
                    const FormattingSettings& settings,
@@ -2033,6 +2043,40 @@ class FlushEveryN : public FlushHandler {
   explicit FlushEveryN(std::size_t N) : FlushHandler(std::make_shared<Impl>(N)) {}
 };
 
+class DisjunctionFlushHandler : public FlushHandler {
+ public:
+  class Impl : public FlushHandler::Impl {
+   public:
+    Impl(FlushHandler lhs, FlushHandler rhs) : lhs_(std::move(lhs)), rhs_(std::move(rhs)) {}
+    bool DoFlush(const Record& record) override { return lhs_.DoFlush(record) || rhs_.DoFlush(record); }
+   private:
+    FlushHandler lhs_, rhs_;
+  };
+  DisjunctionFlushHandler(FlushHandler lhs, FlushHandler rhs)
+      : FlushHandler(std::make_shared<Impl>(std::move(lhs), std::move(rhs))) {}
+};
+
+class ConjunctionFlushHandler : public FlushHandler {
+ public:
+  class Impl : public FlushHandler::Impl {
+   public:
+    Impl(FlushHandler lhs, FlushHandler rhs) : lhs_(std::move(lhs)), rhs_(std::move(rhs)) {}
+    bool DoFlush(const Record& record) override { return lhs_.DoFlush(record) && rhs_.DoFlush(record); }
+   private:
+    FlushHandler lhs_, rhs_;
+  };
+  ConjunctionFlushHandler(FlushHandler lhs, FlushHandler rhs)
+  : FlushHandler(std::make_shared<Impl>(std::move(lhs), std::move(rhs))) {}
+};
+
+DisjunctionFlushHandler operator||(const FlushHandler& lhs, const FlushHandler& rhs) {
+  return {lhs, rhs};
+}
+
+ConjunctionFlushHandler operator&&(const FlushHandler& lhs, const FlushHandler& rhs) {
+  return {lhs, rhs};
+}
+
 };  // namespace flush
 
 //! \brief  Base class for sink backends, which are responsible for actually handling the record and
@@ -2079,6 +2123,11 @@ class SinkBackend {
   template <typename FlushHandler_t, typename ...Args_t>
   SinkBackend& CreateFlushHandler(Args_t&& ... args) {
     flush_handler_ = FlushHandler_t(std::forward<Args_t>(args)...);
+    return *this;
+  }
+
+  SinkBackend& SetFlushHandler(flush::FlushHandler&& flush_handler) {
+    flush_handler_ = std::move(flush_handler);
     return *this;
   }
 
