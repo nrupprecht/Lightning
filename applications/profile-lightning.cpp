@@ -201,6 +201,48 @@ void bench_st(int howmany) {
                   << " secs " << Format(static_cast<int>(howmany / delta_d)) << "/sec";
   }
 
+  { // Benchmark using MsgFormatter
+    ++count;
+    auto fs = make_sink();
+    fs->GetBackend().CreateFlushHandler<flush::AutoFlush>();
+    Logger logger(fs);
+    logger.SetName("basic_st/backtrace-off");
+    fs->SetFormatter(MakeMsgFormatter("[{}] [{}] [{}] {}",
+                                      formatting::DateTimeAttributeFormatter{},
+                                      formatting::LoggerNameAttributeFormatter{},
+                                      formatting::SeverityAttributeFormatter{},
+                                      formatting::MSG));
+
+    auto start = high_resolution_clock::now();
+    for (auto i = 0; i < howmany; ++i) {
+      LOG_SEV_TO(logger, Info) << "Hello logger: msg number " << i;
+    }
+    auto delta_d = duration_cast<duration<double>>(high_resolution_clock::now() - start).count();
+    LOG_SEV(Info) << "MsgFormatter, auto flush:" << PadUntil(pad_width) << "Elapsed: " << delta_d
+                  << " secs " << Format(static_cast<int>(howmany / delta_d)) << "/sec";
+  }
+
+  { // Benchmark using MsgFormatter
+    ++count;
+    auto fs = make_sink();
+    fs->GetBackend().CreateFlushHandler<flush::FlushEveryN>(10);
+    Logger logger(fs);
+    logger.SetName("basic_st/backtrace-off");
+    fs->SetFormatter(MakeMsgFormatter("[{}] [{}] [{}] {}",
+                                      formatting::DateTimeAttributeFormatter{},
+                                      formatting::LoggerNameAttributeFormatter{},
+                                      formatting::SeverityAttributeFormatter{},
+                                      formatting::MSG));
+
+    auto start = high_resolution_clock::now();
+    for (auto i = 0; i < howmany; ++i) {
+      LOG_SEV_TO(logger, Info) << "Hello logger: msg number " << i;
+    }
+    auto delta_d = duration_cast<duration<double>>(high_resolution_clock::now() - start).count();
+    LOG_SEV(Info) << "MsgFormatter, flush every 10:" << PadUntil(pad_width) << "Elapsed: " << delta_d
+                  << " secs " << Format(static_cast<int>(howmany / delta_d)) << "/sec";
+  }
+
   { // Benchmark using MsgFormatter and log the file name and line number
     ++count;
     auto fs = make_sink();
