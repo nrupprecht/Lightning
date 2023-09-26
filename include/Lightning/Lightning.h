@@ -115,7 +115,7 @@ NEW_TYPE_TRAIT(has_to_string_v, to_string(std::declval<Value_t>()))
 //! \brief  Type trait that determines if there is std::to_chars support for a type. Some compilers, like clang,
 //!         have std::to_chars for integral types, but not for doubles, so we can't just check the feature test
 //!         macro __cpp_lib_to_chars.
-NEW_TYPE_TRAIT(has_to_chars, std::to_chars(std::declval<char*>(), std::declval<char*>(), std::declval<Value_t>()));
+NEW_TYPE_TRAIT(has_to_chars, std::to_chars(std::declval<char*>(), std::declval<char*>(), std::declval<Value_t>()))
 
 //! \brief Define remove_cvref_t, which is not available everywhere.
 template <typename T>
@@ -407,21 +407,21 @@ inline DateTime AddMicroseconds(const DateTime& time, unsigned long long microse
   if (carry_seconds == 0) {
     return {new_years, new_months, new_days, new_hours, new_minutes, new_seconds, new_us};
   }
-  auto new_seconds_overflow = new_seconds + carry_seconds;
+  auto new_seconds_overflow = static_cast<unsigned long long>(new_seconds) + carry_seconds;
   new_seconds = static_cast<int>(new_seconds_overflow % 60);
 
   auto carry_minutes = new_seconds_overflow / 60;
   if (carry_minutes == 0) {
     return {new_years, new_months, new_days, new_hours, new_minutes, new_seconds, new_us};
   }
-  auto new_minutes_overflow = new_minutes + carry_minutes;
+  auto new_minutes_overflow = static_cast<unsigned long long>(new_minutes) + carry_minutes;
   new_minutes = static_cast<int>(new_minutes_overflow % 60);
 
   auto carry_hours = new_minutes_overflow / 60;
   if (carry_hours == 0) {
     return {new_years, new_months, new_days, new_hours, new_minutes, new_seconds, new_us};
   }
-  auto new_hours_overflow = new_hours + carry_hours;
+  auto new_hours_overflow = static_cast<unsigned long long>(new_hours) + carry_hours;
   new_hours = static_cast<int>(new_hours_overflow % 24);
 
   auto carry_days = static_cast<int>(new_hours_overflow / 24);
@@ -461,7 +461,7 @@ class FastDateGenerator {
     auto current_time = std::chrono::system_clock::now();
 
     auto us = std::chrono::duration_cast<std::chrono::microseconds>(current_time - start_time_point_).count();
-    return AddMicroseconds(base_date_time_, us);
+    return AddMicroseconds(base_date_time_, static_cast<unsigned long long>(us));
   }
 
  private:
@@ -507,29 +507,29 @@ const unsigned long long powers_of_ten[] = {
 
 //! \brief Returns how many digits the decimal representation of a ull will have.
 //!        The optional bound "upper" means that the number has at most "upper" digits.
-inline int NumberOfDigitsULL(unsigned long long x, int upper = 19) {
+inline unsigned NumberOfDigitsULL(unsigned long long x, int upper = 19) {
   using namespace detail;
   upper = std::max(0, std::min(upper, 19));
-  if (x == 0) return 1;
+  if (x == 0) return 1u;
   if (x >= 10'000'000'000'000'000'000ull) return 20;
   auto it = std::upper_bound(&powers_of_ten[0], &powers_of_ten[upper], x);
-  return static_cast<int>(std::distance(&powers_of_ten[0], it));
+  return static_cast<unsigned>(std::distance(&powers_of_ten[0], it));
 }
 
 template <typename Integral_t,
     typename = std::enable_if_t<std::is_integral_v<Integral_t> && !std::is_same_v<Integral_t, bool>>>
-inline int NumberOfDigits(Integral_t x, int upper = 19) {
+inline unsigned NumberOfDigits(Integral_t x, int upper = 19) {
   if constexpr(!std::is_signed_v<Integral_t>) {
     return NumberOfDigitsULL(x, upper);
   }
   else {
-    return NumberOfDigitsULL(std::abs(x), upper);
+    return NumberOfDigitsULL(static_cast<unsigned long long>(std::llabs(x)), upper);
   }
 }
 
 inline char* CopyPaddedInt(char* start, char* end, unsigned long long x, int width, char fill_char = '0', int max_power = 19) {
   auto nd = NumberOfDigits(x, max_power);
-  auto remainder = width - nd;
+  auto remainder = static_cast<unsigned>(width) - nd;
   if (0 < remainder) {
     std::fill_n(start, remainder, fill_char);
   }
@@ -579,7 +579,7 @@ inline char* FormatDateTo(char* c, char* end_c, const time::DateTime& dt) {
   *(start_c + 19) = '.';
   // Microsecond.
   auto microseconds = dt.GetMicrosecond();
-  int nd = formatting::NumberOfDigits(microseconds, 6);
+  int nd = static_cast<int>(formatting::NumberOfDigits(microseconds, 6));
   std::fill_n(c + 20, 6 - nd, '0');
   std::to_chars(c + 26 - nd, end_c, microseconds);
 
@@ -903,7 +903,7 @@ NEW_TYPE_TRAIT(has_segment_formatter_v,
                Segment<std::decay_t<typetraits::remove_cvref_t<Value_t>>>(
                    std::declval<std::decay_t<typetraits::remove_cvref_t<Value_t>>>(),
                    nullptr,
-                   nullptr));
+                   nullptr))
 
 //! \brief Template specialization for string segments.
 template <>
@@ -1206,7 +1206,7 @@ class RefBundle {
 };
 
 //! \brief  Create a type trait that determines if a 'format_logstream' function has been defined for a type.
-NEW_TYPE_TRAIT(has_logstream_formatter_v, format_logstream(std::declval<const Value_t&>(), std::declval<RefBundle&>()));
+NEW_TYPE_TRAIT(has_logstream_formatter_v, format_logstream(std::declval<const Value_t&>(), std::declval<RefBundle&>()))
 
 template <typename T>
 RefBundle& RefBundle::operator<<(T&& obj) {
@@ -1251,6 +1251,10 @@ class Attribute : public ImplBase {
 
   explicit Attribute(std::unique_ptr<Impl>&& impl) : ImplBase(std::move(impl)) {}
   Attribute(const Attribute& other) : ImplBase(other.impl<Attribute>()->Copy()) {}
+  Attribute& operator=(const Attribute& other) {
+    impl_ = other.impl<Attribute>()->Copy();
+    return *this;
+  }
 };
 
 //! \brief The integer type used for severity.
@@ -1346,6 +1350,8 @@ namespace filter {
 
 class AttributeFilter {
  public:
+  virtual ~AttributeFilter() = default;
+
   NO_DISCARD bool WillAccept(const RecordAttributes& attributes) const {
     // Check basic attributes.
     if (!severity_filter_.Check(attributes.basic_attributes.level)) {
@@ -1661,8 +1667,8 @@ class FileNameAttributeFormatter final : public AttributeFormatter {
                                    const formatting::MessageInfo&) const override {
     if (attributes.basic_attributes.file_name) {
       if (only_file_name_) {
-        auto[first, last] = getRange(attributes.basic_attributes.file_name);
-        return last - first;
+        auto [first, last] = getRange(attributes.basic_attributes.file_name);
+        return static_cast<unsigned>(last - first);
       }
       else {
         return static_cast<unsigned>(std::strlen(attributes.basic_attributes.file_name));
@@ -1688,8 +1694,8 @@ class FileNameAttributeFormatter final : public AttributeFormatter {
 class FileLineAttributeFormatter final : public AttributeFormatter {
  public:
   void AddToBuffer(const RecordAttributes& attributes,
-                   const FormattingSettings& settings,
-                   const formatting::MessageInfo& info,
+                   [[maybe_unused]] const FormattingSettings& settings,
+                   [[maybe_unused]] const formatting::MessageInfo& info,
                    char* start,
                    char* end) const override {
     if (attributes.basic_attributes.line_number) {
@@ -1798,7 +1804,7 @@ class MsgFormatter : public BaseMessageFormatter {
       // Erase any unused bits at the end.
       auto actual_length = std::distance(&buffer[0], c);
       LL_ASSERT(actual_length <= required_size, "formatted message overflowed buffer");
-      buffer.resize(actual_length);
+      buffer.resize(static_cast<unsigned long>(actual_length));
     }
 
     return buffer;
@@ -2077,7 +2083,7 @@ ConjunctionFlushHandler operator&&(const FlushHandler& lhs, const FlushHandler& 
   return {lhs, rhs};
 }
 
-};  // namespace flush
+}  // namespace flush
 
 //! \brief  Base class for sink backends, which are responsible for actually handling the record and
 //!         doing something with it.
@@ -2140,7 +2146,7 @@ class SinkBackend {
   virtual void dispatch(std::optional<std::string>&& formatted_message, const Record& record) = 0;
 
   //! \brief Protected implementation of flushing the sink.
-  virtual void flush() {};
+  virtual void flush() {}
 
   //! \brief The sink formatting settings.
   FormattingSettings settings_;
@@ -2471,7 +2477,7 @@ class EmptySink : public SinkBackend {
 //! Primarily for timing and testing.
 class TrivialDispatchSink : public SinkBackend {
  private:
-  void dispatch(std::optional<std::string>&& formatted_message, const Record& record) override {
+  void dispatch([[maybe_unused]] std::optional<std::string>&& formatted_message, const Record& record) override {
     [[maybe_unused]] auto message = formatter_->Format(record, settings_);
   }
 };
@@ -2483,7 +2489,7 @@ class FileSink : public SinkBackend {
   ~FileSink() override { fout_.flush(); }
 
  private:
-  void dispatch(std::optional<std::string>&& formatted_message, const Record& record) override {
+  void dispatch([[maybe_unused]] std::optional<std::string>&& formatted_message, const Record& record) override {
     auto message = formatter_->Format(record, settings_);
     fout_.write(message.c_str(), static_cast<std::streamsize>(message.size()));
   }
@@ -2508,7 +2514,7 @@ class OstreamSink : public SinkBackend {
   }
 
  private:
-  void dispatch(std::optional<std::string>&& formatted_message, const Record& record) override {
+  void dispatch([[maybe_unused]] std::optional<std::string>&& formatted_message, const Record& record) override {
     auto message = formatter_->Format(record, settings_);
     out_.write(message.c_str(), static_cast<std::streamsize>(message.size()));
   }

@@ -46,7 +46,7 @@ void format_logstream(const exception& ex, lightning::RefBundle& handler) {
   const char* begin = ex.what(), * end = ex.what();
   while (*end) {
     for (; *end && *end != '\n'; ++end); // Find next newline.
-    handler << NewLineIndent << string_view(begin, end - begin);
+    handler << NewLineIndent << string_view(begin, static_cast<unsigned long>(end - begin));
     for (; *end && *end == '\n'; ++end); // Pass any number of newlines.
     begin = end;
   }
@@ -225,7 +225,7 @@ void bench_st(int howmany) {
   { // Benchmark using MsgFormatter
     ++count;
     auto fs = make_sink();
-    fs->GetBackend().CreateFlushHandler<flush::FlushEveryN>(10);
+    fs->GetBackend().CreateFlushHandler<flush::FlushEveryN>(10u);
     Logger logger(fs);
     logger.SetName("basic_st/backtrace-off");
     fs->SetFormatter(MakeMsgFormatter("[{}] [{}] [{}] {}",
@@ -815,7 +815,7 @@ void bench_segments(int howmany) {
   {
     auto start = high_resolution_clock::now();
     for (auto i = 0; i < howmany; ++i) {
-      std::string buffer(i % 15 + 50, ' ');
+      std::string buffer(static_cast<unsigned long>(i % 15 + 50), ' ');
     }
     auto delta_d = duration_cast<duration<double>>(high_resolution_clock::now() - start).count();
     LOG_SEV(Info) << "Allocate string:" << PadUntil(pad_width) << "Elapsed: " << delta_d
