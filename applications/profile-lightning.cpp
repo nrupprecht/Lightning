@@ -92,6 +92,7 @@ int main() {
                 << AnsiColor8Bit(12, formatting::AnsiForegroundColor::Blue) << "!\n";
 
   LOG_SEV(Info) << "Current path is " << std::filesystem::current_path();
+  std::filesystem::create_directories("logs");
 
   // ========================================================
   //  Profiling functions.
