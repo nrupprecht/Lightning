@@ -2075,11 +2075,11 @@ class ConjunctionFlushHandler : public FlushHandler {
   : FlushHandler(std::make_shared<Impl>(std::move(lhs), std::move(rhs))) {}
 };
 
-DisjunctionFlushHandler operator||(const FlushHandler& lhs, const FlushHandler& rhs) {
+inline DisjunctionFlushHandler operator||(const FlushHandler& lhs, const FlushHandler& rhs) {
   return {lhs, rhs};
 }
 
-ConjunctionFlushHandler operator&&(const FlushHandler& lhs, const FlushHandler& rhs) {
+inline ConjunctionFlushHandler operator&&(const FlushHandler& lhs, const FlushHandler& rhs) {
   return {lhs, rhs};
 }
 
