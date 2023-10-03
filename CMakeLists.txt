@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.14)
 
 include(cmake/prelude.cmake)
 
-option(BUILD_APPLICATIONS ON)
+option(BUILD_LIGHTNING_APPLICATIONS OFF)
 
 project(
     Lightning
@@ -14,6 +14,7 @@ project(
 
 include(cmake/project-is-top-level.cmake)
 include(cmake/variables.cmake)
+
 
 # ---- Declare library ----
 
@@ -33,7 +34,7 @@ target_include_directories(
 
 target_compile_features(Lightning_Lightning INTERFACE cxx_std_17)
 
-if (BUILD_APPLICATIONS)
+if (BUILD_LIGHTNING_APPLICATIONS)
   message("Building applications.")
   add_subdirectory("${PROJECT_SOURCE_DIR}/applications")
 else()
