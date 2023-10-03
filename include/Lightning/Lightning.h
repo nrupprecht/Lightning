@@ -1321,7 +1321,7 @@ class BasicSeverityFilter {
 
  private:
   //! \brief The acceptance mask.
-  int mask_ = 0b11111;
+  int mask_ = 0xFFFF;
 
   //! \brief Whether to accept a message that does not contain the severity attribute.
   bool allow_if_no_severity_ = false;
