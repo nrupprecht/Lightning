@@ -78,12 +78,12 @@ void AddRow(const std::string& name, double delta_d, int howmany) {
 
 int main() {
   // Set up global logger.
-  auto sink = std::make_shared<OstreamSink>();
+  auto sink = NewSink<UnlockedSink, OstreamSink>();
   Global::GetCore()->AddSink(sink)
       .SetAllFormatters(formatting::MakeMsgFormatter("{}", formatting::MSG));
 
-  auto iters = 250'000;
-  auto num_threads = 4;
+  constexpr std::size_t iters = 250'000;
+  constexpr std::size_t num_threads = 4;
 
   // ========================================================
   //  Profiling functions.
@@ -126,7 +126,7 @@ int main() {
 
 void bench_st(int howmany) {
   { // Benchmark using MsgFormatter
-    auto fs = std::make_shared<FileSink>("logs/greased_lightning_basic_st.log");
+    auto fs = UnlockedSink::From<FileSink>("logs/greased_lightning_basic_st.log");
     Logger logger(fs);
     logger.SetName("basic_st/backtrace-off");
     fs->SetFormatter(MakeMsgFormatter("[{}] [{}] [{}] {}",
@@ -156,7 +156,7 @@ void bench_st(int howmany) {
   }
 
   { // Benchmark using EmptySink
-    auto fs = std::make_shared<EmptySink>();
+    auto fs = UnlockedSink::From<EmptySink>();
     Logger logger(fs);
     logger.SetName("basic_st/backtrace-off");
     fs->SetFormatter(MakeMsgFormatter("[{}] [{}] [{}] {}",
@@ -174,7 +174,7 @@ void bench_st(int howmany) {
   }
 
   { // Benchmark using TrivialDispatchSink
-    auto fs = std::make_shared<TrivialDispatchSink>();
+    auto fs = UnlockedSink::From<TrivialDispatchSink>();
     Logger logger(fs);
     logger.SetName("basic_st/backtrace-off");
     fs->SetFormatter(MakeMsgFormatter("[{}] [{}] [{}] {}",
@@ -194,7 +194,7 @@ void bench_st(int howmany) {
 
 void bench_st_types(int howmany) {
   auto make_logger = []() {
-    auto fs = std::make_shared<FileSink>("logs/greased_lightning_basic_st-types.log");
+    auto fs = UnlockedSink::From<FileSink>("logs/greased_lightning_basic_st-types.log");
     Logger logger(fs);
     logger.SetName("basic_st/backtrace-off");
     fs->SetFormatter(MakeMsgFormatter("[{}] [{}] [{}] {}",
@@ -300,7 +300,7 @@ void bench_st_types(int howmany) {
   {
     auto logger = make_logger();
     auto start = high_resolution_clock::now();
-    double x = 1.24525;
+    constexpr double x = 1.24525;
     for (auto i = 0; i < howmany; ++i) {
       LOG_SEV_TO(logger, Info) << "Hello logger: writing data " << x;
     }
@@ -348,7 +348,7 @@ void bench_st_types(int howmany) {
 
 void bench_nonaccepting(int howmany) {
   {
-    auto fs = std::make_shared<FileSink>("logs/greased_lightning_basic_st_nonaccepting.log");
+    auto fs = UnlockedSink::From<FileSink>("logs/greased_lightning_basic_st_nonaccepting.log");
     fs->GetFilter().Accept({Severity::Error});
     Logger logger(fs);
     logger.SetName("basic_st/backtrace-off");
@@ -366,7 +366,7 @@ void bench_nonaccepting(int howmany) {
     AddRow("Non-accepting sink", delta_d, howmany);
   }
   {
-    auto fs = std::make_shared<FileSink>("logs/greased_lightning_basic_st_nonaccepting.log");
+    auto fs = UnlockedSink::From<FileSink>("logs/greased_lightning_basic_st_nonaccepting.log");
     Logger logger(fs);
     logger.GetCore()->GetFilter().Accept({Severity::Error});
     logger.SetName("basic_st/backtrace-off");
@@ -387,7 +387,7 @@ void bench_nonaccepting(int howmany) {
 
 void bench_mt(int howmany, std::size_t thread_count) {
   {
-    auto fs = std::make_shared<FileSink>("logs/greased_lightning_basic_mt.log");
+    auto fs = UnlockedSink::From<FileSink>("logs/greased_lightning_basic_mt.log");
     Logger logger(fs);
     logger.SetName("basic_mt/backtrace-off");
     fs->SetFormatter(formatting::MakeMsgFormatter("[{}] [{}] [{}] {}",
@@ -415,7 +415,7 @@ void bench_mt(int howmany, std::size_t thread_count) {
     AddRow("One logger, multiple threads", delta_d, howmany);
   }
   {
-    auto fs = std::make_shared<FileSink>("logs/greased_lightning_basic_mt_multiple_logger.log");
+    auto fs = UnlockedSink::From<FileSink>("logs/greased_lightning_basic_mt_multiple_logger.log");
     fs->SetFormatter(formatting::MakeMsgFormatter("[{}] [{}] [{}] {}",
                                                   formatting::DateTimeAttributeFormatter{},
                                                   formatting::LoggerNameAttributeFormatter{},

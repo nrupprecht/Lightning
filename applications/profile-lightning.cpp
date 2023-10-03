@@ -73,7 +73,30 @@ void bench_fmtdatetime(int howmany);
 
 void bench_mt(int howmany, std::size_t thread_count);
 
-int main() {
+void profile(int howmany) {
+  auto make_sink = []() {
+    return NewSink<UnlockedSink, FileSink>("logs/greased_lightning_basic_st-0.log");
+  };
+
+  auto fs = make_sink();
+  Logger logger(fs);
+  logger.SetName("basic_st/backtrace-off");
+  fs->SetFormatter(MakeMsgFormatter("[{}] [{}] [{}] {}",
+                                    formatting::DateTimeAttributeFormatter{},
+                                    formatting::LoggerNameAttributeFormatter{},
+                                    formatting::SeverityAttributeFormatter{},
+                                    formatting::MSG));
+
+  auto start = high_resolution_clock::now();
+  for (auto i = 0; i < howmany; ++i) {
+    LOG_SEV_TO(logger, Info) << "Hello logger: msg number " << i;
+  }
+  auto delta_d = duration_cast<duration<double>>(high_resolution_clock::now() - start).count();
+  LOG_SEV(Info) << "MsgFormatter:" << PadUntil(pad_width) << "Elapsed: " << delta_d
+                << " secs " << Format(static_cast<int>(howmany / delta_d)) << "/sec";
+}
+
+auto main() -> int {
   // Set up global logger.
   auto sink = NewSink<UnlockedSink, OstreamSink>();
   Global::GetCore()->AddSink(sink)
@@ -82,6 +105,9 @@ int main() {
                                                          .SeverityName(Severity::Info, "Info"),
                                                      formatting::DateTimeAttributeFormatter{},
                                                      formatting::MSG));
+
+//  profile(250'000);
+//  return 0;
 
   constexpr auto iters = 250'000;
   constexpr auto num_threads = 10;

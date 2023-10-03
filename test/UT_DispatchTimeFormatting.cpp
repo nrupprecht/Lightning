@@ -16,7 +16,7 @@ namespace Testing {
 TEST(Lightning, NewLineIndent) {
   // Set up logger.
   std::ostringstream stream;
-  auto sink = std::make_shared<OstreamSink>(stream);
+  auto sink = UnlockedSink::From<OstreamSink>(stream);
   lightning::Logger logger(sink);
 
   EXPECT_TRUE((std::is_base_of_v<BaseSegment, decltype(NewLineIndent)>));
@@ -44,7 +44,7 @@ TEST(Lightning, NewLineIndent) {
 TEST(Lightning, PadTill) {
   // Set up logger.
   std::ostringstream stream;
-  auto sink = std::make_shared<OstreamSink>(stream);
+  auto sink = UnlockedSink::From<OstreamSink>(stream);
   sink->SetFormatter(MakeMsgFormatter("{}", formatting::MSG));
   lightning::Logger logger(sink);
 
@@ -76,7 +76,7 @@ TEST(Lightning, PadTill) {
 TEST(Lightning, RepeatChar) {
   // Set up logger.
   std::ostringstream stream;
-  auto sink = std::make_shared<OstreamSink>(stream);
+  auto sink = UnlockedSink::From<OstreamSink>(stream);
   sink->SetFormatter(MakeMsgFormatter("{}", formatting::MSG));
   lightning::Logger logger(sink);
 

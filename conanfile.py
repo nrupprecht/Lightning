@@ -13,7 +13,6 @@ class LightningProject(ConanFile):
     generators = "cmake"
     exports_sources = "include/**", "source/**", "CMakeLists.txt", "cmake/**", "test/**"
 
-
     def build(self):
         cmake = CMake(self)
         cmake.configure()

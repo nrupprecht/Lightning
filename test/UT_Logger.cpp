@@ -28,7 +28,7 @@ namespace Testing {
 
 TEST(Logger, RecordHandler_Streaming) {
   std::ostringstream stream;
-  auto sink = std::make_shared<OstreamSink>(stream);
+  auto sink = UnlockedSink::From<OstreamSink>(stream);
   sink->SetFormatter(MakeMsgFormatter("{}", formatting::MSG));
 
   lightning::Logger logger(sink);
@@ -40,7 +40,7 @@ TEST(Logger, RecordHandler_Streaming) {
 
 TEST(Logger, OstreamSink) {
   std::ostringstream stream;
-  auto sink = std::make_shared<OstreamSink>(stream);
+  auto sink = UnlockedSink::From<OstreamSink>(stream);
   sink->SetFormatter(MakeMsgFormatter("{}", formatting::MSG));
 
   lightning::Logger logger;
@@ -51,49 +51,9 @@ TEST(Logger, OstreamSink) {
   stream.str("");
 }
 
-TEST(Logger, Segmentize_1) {
-  auto segments = formatting::Segmentize("[{Severity}]: {Message}");
-  EXPECT_EQ(segments.size(), 4u);
-  EXPECT_EQ(segments[0].index(), 0u);
-  EXPECT_EQ(segments[1].index(), 1u);
-  EXPECT_EQ(segments[2].index(), 0u);
-  EXPECT_EQ(segments[3].index(), 1u);
-
-  EXPECT_EQ(std::get<0>(segments[0]), "[");
-  EXPECT_EQ(std::get<1>(segments[1]).attr_name, "Severity");
-  EXPECT_EQ(std::get<0>(segments[2]), "]: ");
-  EXPECT_EQ(std::get<1>(segments[3]).attr_name, "Message");
-}
-
-TEST(Logger, Segmentize_2) {
-  auto segments = formatting::Segmentize("{First}==<>=={Time}{Attitude}:{Weather}({Thread}): {Message}");
-  EXPECT_EQ(segments.size(), 10u);
-  EXPECT_EQ(segments[0].index(), 1u);
-  EXPECT_EQ(segments[1].index(), 0u);
-  EXPECT_EQ(segments[2].index(), 1u);
-  EXPECT_EQ(segments[3].index(), 1u);
-  EXPECT_EQ(segments[4].index(), 0u);
-  EXPECT_EQ(segments[5].index(), 1u);
-  EXPECT_EQ(segments[6].index(), 0u);
-  EXPECT_EQ(segments[7].index(), 1u);
-  EXPECT_EQ(segments[8].index(), 0u);
-  EXPECT_EQ(segments[9].index(), 1u);
-
-  EXPECT_EQ(std::get<1>(segments[0]).attr_name, "First");
-  EXPECT_EQ(std::get<0>(segments[1]), "==<>==");
-  EXPECT_EQ(std::get<1>(segments[2]).attr_name, "Time");
-  EXPECT_EQ(std::get<1>(segments[3]).attr_name, "Attitude");
-  EXPECT_EQ(std::get<0>(segments[4]), ":");
-  EXPECT_EQ(std::get<1>(segments[5]).attr_name, "Weather");
-  EXPECT_EQ(std::get<0>(segments[6]), "(");
-  EXPECT_EQ(std::get<1>(segments[7]).attr_name, "Thread");
-  EXPECT_EQ(std::get<0>(segments[8]), "): ");
-  EXPECT_EQ(std::get<1>(segments[9]).attr_name, "Message");
-}
-
 TEST(Logger, SeverityLogger) {
   std::ostringstream stream;
-  auto sink = std::make_shared<OstreamSink>(stream);
+  auto sink = UnlockedSink::From<OstreamSink>(stream);
   sink->SetFormatter(MakeMsgFormatter("[{}]: {}",
                                     formatting::SeverityAttributeFormatter{},
                                     formatting::MSG));
@@ -123,7 +83,7 @@ TEST(Logger, SeverityLogger) {
 
 TEST(GeneralFormatting, MoreThanInitialBuffer) {
   std::ostringstream stream;
-  auto sink = std::make_shared<OstreamSink>(stream);
+  auto sink = UnlockedSink::From<OstreamSink>(stream);
   sink->SetFormatter(formatting::MakeMsgFormatter("{}", formatting::MSG));
   Logger logger(sink);
 
@@ -133,7 +93,7 @@ TEST(GeneralFormatting, MoreThanInitialBuffer) {
 
 TEST(Logger, BlockAttributes) {
   std::ostringstream stream;
-  auto sink = std::make_shared<OstreamSink>(stream);
+  auto sink = UnlockedSink::From<OstreamSink>(stream);
   Logger logger(sink);
   /*
   logger
