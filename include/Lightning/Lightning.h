@@ -758,6 +758,9 @@ struct FormattingSettings {
 
   //! \brief How to terminate the message, e.g. with a newline.
   std::string message_terminator = "\n";
+
+  //! \brief Whether the sink frontend should format the record to a string and pass that to the backend.
+  bool needs_formatting = true;
 };
 
 //! \brief  The base class for all message segments.
@@ -2085,6 +2088,13 @@ auto MakeMsgFormatter(const std::string& fmt_string, const Types&... types) {
   return std::unique_ptr<BaseMessageFormatter>(new MsgFormatter(fmt_string, types...));
 }
 
+inline auto MakeStandardFormatter() {
+  return MakeMsgFormatter("[{}] [{}] {}",
+                          formatting::SeverityAttributeFormatter {},
+                          formatting::DateTimeAttributeFormatter {},
+                          formatting::MSG);
+}
+
 class RecordFormatter : public BaseMessageFormatter {
 public:
   //! \brief The default record formatter just prints the message.
@@ -2286,15 +2296,6 @@ inline ConjunctionFlushHandler operator&&(const FlushHandler& lhs, const FlushHa
 //!         Not responsible for thread synchronization, this is the job of the frontend.
 class SinkBackend {
 public:
-  //! \brief Create a sink backend with a sensible default formatter.
-  //!
-  SinkBackend()
-      : formatter_(std::unique_ptr<formatting::BaseMessageFormatter>(
-          new formatting::MsgFormatter("[{}] [{}] {}",
-                                       formatting::SeverityAttributeFormatter {},
-                                       formatting::DateTimeAttributeFormatter {},
-                                       formatting::MSG))) {}
-
   //! \brief Flush the sink upon deletion.
   virtual ~SinkBackend() { Flush(); }
 
@@ -2310,14 +2311,6 @@ public:
   SinkBackend& Flush() {
     flush();
     return *this;
-  }
-
-  //! \brief Get the record formatter.
-  formatting::BaseMessageFormatter& GetFormatter() { return *formatter_; }
-
-  //! \brief Set the sink's formatter.
-  void SetFormatter(std::unique_ptr<formatting::BaseMessageFormatter>&& formatter) {
-    formatter_ = std::move(formatter);
   }
 
   //! \brief Get the sink formatting settings.
@@ -2348,9 +2341,6 @@ protected:
   //! \brief The sink formatting settings.
   FormattingSettings settings_;
 
-  //! \brief The sink's formatter.
-  std::unique_ptr<formatting::BaseMessageFormatter> formatter_;
-
   std::optional<flush::FlushHandler> flush_handler_ {};
 
   //! \brief Whether to automatically flush the sink after each message.
@@ -2363,7 +2353,8 @@ class Sink {
 public:
   //! \brief
   explicit Sink(std::unique_ptr<SinkBackend>&& backend)
-      : sink_backend_(std::move(backend)) {}
+      : sink_backend_(std::move(backend))
+      , formatter_(formatting::MakeStandardFormatter()) {}
 
   virtual ~Sink() = default;
 
@@ -2384,11 +2375,11 @@ public:
   // ==============================================================================================
 
   //! \brief Get the record formatter.
-  formatting::BaseMessageFormatter& GetFormatter() { return sink_backend_->GetFormatter(); }
+  formatting::BaseMessageFormatter& GetFormatter() { return *formatter_; }
 
   //! \brief Set the sink's formatter.
   void SetFormatter(std::unique_ptr<formatting::BaseMessageFormatter>&& formatter) {
-    sink_backend_->SetFormatter(std::move(formatter));
+    formatter_ = std::move(formatter);
   }
 
   //! \brief 'Flush' the sink. This is implementation defined.
@@ -2407,6 +2398,11 @@ protected:
 
   //! \brief The Sink's attribute filters.
   filter::AttributeFilter filter_;
+
+  //! \brief The sink's formatter.
+  std::unique_ptr<formatting::BaseMessageFormatter> formatter_;
+
+  std::optional<flush::FlushHandler> flush_handler_ {};
 };
 
 //! \brief  Sink frontend that uses no synchronization methods.
@@ -2422,7 +2418,10 @@ public:
   }
 
 private:
-  void dispatch(const Record& record) override { sink_backend_->Dispatch({}, record); }
+  void dispatch(const Record& record) override {
+    auto message = formatter_->Format(record, sink_backend_->GetFormattingSettings());
+    sink_backend_->Dispatch(std::move(message), record);
+  }
 };
 
 //! \brief  Sink frontend that uses a mutex to control access.
@@ -2439,9 +2438,10 @@ public:
 
 private:
   void dispatch(const Record& record) override {
+    auto message = formatter_->Format(record, sink_backend_->GetFormattingSettings());
     {
       std::lock_guard guard(lock_);
-      sink_backend_->Dispatch({}, record);
+      sink_backend_->Dispatch(std::move(message), record);
     }
   }
 
@@ -2663,6 +2663,9 @@ private:
 
 //! \brief A sink, used for testing, that does nothing.
 class EmptySink : public SinkBackend {
+public:
+  EmptySink() { settings_.needs_formatting = false; }
+
 private:
   void dispatch(std::optional<std::string>&&, const Record&) override {}
 };
@@ -2673,9 +2676,7 @@ private:
 class TrivialDispatchSink : public SinkBackend {
 private:
   void dispatch([[maybe_unused]] std::optional<std::string>&& formatted_message,
-                const Record& record) override {
-    [[maybe_unused]] auto message = formatter_->Format(record, settings_);
-  }
+                [[maybe_unused]] const Record& record) override {}
 };
 
 //! \brief A simple sink that writes to a file via an ofstream.
@@ -2687,9 +2688,10 @@ public:
 
 private:
   void dispatch([[maybe_unused]] std::optional<std::string>&& formatted_message,
-                const Record& record) override {
-    auto message = formatter_->Format(record, settings_);
-    fout_.write(message.c_str(), static_cast<std::streamsize>(message.size()));
+                [[maybe_unused]] const Record& record) override {
+    if (formatted_message) {
+      fout_.write(formatted_message->c_str(), static_cast<std::streamsize>(formatted_message->size()));
+    }
   }
 
   void flush() override { fout_.flush(); }
@@ -2715,9 +2717,10 @@ public:
 
 private:
   void dispatch([[maybe_unused]] std::optional<std::string>&& formatted_message,
-                const Record& record) override {
-    auto message = formatter_->Format(record, settings_);
-    out_.write(message.c_str(), static_cast<std::streamsize>(message.size()));
+                [[maybe_unused]] const Record& record) override {
+    if (formatted_message) {
+      out_.write(formatted_message->c_str(), static_cast<std::streamsize>(formatted_message->size()));
+    }
   }
 
   void flush() override { out_.flush(); }
