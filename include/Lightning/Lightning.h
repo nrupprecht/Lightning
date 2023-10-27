@@ -1400,7 +1400,7 @@ enum class Severity : SeverityInt_t {
   Trace = 0b1,
   Debug = 0b10,
   Info = 0b100,
-  Major = 0b000,
+  Major = 0b1000,
   Warning = 0b10000,
   Error = 0b100000,
   Fatal = 0b1000000
@@ -1458,7 +1458,7 @@ public:
     if (does_accept)
       mask_ |= static_cast<int>(severity);
     else
-      mask_ &= (0b11111 & ~static_cast<int>(severity));
+      mask_ &= (0b1111111 & ~static_cast<int>(severity));
     return *this;
   }
 
@@ -1695,10 +1695,14 @@ public:
 private:
   NO_DISCARD const std::string& getString(Severity severity) const {
     switch (severity) {
+      case Severity::Trace:
+        return trace_;
       case Severity::Debug:
         return debug_;
       case Severity::Info:
         return info_;
+      case Severity::Major:
+        return major_;
       case Severity::Warning:
         return warn_;
       case Severity::Error:
@@ -1712,10 +1716,14 @@ private:
 
   NO_DISCARD std::string& getString(Severity severity) {
     switch (severity) {
+      case Severity::Trace:
+        return trace_;
       case Severity::Debug:
         return debug_;
       case Severity::Info:
         return info_;
+      case Severity::Major:
+        return major_;
       case Severity::Warning:
         return warn_;
       case Severity::Error:
@@ -1729,10 +1737,14 @@ private:
 
   NO_DISCARD const AnsiColorSegment& colorSegment(Severity severity) const {
     switch (severity) {
+      case Severity::Trace:
+        return trace_colors_;
       case Severity::Debug:
         return debug_colors_;
       case Severity::Info:
         return info_colors_;
+      case Severity::Major:
+        return major_colors_;
       case Severity::Warning:
         return warn_colors_;
       case Severity::Error:
@@ -1746,10 +1758,14 @@ private:
 
   NO_DISCARD AnsiColorSegment& colorSegment(Severity severity) {
     switch (severity) {
+      case Severity::Trace:
+        return trace_colors_;
       case Severity::Debug:
         return debug_colors_;
       case Severity::Info:
         return info_colors_;
+      case Severity::Major:
+        return major_colors_;
       case Severity::Warning:
         return warn_colors_;
       case Severity::Error:
@@ -1761,14 +1777,18 @@ private:
     }
   }
 
+  std::string trace_ = "Trace  ";
   std::string debug_ = "Debug  ";
   std::string info_ = "Info   ";
+  std::string major_ = "Major  ";
   std::string warn_ = "Warning";
   std::string error_ = "Error  ";
   std::string fatal_ = "Fatal  ";
 
+  AnsiColorSegment trace_colors_ {AnsiForegroundColor::White};
   AnsiColorSegment debug_colors_ {AnsiForegroundColor::BrightWhite};
   AnsiColorSegment info_colors_ {AnsiForegroundColor::Green};
+  AnsiColorSegment major_colors_ {AnsiForegroundColor::BrightBlue};
   AnsiColorSegment warn_colors_ {AnsiForegroundColor::Yellow};
   AnsiColorSegment error_colors_ {AnsiForegroundColor::Red};
   AnsiColorSegment fatal_colors_ {AnsiForegroundColor::BrightRed};
@@ -2737,6 +2757,8 @@ private:
 //!
 class Global {
 public:
+  Global() = delete;
+
   static std::shared_ptr<Core> GetCore() {
     if (!global_core_) {
       global_core_ = std::make_shared<Core>();
