@@ -10,9 +10,7 @@ using namespace lightning;
 using namespace std::string_literals;
 
 namespace Testing {
-
 TEST(MsgFormatter, Basic) {
-
   auto formatter = formatting::MsgFormatter("[{}] [{}] {}",
                                             formatting::SeverityAttributeFormatter{},
                                             formatting::DateTimeAttributeFormatter{},
@@ -24,13 +22,19 @@ TEST(MsgFormatter, Basic) {
   record.Bundle() << "Hello world!";
 
   FormattingSettings sink_settings;
-  // No colors
-  sink_settings.has_virtual_terminal_processing = false;
-  EXPECT_EQ(formatter.Format(record, sink_settings), "[Info   ] [2023-12-31 12:49:30.100000] Hello world!\n");
-
-  // With colors.
-  sink_settings.has_virtual_terminal_processing = true;
-  EXPECT_EQ(formatter.Format(record, sink_settings), "[\x1B[32mInfo   \x1B[0m] [2023-12-31 12:49:30.100000] Hello world!\n");
+  {
+    // No colors
+    sink_settings.has_virtual_terminal_processing = false;
+    memory::MemoryBuffer<char> buffer;
+    formatter.Format(record, sink_settings, buffer);
+    EXPECT_EQ(buffer.ToString(), "[Info   ] [2023-12-31 12:49:30.100000] Hello world!\n");
+  }
+  {
+    // With colors.
+    sink_settings.has_virtual_terminal_processing = true;
+    memory::MemoryBuffer<char> buffer;
+    formatter.Format(record, sink_settings, buffer);
+    EXPECT_EQ(buffer.ToString(), "[\x1B[32mInfo   \x1B[0m] [2023-12-31 12:49:30.100000] Hello world!\n");
+  }
 }
-
 } // namespace Testing

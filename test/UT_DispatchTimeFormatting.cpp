@@ -12,12 +12,11 @@ using namespace lightning;
 using namespace lightning::formatting;
 
 namespace Testing {
-
 TEST(Lightning, NewLineIndent) {
   // Set up logger.
   std::ostringstream stream;
   auto sink = UnlockedSink::From<OstreamSink>(stream);
-  lightning::Logger logger(sink);
+  Logger logger(sink);
 
   EXPECT_TRUE((std::is_base_of_v<BaseSegment, decltype(NewLineIndent)>));
 
@@ -38,7 +37,8 @@ TEST(Lightning, NewLineIndent) {
   sink->SetFormatter(MakeMsgFormatter("[Top]: {}\n[Repeated]: {}", formatting::MSG, formatting::MSG));
   LOG_SEV_TO(logger, Info) << "A is for apple." << NewLineIndent_t{} << "B is for bear.";
 
-  EXPECT_EQ(stream.str(), "[Top]: A is for apple.\n       B is for bear.\n[Repeated]: A is for apple.\n            B is for bear.\n");
+  EXPECT_EQ(stream.str(),
+            "[Top]: A is for apple.\n       B is for bear.\n[Repeated]: A is for apple.\n            B is for bear.\n");
 }
 
 TEST(Lightning, PadTill) {
@@ -46,7 +46,7 @@ TEST(Lightning, PadTill) {
   std::ostringstream stream;
   auto sink = UnlockedSink::From<OstreamSink>(stream);
   sink->SetFormatter(MakeMsgFormatter("{}", formatting::MSG));
-  lightning::Logger logger(sink);
+  Logger logger(sink);
 
   sink->GetFilter().AcceptNoSeverity(true);
   logger.GetCore()->GetFilter().AcceptNoSeverity(true);
@@ -77,8 +77,8 @@ TEST(Lightning, RepeatChar) {
   // Set up logger.
   std::ostringstream stream;
   auto sink = UnlockedSink::From<OstreamSink>(stream);
-  sink->SetFormatter(MakeMsgFormatter("{}", formatting::MSG));
-  lightning::Logger logger(sink);
+  sink->SetFormatter(MakeMsgFormatter("{}", MSG));
+  Logger logger(sink);
 
   sink->GetFilter().AcceptNoSeverity(true);
   logger.GetCore()->GetFilter().AcceptNoSeverity(true);
@@ -93,7 +93,6 @@ TEST(Lightning, RepeatChar) {
     EXPECT_EQ(stream.str(), "AxxxxxBccc\n");
     stream.str("");
   }
-
 }
 
 } // namespace Testing

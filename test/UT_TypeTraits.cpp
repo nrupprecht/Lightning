@@ -15,7 +15,7 @@ struct MAYBE_UNUSED Nonstreamable {};
 
 struct MAYBE_UNUSED ToStringable { char c; };
 
-MAYBE_UNUSED inline std::string to_string(const ToStringable x) { return "<"s + x.c + ">"; }
+MAYBE_UNUSED std::string to_string(const ToStringable x) { return "<"s + x.c + ">"; }
 
 } // namespace <unnamed>
 

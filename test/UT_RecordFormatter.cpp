@@ -22,15 +22,17 @@ TEST(MessageStringFormatter, Basic) {
 
   record.Bundle() << "Hello, world!";
   {
-    auto result = record_formatter.Format(record, {});
-    EXPECT_EQ(result, "\n");
+    memory::MemoryBuffer<char> buffer;
+    record_formatter.Format(record, {}, buffer);
+    EXPECT_EQ(buffer.ToString(), "\n");
   }
 
   record_formatter.AddMsgSegment();
   EXPECT_EQ(record_formatter.NumSegments(), 1u);
   {
-    auto result = record_formatter.Format(record, {});
-    EXPECT_EQ(result, "Hello, world!\n");
+    memory::MemoryBuffer<char> buffer;
+    record_formatter.Format(record, {}, buffer);
+    EXPECT_EQ(buffer.ToString(), "Hello, world!\n");
   }
 
   record_formatter.ClearSegments();
@@ -43,14 +45,16 @@ TEST(MessageStringFormatter, Basic) {
   { // With colors
     FormattingSettings settings;
     settings.has_virtual_terminal_processing = true;
-    auto result = record_formatter.Format(record, settings);
-    EXPECT_EQ(result, "[\x1B[32mInfo   \x1B[0m] Hello, world!\n");
+    memory::MemoryBuffer<char> buffer;
+    record_formatter.Format(record, settings, buffer);
+    EXPECT_EQ(buffer.ToString(), "[\x1B[32mInfo   \x1B[0m] Hello, world!\n");
   }
   { // No colors
     FormattingSettings settings;
     settings.has_virtual_terminal_processing = false;
-    auto result = record_formatter.Format(record, settings);
-    EXPECT_EQ(result, "[Info   ] Hello, world!\n");
+    memory::MemoryBuffer<char> buffer;
+    record_formatter.Format(record, settings, buffer);
+    EXPECT_EQ(buffer.ToString(), "[Info   ] Hello, world!\n");
   }
 }
 

@@ -11,7 +11,6 @@ using namespace std::string_literals;
 
 
 namespace Testing {
-
 TEST(Utility, NumberOfDigits_ULL) {
   EXPECT_EQ(formatting::NumberOfDigits(0ull), 1);
   EXPECT_EQ(formatting::NumberOfDigits(1ull), 1);
@@ -54,18 +53,25 @@ TEST(Utility, CopyPaddedInt) {
 TEST(Utility, FormatDateTo) {
   {
     std::string buffer(26, ' ');
-    formatting::FormatDateTo(&buffer[0], &buffer[0] + 26, time::DateTime::YMD_Time(2023'06'01, 12, 15, 6, 10023));
+    formatting::FormatDateTo(&buffer[0],
+                             &buffer[0] + 26,
+                             time::DateTime::YMD_Time(2023'06'01, 12, 15, 6, 10023));
     EXPECT_EQ(buffer, "2023-06-01 12:15:06.010023");
   }
-  { // You can format into the middle of a buffer.
+  {
+    // You can format into the middle of a buffer.
     std::string buffer(30, 'x');
-    formatting::FormatDateTo(&buffer[0] + 2, &buffer[0] + 30, time::DateTime::YMD_Time(2023'01'01, 1, 1, 1, 5));
+    formatting::FormatDateTo(&buffer[0] + 2,
+                             &buffer[0] + 30,
+                             time::DateTime::YMD_Time(2023'01'01, 1, 1, 1, 5));
     EXPECT_EQ(buffer, "xx2023-01-01 01:01:01.000005xx");
   }
-  { // Not enough space in the buffer.
+  {
+    // Not enough space in the buffer.
     std::string buffer(20, ' ');
-    EXPECT_ANY_THROW(formatting::FormatDateTo(&buffer[0], &buffer[0] + 20, time::DateTime::YMD_Time(2023'01'01, 1, 1, 1, 5)));
+    EXPECT_ANY_THROW(
+        formatting::FormatDateTo(&buffer[0], &buffer[0] + 20, time::DateTime::YMD_Time(2023'01'01, 1, 1, 1, 5)
+        ));
   }
 }
-
 } // namespace Testing

@@ -10,9 +10,7 @@ using namespace lightning;
 using namespace std::string_literals;
 
 namespace Testing {
-
 TEST(GeneralFormatting, Basic) {
-
   auto formatter = formatting::MsgFormatter("{}", formatting::MSG);
   FormattingSettings sink_settings;
   sink_settings.message_terminator = "";
@@ -20,32 +18,44 @@ TEST(GeneralFormatting, Basic) {
   {
     Record record;
     record.Bundle() << 12;
-    EXPECT_EQ(formatter.Format(record, sink_settings), "12");
+    memory::MemoryBuffer<char> buffer;
+    formatter.Format(record, sink_settings, buffer);
+    EXPECT_EQ(buffer.ToString(), "12");
   }
   {
     Record record;
     record.Bundle() << -12;
-    EXPECT_EQ(formatter.Format(record, sink_settings), "-12");
+    memory::MemoryBuffer<char> buffer;
+    formatter.Format(record, sink_settings, buffer);
+    EXPECT_EQ(buffer.ToString(), "-12");
   }
   {
     Record record;
     record.Bundle() << 12'235'938'546'972'340'928ull;
-    EXPECT_EQ(formatter.Format(record, sink_settings), "12235938546972340928");
+    memory::MemoryBuffer<char> buffer;
+    formatter.Format(record, sink_settings, buffer);
+    EXPECT_EQ(buffer.ToString(), "12235938546972340928");
   }
   {
     Record record;
     record.Bundle() << static_cast<short>(12);
-    EXPECT_EQ(formatter.Format(record, sink_settings), "12");
+    memory::MemoryBuffer<char> buffer;
+    formatter.Format(record, sink_settings, buffer);
+    EXPECT_EQ(buffer.ToString(), "12");
   }
   {
     Record record;
     record.Bundle() << std::string("Hi there my friends");
-    EXPECT_EQ(formatter.Format(record, sink_settings), "Hi there my friends");
+    memory::MemoryBuffer<char> buffer;
+    formatter.Format(record, sink_settings, buffer);
+    EXPECT_EQ(buffer.ToString(), "Hi there my friends");
   }
   {
     Record record;
     record.Bundle() << time::DateTime::YMD_Time(2023'01'01, 12, 30, 56, 12'134);
-    EXPECT_EQ(formatter.Format(record, sink_settings), "2023-01-01 12:30:56.012134");
+    memory::MemoryBuffer<char> buffer;
+    formatter.Format(record, sink_settings, buffer);
+    EXPECT_EQ(buffer.ToString(), "2023-01-01 12:30:56.012134");
   }
 }
 
@@ -65,5 +75,4 @@ TEST(GeneralFormatting, CalculateIndentation) {
     EXPECT_EQ(CalculateMessageIndentation(buffer, msg_info), 3u);
   }
 }
-
 }

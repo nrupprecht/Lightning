@@ -208,10 +208,10 @@ Single threaded: 250,000 messages
 
 | Experiment Name                            |Elapsed time (secs)     |Rate               |
 |--------------------------------------------|:----------------------:|-------------------|
-|MsgFormatter                                |0.083953                |2,977,872/sec      |
-|std::ofstream, with message, static header  |0.039416                |6,342,555/sec      |
-|EmptySink                                   |0.031420                |7,956,662/sec      |
-|TrivialDispatchSink                         |0.062762                |3,983,278/sec      |
+|MsgFormatter                                |0.044316                |5,641,314/sec      |
+|std::ofstream, with message, static header  |0.060310                |4,145,235/sec      |
+|EmptySink                                   |0.025524                |9,794,735/sec      |
+|TrivialDispatchSink                         |0.024978                |10,008,774/sec     |
 
 ******************************************************************************************
 
@@ -219,18 +219,18 @@ Single threaded, Types: 250,000 messages
 
 | Experiment Name                            |Elapsed time (secs)     |Rate               |
 |--------------------------------------------|:----------------------:|-------------------|
-|C-string                                    |0.082985                |3,012,592/sec      |
-|Long C-string                               |0.127386                |1,962,546/sec      |
-|Many C-strings                              |0.138126                |1,809,942/sec      |
-|String                                      |0.102179                |2,446,683/sec      |
-|Integer                                     |0.112620                |2,219,860/sec      |
-|Many integers                               |0.209955                |1,190,728/sec      |
-|Colored Integer                             |0.115283                |2,168,570/sec      |
-|Bool                                        |0.146225                |1,709,696/sec      |
-|Float                                       |0.131685                |1,898,472/sec      |
-|Thread ID                                   |0.143803                |1,738,486/sec      |
-|Combo                                       |0.220906                |1,131,704/sec      |
-|Use-defined exception formatting            |0.387635                |644,937/sec        |
+|C-string                                    |0.046936                |5,326,378/sec      |
+|Long C-string                               |0.063292                |3,949,930/sec      |
+|Many C-strings                              |0.093344                |2,678,260/sec      |
+|String                                      |0.056923                |4,391,913/sec      |
+|Integer                                     |0.045571                |5,485,980/sec      |
+|Many integers                               |0.099563                |2,510,977/sec      |
+|Colored Integer                             |0.058169                |4,297,794/sec      |
+|Bool                                        |0.083083                |3,009,025/sec      |
+|Float                                       |0.077367                |3,231,332/sec      |
+|Thread ID                                   |0.088423                |2,827,305/sec      |
+|Combo                                       |0.106442                |2,348,690/sec      |
+|Use-defined exception formatting            |0.407737                |613,140/sec        |
 
 ******************************************************************************************
 
@@ -238,8 +238,8 @@ Single threaded: 250,000 messages, non-acceptance
 
 | Experiment Name                            |Elapsed time (secs)     |Rate               |
 |--------------------------------------------|:----------------------:|-------------------|
-|Non-accepting sink                          |0.000289                |866,049,808/sec    |
-|Non-accepting core                          |0.000165                |1,516,686,585/sec  |
+|Non-accepting sink                          |0.000243                |1,030,927,835/sec  |
+|Non-accepting core                          |0.000120                |2,084,775,302/sec  |
 
 ******************************************************************************************
 
@@ -247,8 +247,8 @@ Multi threaded (4 threads): 250,000 messages
 
 | Experiment Name                            |Elapsed time (secs)     |Rate               |
 |--------------------------------------------|:----------------------:|-------------------|
-|One logger, multiple threads                |0.165496                |1,510,612/sec      |
-|Multiple loggers, same sink                 |0.195100                |1,281,393/sec      |
+|One logger, multiple threads                |0.041597                |6,010,036/sec      |
+|Multiple loggers, same sink                 |0.092153                |2,712,891/sec      |
 
 # Building and installing
 

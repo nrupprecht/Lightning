@@ -32,25 +32,25 @@ SOFTWARE.
 #include <fstream>
 #include <iostream>
 #include <map>
-#include <mutex>
 #include <optional>
 #include <set>
 #include <sstream>
 #include <string>
 #include <thread>
 #include <type_traits>
-#include <utility>
 #include <variant>
 #include <vector>
+#include <string_view>
 
 namespace lightning {
-
 // ==============================================================================
 //  Macro definitions.
 // ==============================================================================
 
 #define NO_DISCARD [[nodiscard]]
 #define MAYBE_UNUSED [[maybe_unused]]
+
+#define LL_ENABLE_IF(...) typename = std::enable_if_t<(__VA_ARGS__)>
 
 //! \brief  Macro that allows you to create a type trait based on whether a statement about a type called
 //! Value_t is valid.
@@ -62,10 +62,10 @@ namespace lightning {
   namespace detail_traits_##trait_name { \
     template<typename Value_t> \
     inline auto test_##trait_name(int) -> decltype((trait_test), std::true_type {}); \
-\
+    \
     template<typename Value_t> \
     inline auto test_##trait_name(...) -> std::false_type; \
-\
+    \
     template<typename Value_t> \
     struct trait_class_##trait_name { \
       static constexpr bool value = decltype(test_##trait_name<Value_t>(0))::value; \
@@ -107,41 +107,36 @@ namespace lightning {
 //  Type traits.
 // ==============================================================================
 
-namespace typetraits {  // namespace lightning::typetraits
-
+namespace typetraits {
 //! \brief  Type trait that determines whether a type can be ostream'ed.
 NEW_TYPE_TRAIT(is_ostreamable_v, std::declval<std::ostream&>() << std::declval<Value_t>())
 
 //! \brief  Type trait that determines whether a type has a to_string function.
 NEW_TYPE_TRAIT(has_to_string_v, to_string(std::declval<Value_t>()))
 
-//! \brief  Type trait that determines if there is std::to_chars support for a type. Some compilers, like
-//! clang,
-//!         have std::to_chars for integral types, but not for doubles, so we can't just check the feature
-//!         test macro __cpp_lib_to_chars.
+//! \brief  Type trait that determines if there is std::to_chars support for a type. Some compilers, like clang,
+//! have std::to_chars for integral types, but not for doubles, so we can't just check the feature test macro
+//! __cpp_lib_to_chars.
 NEW_TYPE_TRAIT(has_to_chars,
                std::to_chars(std::declval<char*>(), std::declval<char*>(), std::declval<Value_t>()))
 
 //! \brief Define remove_cvref_t, which is not available everywhere.
 template<typename T>
-using remove_cvref_t = typename std::remove_cv_t<std::remove_reference_t<T>>;
+using remove_cvref_t = std::remove_cv_t<std::remove_reference_t<T>>;
 
-namespace detail_always_false {  // namespace lightning::typetraits::detail_always_false
-
+namespace detail_always_false {
 template<typename T>
 struct always_false {
   static constexpr bool value = false;
 };
+} // namespace detail_always_false
 
-}  // namespace detail_always_false
-
-//! \brief  "Type trait" that is always false, useful in static_asserts, since right now, you cannot
-//! static_assert(false).
+//! \brief  "Type trait" that is always false, useful in static_asserts, since right now (meaning in C++17),
+//! you cannot static_assert(false).
 template<typename T>
 inline constexpr bool always_false_v = detail_always_false::always_false<T>::value;
 
-namespace detail_unconst {  // namespace lightning::detail_unconst
-
+namespace detail_unconst {
 template<typename T>
 struct Unconst {
   using type = T;
@@ -161,21 +156,21 @@ template<typename T>
 struct Unconst<T*> {
   using type = typename Unconst<T>::type*;
 };
-
-}  // namespace detail_unconst
+} // namespace detail_unconst
 
 //! \brief  Remove const-ness on all levels of pointers.
-//!
 template<typename T>
 using Unconst_t = typename detail_unconst::Unconst<T>::type;
 
+//! \brief Type trait that checks if a type is a c-style string or a std::string, no matter what const-ness qualifies T.
 template<typename T>
 constexpr inline bool IsCstrRelated_v =
     std::is_same_v<Unconst_t<std::decay_t<T>>, char*> || std::is_same_v<remove_cvref_t<T>, std::string>;
+} // namespace typetraits.
 
-}  // namespace typetraits.
-
-//! \brief Convenient base class for pImpl type objects.
+//! \brief Convenient base class for pImpl type objects. Note that here, we use PImpl to give value semantics to objects
+//! that would otherwise need to be stored as shared pointers to base objects. This is in contrast to why PImpl is
+//! usually used, as a way to hide implementation details and a compilation firewall.
 class ImplBase {
 public:
   class Impl {
@@ -202,15 +197,232 @@ protected:
   std::shared_ptr<Impl> impl_ = nullptr;
 
   explicit ImplBase(std::shared_ptr<Impl> impl)
-      : impl_(std::move(impl)) {}
+    : impl_(std::move(impl)) {}
 };
+
+namespace memory {
+//! \brief Basic contiguous memory buffer. Not thread safe.
+//!
+template<typename T>
+class BasicMemoryBuffer {
+public:
+  virtual ~BasicMemoryBuffer() = default;
+
+  NO_DISCARD T* Data() {
+    return data_;
+  }
+
+  NO_DISCARD const T* Data() const {
+    return data_;
+  }
+
+  NO_DISCARD const T* End() const {
+    return data_ + size_;
+  }
+
+  NO_DISCARD T* End() {
+    return data_ + size_;
+  }
+
+  void PushBack(const T& value) {
+    reserve(size_ + 1);
+    data_[size_++] = value;
+  }
+
+  //! \brief Append a range of values to the buffer.
+  void Append(const T* begin, const T* end) {
+    auto count = std::distance(begin, end);
+    reserve(size_ + static_cast<std::size_t>(count));
+    std::uninitialized_copy(begin, end, data_ + size_);
+    size_ += static_cast<std::size_t>(count);
+  }
+
+  void AppendN(const T& object, std::size_t n_copies) {
+    reserve(size_ + n_copies);
+    std::uninitialized_fill_n(data_ + size_, n_copies, object);
+    size_ += n_copies;
+  }
+
+  //! \brief Get the size of the buffer.
+  NO_DISCARD std::size_t Size() const { return size_; }
+
+  //! \brief Get the capacity of the buffer.
+  NO_DISCARD std::size_t Capacity() const { return capacity_; }
+
+  //! \brief Checks whether the buffer is empty.
+  NO_DISCARD bool Empty() const { return size_ == 0; }
+
+  //! \brief Make sure the capacity is enough for the given size plus some additional amount of space.
+  void ReserveAdditional(std::size_t additional) {
+    reserve(size_ + additional);
+  }
+
+  //! \brief Allocate an additional chunk of storage and return pointers to the beginning and (element after) end of
+  //! the chunk.
+  std::pair<T*, T*> Allocate(std::size_t additional) {
+    reserve(size_ + additional);
+    auto begin = End();
+    size_ += additional;
+    return {begin, End()};
+  }
+
+  //! \brief If the storage type is char, return a string copy of the data.
+  template<LL_ENABLE_IF(std::is_same_v<T, char>)>
+  NO_DISCARD std::string ToString() const {
+    return std::string(Data(), End());
+  }
+
+  template<LL_ENABLE_IF(std::is_same_v<T, char>)>
+  NO_DISCARD std::string_view ToView() const {
+    return std::string_view(Data(), Size());
+  }
+
+protected:
+  void reserve(std::size_t new_capacity) {
+    // Note: only makes a virtual call if the capacity is too small.
+    if (capacity_ < new_capacity) {
+      allocate(new_capacity);
+    }
+  }
+
+  virtual void allocate(std::size_t size) = 0;
+
+  //! \brief Pointer to the data that is being used.
+  T* data_{};
+  //! \brief The current size of the data stored in the buffer (number of entries).
+  std::size_t size_{};
+  //! \brief The current capacity of the buffer.
+  std::size_t capacity_{};
+};
+
+//! \brief Basic memory buffer that has a predetermined amount of stack storage and a concrete method for allocating
+//! new data on the heap.
+//!
+template<typename T, std::size_t stack_size_v = 256>
+class MemoryBuffer final : public BasicMemoryBuffer<T> {
+public:
+  MemoryBuffer() {
+    this->data_ = buffer_;
+    this->capacity_ = stack_size_v;
+  }
+
+  ~MemoryBuffer() override {
+    deallocate();
+  }
+
+private:
+  void allocate(std::size_t size) override {
+    auto trial_capacity = this->capacity_ + this->capacity_ / 2;
+    trial_capacity = std::max(size, trial_capacity);
+    auto old_data = this->data_;
+    this->data_ = new T[trial_capacity];
+    std::copy(old_data, old_data + this->size_, this->data_);
+    if (old_data != buffer_) {
+      delete[] old_data;
+    }
+    this->capacity_ = trial_capacity;
+  }
+
+  void deallocate() {
+    if (this->data_ != buffer_) {
+      delete [] this->data_;
+    }
+  }
+
+  //! \brief The internal data buffer.
+  T buffer_[stack_size_v];
+};
+
+
+//! \brief Helper function to append a string to a memory buffer of chars.
+inline void AppendBuffer(BasicMemoryBuffer<char>& buffer, const std::string& str) {
+  buffer.Append(str.data(), str.data() + str.size());
+}
+
+//! \brief Helper function to append a string view to a memory buffer of chars.
+inline void AppendBuffer(BasicMemoryBuffer<char>& buffer, const std::string_view& str) {
+  buffer.Append(str.data(), str.data() + str.size());
+}
+
+//! \brief Helper function to append a c-style string to a memory buffer of chars.
+inline void AppendBuffer(BasicMemoryBuffer<char>& buffer, const char* str) {
+  for (auto c = str; *c != '\0'; ++c) {
+    buffer.PushBack(*c);
+  }
+}
+
+//! \brief A vector (-like class) that has a predetermined amount of stack storage and uses a vector for the
+//! rest of the storage.
+//!
+//! Note: This is very similar to a MemoryBuffer, but differs in a couple ways. First, it is not a contiguous
+//! buffer, so it does not have a Data() (or related) methods. Second, it allows for direct indexing. I am not
+//! allowing MemoryBuffer to index, since there are certain use cases I might want to explore where you would
+//! not want to allow indexing. For example, you could create a BasicMemoryBuffer child that wraps around an
+//! ostream, and flushes the fixed buffer to the ostream whenever it is full, and then resets. Obviously, you
+//! cannot index into an arbitrary place in a class like this.
+//! So for now, despite their similarities, I am keeping these classes distinct and unrelated.
+template<typename T, std::size_t stack_size_v>
+class HybridVector {
+public:
+  void PushBack(T&& x) {
+    if (stack_size_ == stack_size_v) {
+      heap_buffer_.push_back(std::move(x));
+    }
+    else {
+      stack_buffer_[stack_size_++] = std::move(x);
+    }
+  }
+
+  template<typename... Args_t>
+  void EmplaceBack(Args_t&&... args) {
+    if (stack_size_ == stack_size_v) {
+      heap_buffer_.emplace_back(std::forward<Args_t>(args)...);
+    }
+    else {
+      // Use placement new to allocate an item on the stack buffer.
+      new(stack_buffer_ + stack_size_++) T(std::forward<Args_t>(args)...);
+    }
+  }
+
+  T& Back() {
+    if (!heap_buffer_.empty()) {
+      return heap_buffer_.back();
+    }
+    else {
+      return stack_buffer_[stack_size_ - 1];
+    }
+  }
+
+  T& operator[](std::size_t index) {
+    if (index < stack_size_v) {
+      return stack_buffer_[index];
+    }
+    return heap_buffer_[index - stack_size_v];
+  }
+
+  const T& operator[](std::size_t index) const {
+    if (index < stack_size_v) {
+      return stack_buffer_[index];
+    }
+    return heap_buffer_[index - stack_size_v];
+  }
+
+  NO_DISCARD std::size_t Size() const { return stack_size_ + heap_buffer_.size(); }
+  NO_DISCARD std::size_t HeapSize() const { return heap_buffer_.size(); }
+  NO_DISCARD bool Empty() const { return stack_size_ == 0; }
+
+private:
+  T stack_buffer_[stack_size_v];
+  std::vector<T> heap_buffer_;
+  std::size_t stack_size_{};
+};
+} // namespace memory
 
 // ==============================================================================
 //  Date / time support.
 // ==============================================================================
 
-namespace time {  // namespace lightning::time
-
+namespace time {
 //! \brief Compute whether a year is a leap year.
 //!
 inline bool IsLeapYear(int year) {
@@ -252,38 +464,41 @@ enum class Month {
   December
 };
 
-inline std::string MonthAbbreviation(Month m) {
-  auto m_int = static_cast<int>(m);
+inline const char* MonthAbbreviation(Month m) {
+  const auto m_int = static_cast<int>(m);
   LL_REQUIRE(0 < m_int && m_int < 13, "month must be in the range [1, 12], not " << m_int);
-  static std::string abbrev_[] {
+  static const char* abbrev_[]{
       "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"};
   return abbrev_[m_int - 1];
 }
 
 inline Month MonthIntToMonth(int month) {
   LL_REQUIRE(0 < month && month < 13, "month must be in the range [1, 12], not " << month);
-  static Month months_[] {Month::January,
-                          Month::February,
-                          Month::March,
-                          Month::April,
-                          Month::May,
-                          Month::June,
-                          Month::July,
-                          Month::August,
-                          Month::September,
-                          Month::October,
-                          Month::November,
-                          Month::December};
+  static Month months_[]{Month::January,
+                         Month::February,
+                         Month::March,
+                         Month::April,
+                         Month::May,
+                         Month::June,
+                         Month::July,
+                         Month::August,
+                         Month::September,
+                         Month::October,
+                         Month::November,
+                         Month::December};
   return months_[month - 1];
 }
 
 //! \brief  A class that represents a date and time, down to millisecond precision.
 //!
-//!         This class does ignore some of the very odd bits of timekeeping, like leap-seconds.
+//! The year must satisfy 0 <= year < 4096.
+//! Note: This class does ignore some of the very odd bits of timekeeping, like leap-seconds. It also doesn't deal with
+//! timezones and time changes, so it is up to the user to make sure that the time is in the correct timezone.
 //!
 class DateTime {
 public:
   DateTime() = default;
+
   DateTime(int year, int month, int day, int hour = 0, int minute = 0, int second = 0, int microsecond = 0) {
     setYMD(year, month, day);
     setHMSUS(hour, minute, second, microsecond);
@@ -291,19 +506,19 @@ public:
 
   //! \brief  Date time from system clock.
   //!
-  //!         Note: localtime (and its related variants, and gmtime) are relatively slow functions. Prefer
-  //!         using FastDateGenerator if you need to repeatedly generate DateTimes.
+  //! Note: localtime (and its related variants, and gmtime) are relatively slow functions. Prefer using
+  //! FastDateGenerator if you need to repeatedly generate DateTimes.
   //!
   explicit DateTime(const std::chrono::time_point<std::chrono::system_clock>& time_point) {
     // Get number of milliseconds for the current second (remainder after division into seconds)
-    int ms = static_cast<int>(
-        (std::chrono::duration_cast<std::chrono::microseconds>(time_point.time_since_epoch()) % 1'000'000)
-            .count());
-    // convert to std::time_t in order to convert to std::tm (broken time)
+    const int ms = static_cast<int>(
+      (std::chrono::duration_cast<std::chrono::microseconds>(time_point.time_since_epoch()) % 1'000'000)
+      .count());
+    // Convert to std::time_t in order to convert to std::tm (broken time)
     auto t = std::chrono::system_clock::to_time_t(time_point);
 
-    // Convert time - this is expensive.
-    std::tm now {};
+    // Convert time - this is expensive. See FastDateGenerator for a faster alternative.
+    std::tm now{};
 #if defined _MSC_VER
     localtime_s(&now, &t);
 #else
@@ -316,7 +531,7 @@ public:
   }
 
   explicit DateTime(int yyyymmdd)
-      : DateTime(yyyymmdd / 10000, (yyyymmdd / 100) % 100, yyyymmdd % 100) {}
+    : DateTime(yyyymmdd / 10000, (yyyymmdd / 100) % 100, yyyymmdd % 100) {}
 
   NO_DISCARD int AsYYYYMMDD() const { return GetYear() * 10000 + GetMonthInt() * 100 + GetDay(); }
 
@@ -324,15 +539,18 @@ public:
   NO_DISCARD int GetMonthInt() const {
     return static_cast<int>((y_m_d_h_m_s_um_ >> shift_month_) & month_mask_);
   }
+
   NO_DISCARD Month GetMonth() const { return MonthIntToMonth(GetMonthInt()); }
   NO_DISCARD int GetDay() const { return static_cast<int>((y_m_d_h_m_s_um_ >> shift_day_) & day_mask_); }
   NO_DISCARD int GetHour() const { return static_cast<int>(y_m_d_h_m_s_um_ >> shift_hour_) & hour_mask_; }
   NO_DISCARD int GetMinute() const {
     return static_cast<int>((y_m_d_h_m_s_um_ >> shift_minute_) & minute_mask_);
   }
+
   NO_DISCARD int GetSecond() const {
     return static_cast<int>((y_m_d_h_m_s_um_ >> shift_second_) & second_mask_);
   }
+
   NO_DISCARD int GetMillisecond() const { return GetMicrosecond() / 1000; }
   NO_DISCARD int GetMicrosecond() const { return static_cast<int>(y_m_d_h_m_s_um_ & us_mask_); }
 
@@ -350,14 +568,15 @@ public:
 
   //! \brief  Get the current clock time, in the local timezone.
   //!
-  //!         Note: localtime (and its related variants, and gmtime) are relatively slow functions. Prefer
-  //!         using FastDateGenerator if you need to repeatedly generate DateTimes.
+  //! Note: localtime (and its related variants, and gmtime) are relatively slow functions. Prefer using
+  //! FastDateGenerator if you need to repeatedly generate DateTimes.
   //!
   static DateTime Now() {
-    auto time = std::chrono::system_clock::now();
+    const auto time = std::chrono::system_clock::now();
     return DateTime(time);
   }
 
+  //! \brief Construct a DateTime out of a yyyymmdd integer, hours, minutes and optional seconds and microseconds.
   static DateTime YMD_Time(int yyyymmdd, int hours, int minutes, int seconds = 0, int microsecond = 0) {
     DateTime dt(yyyymmdd);
     dt.setHMSUS(hours, minutes, seconds, microsecond);
@@ -367,7 +586,14 @@ public:
 private:
   //! \brief Non-validating date constructor.
   DateTime(
-      bool, int year, int month, int day, int hour = 0, int minute = 0, int second = 0, int microsecond = 0) {
+      bool,
+      int year,
+      int month,
+      int day,
+      int hour = 0,
+      int minute = 0,
+      int second = 0,
+      int microsecond = 0) {
     setYMD(year, month, day, false);
     setHMSUS(hour, minute, second, microsecond, false);
   }
@@ -418,7 +644,7 @@ private:
   //!         0 <= ms < 1'000'000  => 20 bits
   //!         Total: 64 bits
   //! yyyyyyyy-yyyymmmm-mmmddddd-dddhhhhh mmmmmmss-ssssuuuu-uuuuuuuu-uuuuuuuu
-  std::uint64_t y_m_d_h_m_s_um_ {};
+  std::uint64_t y_m_d_h_m_s_um_{};
 
   static constexpr int shift_second_ = 20;
   static constexpr int shift_minute_ = 26;
@@ -437,34 +663,34 @@ private:
 
 inline DateTime AddMicroseconds(const DateTime& time, unsigned long long microseconds) {
   int new_years = time.GetYear(), new_months = time.GetMonthInt(), new_days = time.GetDay();
-  int new_hours = time.GetHour(), new_minutes = time.GetMinute(), new_seconds = time.GetSecond(),
-      new_us = time.GetMicrosecond();
+  int new_hours = time.GetHour(), new_minutes = time.GetMinute(), new_seconds = time.GetSecond();
+  int new_us = time.GetMicrosecond();
 
-  auto new_us_overflow = static_cast<unsigned long long>(time.GetMicrosecond()) + microseconds;
+  const auto new_us_overflow = static_cast<unsigned long long>(new_us) + microseconds;
   new_us = static_cast<int>(new_us_overflow % 1'000'000);
 
-  auto carry_seconds = new_us_overflow / 1'000'000;
+  const auto carry_seconds = new_us_overflow / 1'000'000;
   if (carry_seconds == 0) {
     return {new_years, new_months, new_days, new_hours, new_minutes, new_seconds, new_us};
   }
-  auto new_seconds_overflow = static_cast<unsigned long long>(new_seconds) + carry_seconds;
+  const auto new_seconds_overflow = static_cast<unsigned long long>(new_seconds) + carry_seconds;
   new_seconds = static_cast<int>(new_seconds_overflow % 60);
 
-  auto carry_minutes = new_seconds_overflow / 60;
+  const auto carry_minutes = new_seconds_overflow / 60;
   if (carry_minutes == 0) {
     return {new_years, new_months, new_days, new_hours, new_minutes, new_seconds, new_us};
   }
-  auto new_minutes_overflow = static_cast<unsigned long long>(new_minutes) + carry_minutes;
+  const auto new_minutes_overflow = static_cast<unsigned long long>(new_minutes) + carry_minutes;
   new_minutes = static_cast<int>(new_minutes_overflow % 60);
 
-  auto carry_hours = new_minutes_overflow / 60;
+  const auto carry_hours = new_minutes_overflow / 60;
   if (carry_hours == 0) {
     return {new_years, new_months, new_days, new_hours, new_minutes, new_seconds, new_us};
   }
-  auto new_hours_overflow = static_cast<unsigned long long>(new_hours) + carry_hours;
+  const auto new_hours_overflow = static_cast<unsigned long long>(new_hours) + carry_hours;
   new_hours = static_cast<int>(new_hours_overflow % 24);
 
-  auto carry_days = static_cast<int>(new_hours_overflow / 24);
+  const auto carry_days = static_cast<int>(new_hours_overflow / 24);
   if (carry_days == 0) {
     return {new_years, new_months, new_days, new_hours, new_minutes, new_seconds, new_us};
   }
@@ -473,7 +699,7 @@ inline DateTime AddMicroseconds(const DateTime& time, unsigned long long microse
   // in the month, and increment years when you go past December.
   auto which_month = time.GetMonthInt(), which_year = time.GetYear();
   while (0 < carry_days) {
-    auto days = DaysInMonth(which_month, which_year);
+    const auto days = DaysInMonth(which_month, which_year);
     if (new_days + carry_days < days) {
       new_days += carry_days;
       break;
@@ -495,34 +721,32 @@ inline DateTime AddMicroseconds(const DateTime& time, unsigned long long microse
 class FastDateGenerator {
 public:
   FastDateGenerator()
-      : start_time_point_(std::chrono::system_clock::now())
+    : start_time_point_(std::chrono::system_clock::now())
       , base_date_time_(start_time_point_) {}
 
   NO_DISCARD DateTime CurrentTime() const {
-    auto current_time = std::chrono::system_clock::now();
-
-    auto us = std::chrono::duration_cast<std::chrono::microseconds>(current_time - start_time_point_).count();
+    const auto current_time = std::chrono::system_clock::now();
+    const auto dt = current_time - start_time_point_;
+    const auto us = std::chrono::duration_cast<std::chrono::microseconds>(dt).count();
     return AddMicroseconds(base_date_time_, static_cast<unsigned long long>(us));
   }
 
 private:
   //! \brief Keep track of when the logger was created.
   std::chrono::time_point<std::chrono::system_clock> start_time_point_;
-
+  //! \brief The DateTime at the time that the generator was created.
   DateTime base_date_time_;
 };
-
-}  // namespace time
+} // namespace time
 
 // ==============================================================================
 //  Formatting.
 // ==============================================================================
 
-namespace formatting {  // namespace lightning::formatting
-
+namespace formatting {
 namespace detail {
 //! \brief Store all powers of ten that fit in an unsigned long long.
-const unsigned long long powers_of_ten[] = {
+constexpr unsigned long long powers_of_ten[] = {
     1,
     10,
     100,
@@ -544,16 +768,22 @@ const unsigned long long powers_of_ten[] = {
     1'000'000'000'000'000'000,
     10'000'000'000'000'000'000ull,
 };
-}  // namespace detail
+
+//! \brief The largest power of ten that fits in an unsigned long long.
+constexpr unsigned long long max_ull_power_of_ten = 10'000'000'000'000'000'000ull;
+
+//! \brief The largest power of ten that fits in an unsigned long long is (10 ^ log10_max_ull_power_of_ten).
+constexpr int log10_max_ull_power_of_ten = 19;
+} // namespace detail
 
 //! \brief Returns how many digits the decimal representation of a ull will have.
 //!        The optional bound "upper" means that the number has at most "upper" digits.
-inline unsigned NumberOfDigitsULL(unsigned long long x, int upper = 19) {
+inline unsigned NumberOfDigitsULL(unsigned long long x, int upper = detail::log10_max_ull_power_of_ten) {
   using namespace detail;
   upper = std::max(0, std::min(upper, 19));
   if (x == 0)
     return 1u;
-  if (x >= 10'000'000'000'000'000'000ull)
+  if (x >= max_ull_power_of_ten)
     return 20;
   auto it = std::upper_bound(&powers_of_ten[0], &powers_of_ten[upper], x);
   return static_cast<unsigned>(std::distance(&powers_of_ten[0], it));
@@ -561,7 +791,7 @@ inline unsigned NumberOfDigitsULL(unsigned long long x, int upper = 19) {
 
 template<typename Integral_t,
          typename = std::enable_if_t<std::is_integral_v<Integral_t> && !std::is_same_v<Integral_t, bool>>>
-inline unsigned NumberOfDigits(Integral_t x, int upper = 19) {
+unsigned NumberOfDigits(Integral_t x, int upper = detail::log10_max_ull_power_of_ten) {
   if constexpr (!std::is_signed_v<Integral_t>) {
     return NumberOfDigitsULL(x, upper);
   }
@@ -571,16 +801,21 @@ inline unsigned NumberOfDigits(Integral_t x, int upper = 19) {
 }
 
 inline char* CopyPaddedInt(
-    char* start, char* end, unsigned long long x, int width, char fill_char = '0', int max_power = 19) {
-  auto nd = NumberOfDigits(x, max_power);
-  auto remainder = static_cast<unsigned>(width) - nd;
+    char* start,
+    char* end,
+    unsigned long long x,
+    int width,
+    char fill_char = '0',
+    int max_power = detail::log10_max_ull_power_of_ten) {
+  const auto nd = NumberOfDigits(x, max_power);
+  const auto remainder = static_cast<unsigned>(width) - nd;
   if (0 < remainder) {
     std::fill_n(start, remainder, fill_char);
   }
   return std::to_chars(start + remainder, end, x).ptr;
 }
 
-//! \brief Format a date to a buffer.
+//! \brief Format a date to a character range.
 inline char* FormatDateTo(char* c, char* end_c, const time::DateTime& dt) {
   // Store all zero-padded one and two-digit numbers, allows for very fast serialization.
   static const char up_to[] =
@@ -594,49 +829,50 @@ inline char* FormatDateTo(char* c, char* end_c, const time::DateTime& dt) {
       "70717273747576777879"
       "80818283848586878889"
       "90919293949596979899";
-  static const char* up_to_c = static_cast<const char*>(up_to);
-
   LL_REQUIRE(26 <= end_c - c, "need at least 26 characters to format date");
 
   // Year
-  auto start_c = c;
+  const auto start_c = c;
   std::to_chars(c, end_c, dt.GetYear());
   *(start_c + 4) = '-';
   // Month
-  auto month = dt.GetMonthInt();
-  std::copy(up_to_c + 2 * month, up_to_c + 2 * month + 2, start_c + 5);
+  const auto month = dt.GetMonthInt();
+  std::copy(up_to + 2 * month, up_to + 2 * month + 2, start_c + 5);
   *(start_c + 7) = '-';
   // Day
-  auto day = dt.GetDay();
-  std::copy(up_to_c + 2 * day, up_to_c + 2 * day + 2, start_c + 8);
+  const auto day = dt.GetDay();
+  std::copy(up_to + 2 * day, up_to + 2 * day + 2, start_c + 8);
   *(start_c + 10) = ' ';
   // Hour.
-  auto hour = dt.GetHour();
-  std::copy(up_to_c + 2 * hour, up_to_c + 2 * hour + 2, start_c + 11);
+  const auto hour = dt.GetHour();
+  std::copy(up_to + 2 * hour, up_to + 2 * hour + 2, start_c + 11);
   *(start_c + 13) = ':';
   // Minute.
-  auto minute = dt.GetMinute();
-  std::copy(up_to_c + 2 * minute, up_to_c + 2 * minute + 2, start_c + 14);
+  const auto minute = dt.GetMinute();
+  std::copy(up_to + 2 * minute, up_to + 2 * minute + 2, start_c + 14);
   *(start_c + 16) = ':';
   // Second.
-  auto second = dt.GetSecond();
-  std::copy(up_to_c + 2 * second, up_to_c + 2 * second + 2, start_c + 17);
+  const auto second = dt.GetSecond();
+  std::copy(up_to + 2 * second, up_to + 2 * second + 2, start_c + 17);
   *(start_c + 19) = '.';
   // Microsecond.
-  auto microseconds = dt.GetMicrosecond();
-  int nd = static_cast<int>(formatting::NumberOfDigits(microseconds, 6));
+  const auto microseconds = dt.GetMicrosecond();
+  const int nd = static_cast<int>(formatting::NumberOfDigits(microseconds, 6));
   std::fill_n(c + 20, 6 - nd, '0');
   std::to_chars(c + 26 - nd, end_c, microseconds);
 
   return c + 26;
 }
 
+//! \brief Information about a formatted logging message. Used to keep track of various information about the message
+//! that is being formatted to a string.
 struct MessageInfo {
   //! \brief The total length of the formatted string so far, inclusive of message and non-message segments.
   unsigned total_length = 0;
 
-  //! \brief The indentation of the start of the message within the formatted record.
-  unsigned message_indentation = 0;
+  //! \brief The indentation of the start of the message within the formatted record. This is only filled in
+  //! if needs_message_indentation is requested (true), and is only valid if is_in_message_segment is true.
+  std::optional<unsigned> message_indentation{};
 
   //! \brief The length of the message segment so far.
   unsigned message_length = 0;
@@ -644,8 +880,8 @@ struct MessageInfo {
   //! \brief True if the current segment or formatter is within the message segment of a formatted record.
   bool is_in_message_segment = false;
 
-  //! \brief  If true, some formatting segment needs the message indentation to be calculated. Otherwise, the
-  //!         message indentation does not need to be calculated.
+  //! \brief If true, some formatting segment needs the message indentation to be calculated. Otherwise, the message
+  //! indentation does not need to be calculated.
   bool needs_message_indentation = false;
 };
 
@@ -700,7 +936,7 @@ using Ansi256Color = unsigned char;
 //! \brief Generate a string that can change the ANSI 8bit color of a terminal, if supported.
 inline std::string SetAnsiColorFmt(std::optional<AnsiForegroundColor> foreground,
                                    std::optional<AnsiBackgroundColor> background = {}) {
-  std::string fmt {};
+  std::string fmt{};
   if (foreground)
     fmt += "\x1b[" + std::to_string(static_cast<short>(*foreground)) + "m";
   if (background)
@@ -711,7 +947,7 @@ inline std::string SetAnsiColorFmt(std::optional<AnsiForegroundColor> foreground
 //! \brief Generate a string that can change the ANSI 256-bit color of a terminal, if supported.
 inline std::string SetAnsi256ColorFmt(std::optional<Ansi256Color> foreground_color_id,
                                       std::optional<Ansi256Color> background_color_id = {}) {
-  std::string fmt {};
+  std::string fmt{};
   if (foreground_color_id)
     fmt = "\x1b[38;5;" + std::to_string(*foreground_color_id) + "m";
   if (background_color_id)
@@ -746,12 +982,10 @@ inline unsigned CountNonAnsiSequenceCharacters(const char* begin, const char* en
   }
   return count;
 }
-
-}  // namespace formatting
+} // namespace formatting
 
 //! \brief  Structure that specifies how a message can be formatted, and what are the capabilities of the sink
-//! that
-//!         the formatted message will be dispatched to.
+//! that the formatted message will be dispatched to.
 struct FormattingSettings {
   //! \brief Records whether the target can handle virtual terminal ascii codes.
   bool has_virtual_terminal_processing = false;
@@ -765,40 +999,41 @@ struct FormattingSettings {
 
 //! \brief  The base class for all message segments.
 //!
-//!         For efficiency, each segment needs to know how much space its formatted self will take up.
+//! For efficiency, each segment needs to know how much space its formatted self will take up.
 struct BaseSegment {
   explicit BaseSegment() = default;
   BaseSegment([[maybe_unused]] const char* fmt_begin, [[maybe_unused]] const char* fmt_end) {}
   virtual ~BaseSegment() = default;
 
-  virtual char* AddToBuffer(const FormattingSettings& settings,
-                            const formatting::MessageInfo& msg_info,
-                            char* start,
-                            char* end) const = 0;
+  virtual void AddToBuffer(const FormattingSettings& settings,
+                           const formatting::MessageInfo& msg_info,
+                           memory::BasicMemoryBuffer<char>& buffer) const = 0;
   NO_DISCARD virtual unsigned SizeRequired(const FormattingSettings& settings,
                                            const formatting::MessageInfo& msg_info) const = 0;
   virtual void CopyTo(class SegmentStorage&) const = 0;
 
   //! \brief  Some formatting segments need the message indentation (the distance from the start of the
-  //! message back to the last newline in the
-  //!         header, counting only visible characters) to be calculated, e.g. to do an aligned newline. The
-  //!         indentation is only calculated if needed, to save time, since it is rarely needed.
+  //! message back to the last newline in the header, counting only visible characters) to be calculated, e.g.
+  //! to do an aligned newline. The indentation is only calculated if needed, to save time, since it is rarely
+  //! needed.
   NO_DISCARD virtual bool NeedsMessageIndentation() const { return false; }
 };
 
 //! \brief  Acts like a unique pointer for an object deriving from BaseSegment, but uses a SBO to put small
-//! segments
-//!         on the stack.
+//! segments on the stack.
 class SegmentStorage {
 public:
   //! \brief Default construct an empty SegmentStorage object.
   SegmentStorage() = default;
 
   //! \brief Copy a segment storage.
-  explicit SegmentStorage(const SegmentStorage& storage) { storage.segment_pointer_->CopyTo(*this); }
+  SegmentStorage(const SegmentStorage& storage) {
+    if (storage.segment_pointer_)
+      storage.segment_pointer_->CopyTo(*this);
+  }
 
   //! \brief Move SegmentStorage.
-  explicit SegmentStorage(SegmentStorage&& storage) {
+  SegmentStorage(SegmentStorage&& storage) noexcept {
     if (storage.IsUsingBuffer()) {
       // TODO: BaseSegment should have a MoveTo function, and call that.
       std::memcpy(buffer_, storage.buffer_, sizeof(buffer_));
@@ -811,11 +1046,14 @@ public:
   }
 
   SegmentStorage& operator=(const SegmentStorage& storage) {
+    if (this == &storage) {
+      return *this;
+    }
     storage.segment_pointer_->CopyTo(*this);
     return *this;
   }
 
-  SegmentStorage& operator=(SegmentStorage&& storage) {
+  SegmentStorage& operator=(SegmentStorage&& storage) noexcept {
     if (storage.IsUsingBuffer()) {
       // TODO: BaseSegment should have a MoveTo function, and call that.
       std::memcpy(buffer_, storage.buffer_, sizeof(buffer_));
@@ -837,13 +1075,14 @@ public:
 
   template<typename Segment_t,
            typename... Args,
-           typename = std::enable_if_t<std::is_base_of_v<BaseSegment, Segment_t>>>
+           LL_ENABLE_IF(std::is_base_of_v<BaseSegment, Segment_t>)>
   SegmentStorage& Create(Args&&... args) {
     if constexpr (sizeof(Segment_t) <= sizeof(buffer_)) {
       // Use the internal buffer.
-      segment_pointer_ = new (buffer_) Segment_t(std::forward<Args>(args)...);
+      segment_pointer_ = new(buffer_) Segment_t(std::forward<Args>(args)...);
     }
     else {
+      // Have to allocate on the heap.
       segment_pointer_ = new Segment_t(std::forward<Args>(args)...);
     }
     return *this;
@@ -853,8 +1092,8 @@ public:
   NO_DISCARD const BaseSegment* Get() const { return segment_pointer_; }
 
   NO_DISCARD bool IsUsingBuffer() const {
-    auto this_ptr = reinterpret_cast<const char*>(this);
-    auto seg_ptr = reinterpret_cast<const char*>(segment_pointer_);
+    const auto this_ptr = reinterpret_cast<const char*>(this);
+    const auto seg_ptr = reinterpret_cast<const char*>(segment_pointer_);
     return seg_ptr - this_ptr < static_cast<long>(sizeof(SegmentStorage));
   }
 
@@ -866,7 +1105,7 @@ private:
 
   //! \brief Pointer to the data that is either on the stack or heap. Allows for polymorphically accessing the
   //! data.
-  BaseSegment* segment_pointer_ {};
+  BaseSegment* segment_pointer_{};
 
   //! \brief The internal buffer for data. Note that all BaseSegments have a vptr, so that takes up
   //! sizeof(void*) bytes by itself.
@@ -877,17 +1116,14 @@ private:
 struct AnsiColorSegment : public BaseSegment {
   explicit AnsiColorSegment(std::optional<formatting::AnsiForegroundColor> foreground,
                             std::optional<formatting::AnsiBackgroundColor> background = {})
-      : fmt_string_(SetAnsiColorFmt(foreground, background)) {}
+    : fmt_string_(SetAnsiColorFmt(foreground, background)) {}
 
-  char* AddToBuffer(const FormattingSettings& settings,
-                    const formatting::MessageInfo&,
-                    char* start,
-                    char*) const override {
+  void AddToBuffer(const FormattingSettings& settings,
+                   const formatting::MessageInfo&,
+                   memory::BasicMemoryBuffer<char>& buffer) const override {
     if (settings.has_virtual_terminal_processing) {
-      std::copy(fmt_string_.begin(), fmt_string_.end(), start);
-      return start + fmt_string_.size();
+      memory::AppendBuffer(buffer, fmt_string_);
     }
-    return start;
   }
 
   NO_DISCARD unsigned SizeRequired(const FormattingSettings& settings,
@@ -909,15 +1145,15 @@ private:
 //! \brief Formatting segment that resets the style.
 struct AnsiResetSegment_t : public AnsiColorSegment {
   AnsiResetSegment_t() noexcept
-      : AnsiColorSegment(formatting::AnsiForegroundColor::Reset) {}
+    : AnsiColorSegment(formatting::AnsiForegroundColor::Reset) {}
 };
 
-//! \brief  Prototypical AnsiResetSegment object. There is no customization possible, so there
-//!         is no reason to explicitly create more.
-const inline AnsiResetSegment_t AnsiResetSegment {};
+//! \brief Prototypical AnsiResetSegment object. There is no customization possible, so there is no reason
+//! to explicitly create more.
+const inline AnsiResetSegment_t AnsiResetSegment{};
 
-//! \brief  How to count distance while formatting, Specifies whether the pad should be for the message
-//!         part of the formatted string, or the entire length of the formatted string.
+//! \brief How to count distance while formatting, Specifies whether the pad should be for the message
+//! part of the formatted string, or the entire length of the formatted string.
 enum class FmtDistanceType : unsigned char {
   MESSAGE_LENGTH,
   TOTAL_LENGTH
@@ -928,17 +1164,15 @@ struct FillUntil : public BaseSegment {
   explicit FillUntil(unsigned pad_length,
                      char fill_char,
                      FmtDistanceType pad_type = FmtDistanceType::MESSAGE_LENGTH)
-      : pad_length_(pad_length)
+    : pad_length_(pad_length)
       , fill_char_(fill_char)
       , pad_type_(pad_type) {}
 
-  char* AddToBuffer(const FormattingSettings& settings,
-                    const formatting::MessageInfo& msg_info,
-                    char* start,
-                    [[maybe_unused]] char* end) const override {
-    auto num_chars = SizeRequired(settings, msg_info);
-    std::fill_n(start, num_chars, fill_char_);
-    return start + num_chars;
+  void AddToBuffer(const FormattingSettings& settings,
+                   const formatting::MessageInfo& msg_info,
+                   memory::BasicMemoryBuffer<char>& buffer) const override {
+    const auto num_chars = SizeRequired(settings, msg_info);
+    buffer.AppendN(fill_char_, num_chars);
   }
 
   NO_DISCARD unsigned SizeRequired(const FormattingSettings&,
@@ -946,70 +1180,70 @@ struct FillUntil : public BaseSegment {
     if (pad_type_ == FmtDistanceType::MESSAGE_LENGTH) {
       return pad_length_ - std::min(msg_info.message_length, pad_length_);
     }
-    else {  // TOTAL_LENGTH
-      return pad_length_ - std::min(msg_info.total_length, pad_length_);
-    }
+    // TOTAL_LENGTH
+    return pad_length_ - std::min(msg_info.total_length, pad_length_);
   }
 
-  void CopyTo(class SegmentStorage& storage) const override { storage.Create<FillUntil>(*this); }
+  void CopyTo(SegmentStorage& storage) const override { storage.Create<FillUntil>(*this); }
 
 private:
-  unsigned pad_length_ {};
-  char fill_char_ {};
+  unsigned pad_length_{};
+  char fill_char_{};
   FmtDistanceType pad_type_;
 };
 
 //! \brief Inject spaces until the message length or total formatted length reaches a specified length.
 struct PadUntil : public FillUntil {
   explicit PadUntil(unsigned pad_length, FmtDistanceType pad_type = FmtDistanceType::MESSAGE_LENGTH)
-      : FillUntil(pad_length, ' ', pad_type) {}
+    : FillUntil(pad_length, ' ', pad_type) {}
 
-  void CopyTo(class SegmentStorage& storage) const override { storage.Create<PadUntil>(*this); }
+  void CopyTo(SegmentStorage& storage) const override { storage.Create<PadUntil>(*this); }
 };
 
 //! \brief Segment that repeats a character N times.
 struct RepeatChar : public BaseSegment {
   RepeatChar(unsigned repeat_length, char c)
-      : repeat_length_(repeat_length)
+    : repeat_length_(repeat_length)
       , c_(c) {}
 
-  char* AddToBuffer(const FormattingSettings&,
-                    const formatting::MessageInfo&,
-                    char* start,
-                    char*) const override {
-    std::fill_n(start, repeat_length_, c_);
-    return start + repeat_length_;
+  void AddToBuffer(const FormattingSettings&,
+                   const formatting::MessageInfo&,
+                   memory::BasicMemoryBuffer<char>& buffer) const override {
+    buffer.AppendN(c_, repeat_length_);
   }
 
   NO_DISCARD unsigned SizeRequired(const FormattingSettings&, const formatting::MessageInfo&) const override {
     return repeat_length_;
   }
 
-  void CopyTo(class SegmentStorage& storage) const override { storage.Create<RepeatChar>(*this); }
+  void CopyTo(SegmentStorage& storage) const override { storage.Create<RepeatChar>(*this); }
 
 private:
-  unsigned repeat_length_ {};
-  char c_ {};
+  unsigned repeat_length_{};
+  char c_{};
 };
 
 struct NewLineIndent_t : public BaseSegment {
-  char* AddToBuffer(const FormattingSettings&,
-                    const formatting::MessageInfo& msg_info,
-                    char* start,
-                    char*) const override {
-    *start = '\n';
-    std::fill_n(++start, msg_info.message_indentation, ' ');
-    return start + msg_info.message_indentation + 1;
+  void AddToBuffer(const FormattingSettings&,
+                   const formatting::MessageInfo& msg_info,
+                   memory::BasicMemoryBuffer<char>& buffer) const override {
+    buffer.PushBack('\n');
+    if (msg_info.message_indentation) {
+      buffer.AppendN(' ', *msg_info.message_indentation);
+    }
   }
 
   NO_DISCARD unsigned SizeRequired(const FormattingSettings&,
                                    const formatting::MessageInfo& msg_info) const override {
-    return msg_info.message_indentation + 1;
+    if (msg_info.message_indentation) {
+      return *msg_info.message_indentation + 1;
+    }
+    return 1;
   }
 
   NO_DISCARD bool NeedsMessageIndentation() const override { return true; }
 
-  void CopyTo(class SegmentStorage& storage) const override { storage.Create<NewLineIndent_t>(); }
+  void CopyTo(SegmentStorage& storage) const override { storage.Create<NewLineIndent_t>(); }
 };
 
 //! \brief Prototypical NewLineIndent_t object.
@@ -1026,33 +1260,26 @@ struct Segment;
 //! \brief  Type trait that determines whether a type has a to_string function.
 NEW_TYPE_TRAIT(has_segment_formatter_v,
                Segment<std::decay_t<typetraits::remove_cvref_t<Value_t>>>(
-                   std::declval<std::decay_t<typetraits::remove_cvref_t<Value_t>>>(), nullptr, nullptr))
+                 std::declval<std::decay_t<typetraits::remove_cvref_t<Value_t>>>(), nullptr, nullptr))
 
 //! \brief Template specialization for string segments.
 template<>
 struct Segment<std::string> : public BaseSegment {
   explicit Segment(std::string s, const char* fmt_begin, const char* fmt_end)
-      : BaseSegment(fmt_begin, fmt_end)
+    : BaseSegment(fmt_begin, fmt_end)
       , str_(std::move(s)) {}
 
-  char* AddToBuffer(const FormattingSettings&,
-                    const formatting::MessageInfo&,
-                    char* start,
-                    char* end) const override {
-    for (auto c : str_) {
-      if (start == end)
-        break;
-      *start = c;
-      ++start;
-    }
-    return start;
+  void AddToBuffer(const FormattingSettings&,
+                   const formatting::MessageInfo&,
+                   memory::BasicMemoryBuffer<char>& buffer) const override {
+    memory::AppendBuffer(buffer, str_);
   }
 
   NO_DISCARD unsigned SizeRequired(const FormattingSettings&, const formatting::MessageInfo&) const override {
     return static_cast<unsigned>(str_.size());
   }
 
-  void CopyTo(class SegmentStorage& storage) const override { storage.Create<Segment<std::string>>(*this); }
+  void CopyTo(SegmentStorage& storage) const override { storage.Create<Segment>(*this); }
 
 private:
   const std::string str_;
@@ -1062,20 +1289,14 @@ private:
 template<>
 struct Segment<char*> : public BaseSegment {
   explicit Segment(const char* s, const char* fmt_begin, const char* fmt_end)
-      : BaseSegment(fmt_begin, fmt_end)
+    : BaseSegment(fmt_begin, fmt_end)
       , cstr_(s)
       , size_required_(static_cast<unsigned>(std::strlen(s))) {}
 
-  char* AddToBuffer([[maybe_unused]] const FormattingSettings& settings,
-                    const formatting::MessageInfo&,
-                    char* start,
-                    char* end) const override {
-    for (auto i = 0u; i < size_required_; ++i, ++start) {
-      if (start == end)
-        break;
-      *start = cstr_[i];
-    }
-    return start;
+  void AddToBuffer([[maybe_unused]] const FormattingSettings& settings,
+                   const formatting::MessageInfo&,
+                   memory::BasicMemoryBuffer<char>& buffer) const override {
+    buffer.Append(cstr_, cstr_ + size_required_);
   }
 
   NO_DISCARD unsigned SizeRequired([[maybe_unused]] const FormattingSettings& settings,
@@ -1083,45 +1304,34 @@ struct Segment<char*> : public BaseSegment {
     return size_required_;
   }
 
-  void CopyTo(class SegmentStorage& storage) const override { storage.Create<Segment<char*>>(*this); }
+  void CopyTo(SegmentStorage& storage) const override { storage.Create<Segment>(*this); }
 
 private:
   const char* cstr_;
-  unsigned size_required_ {};
+  unsigned size_required_{};
 };
 
 //! \brief Template specialization for char array segments. TODO: Can I just combine this with char*?
 template<std::size_t N>
 struct Segment<char[N]> : public Segment<char*> {
   explicit Segment(const char s[N], const char* fmt_begin, const char* fmt_end)
-      : Segment<char*>(&s[0], fmt_begin, fmt_end) {}
+    : Segment<char*>(&s[0], fmt_begin, fmt_end) {}
 };
 
 //! \brief Template specialization for bool segments.
 template<>
 struct Segment<bool> : public BaseSegment {
   explicit Segment(bool b)
-      : value_(b) {}
+    : value_(b) {}
 
-  char* AddToBuffer([[maybe_unused]] const FormattingSettings& settings,
-                    const formatting::MessageInfo&,
-                    char* start,
-                    [[maybe_unused]] char* end) const override {
+  void AddToBuffer([[maybe_unused]] const FormattingSettings& settings,
+                   const formatting::MessageInfo&,
+                   memory::BasicMemoryBuffer<char>& buffer) const override {
     if (value_) {
-#if defined _MSC_VER
-      strcpy_s(start, 5, "true");
-#else
-      strcpy(start, "true");
-#endif
-      return start + 4;
+      memory::AppendBuffer(buffer, "true");
     }
     else {
-#if defined _MSC_VER
-      strcpy_s(start, 6, "false");
-#else
-      strcpy(start, "false");
-#endif
-      return start + 5;
+      memory::AppendBuffer(buffer, "false");
     }
   }
 
@@ -1130,7 +1340,7 @@ struct Segment<bool> : public BaseSegment {
     return value_ ? 4u : 5u;
   }
 
-  void CopyTo(class SegmentStorage& storage) const override { storage.Create<Segment<bool>>(*this); }
+  void CopyTo(SegmentStorage& storage) const override { storage.Create<Segment>(*this); }
 
 private:
   bool value_;
@@ -1140,7 +1350,7 @@ private:
 template<typename Floating_t>
 struct Segment<Floating_t, std::enable_if_t<std::is_floating_point_v<Floating_t>>> : public BaseSegment {
   explicit Segment(Floating_t number, const char* fmt_begin, const char* fmt_end)
-      : BaseSegment(fmt_begin, fmt_end)
+    : BaseSegment(fmt_begin, fmt_end)
       , number_(number)
       , size_required_(10) {
     // TEMPORARY...? Wish that std::to_chars works for floating points.
@@ -1148,17 +1358,11 @@ struct Segment<Floating_t, std::enable_if_t<std::is_floating_point_v<Floating_t>
     size_required_ = static_cast<unsigned>(serialized_number_.size());
   }
 
-  char* AddToBuffer([[maybe_unused]] const FormattingSettings& settings,
-                    const formatting::MessageInfo&,
-                    char* start,
-                    [[maybe_unused]] char* end) const override {
-// std::to_chars(start, end, number_, std::chars_format::fixed);
-#if defined _MSC_VER
-    strcpy_s(start, serialized_number_.size() + 1, &serialized_number_[0]);
-#else
-    std::strcpy(start, &serialized_number_[0]);
-#endif
-    return start + serialized_number_.size();
+  void AddToBuffer([[maybe_unused]] const FormattingSettings& settings,
+                   const formatting::MessageInfo&,
+                   memory::BasicMemoryBuffer<char>& buffer) const override {
+    // std::to_chars(start, end, number_, std::chars_format::fixed);
+    memory::AppendBuffer(buffer, serialized_number_);
   }
 
   NO_DISCARD unsigned SizeRequired([[maybe_unused]] const FormattingSettings& settings,
@@ -1166,13 +1370,14 @@ struct Segment<Floating_t, std::enable_if_t<std::is_floating_point_v<Floating_t>
     return size_required_;
   }
 
-  void CopyTo(class SegmentStorage& storage) const override { storage.Create<Segment<Floating_t>>(*this); }
+  void CopyTo(SegmentStorage& storage) const override { storage.Create<Segment<Floating_t>>(*this); }
 
 private:
   Floating_t number_;
-  unsigned size_required_ {};
+  unsigned size_required_{};
 
-  // TEMPORARY, hopefully. clang does not support std::to_chars for floating point types.
+  // TEMPORARY, hopefully. clang does not support std::to_chars for floating point types even though it is a
+  // C++17 feature.
   std::string serialized_number_;
 };
 
@@ -1180,41 +1385,41 @@ private:
 template<typename Integral_t>
 struct Segment<Integral_t, std::enable_if_t<std::is_integral_v<Integral_t>>> : public BaseSegment {
   explicit Segment(Integral_t number, const char* fmt_begin, const char* fmt_end)
-      : BaseSegment(fmt_begin, fmt_end)
+    : BaseSegment(fmt_begin, fmt_end)
       , number_(number)
       , size_required_(formatting::NumberOfDigits(number_) + (number < 0 ? 1 : 0)) {}
 
-  char* AddToBuffer([[maybe_unused]] const FormattingSettings& settings,
-                    const formatting::MessageInfo&,
-                    char* start,
-                    char* end) const override {
+  void AddToBuffer([[maybe_unused]] const FormattingSettings& settings,
+                   const formatting::MessageInfo&,
+                   memory::BasicMemoryBuffer<char>& buffer) const override {
+    auto [start, end] = buffer.Allocate(size_required_);
     std::to_chars(start, end, number_);
-    return start + size_required_;
   }
 
   NO_DISCARD unsigned SizeRequired(const FormattingSettings&, const formatting::MessageInfo&) const override {
     return size_required_;
   }
 
-  void CopyTo(class SegmentStorage& storage) const override { storage.Create<Segment<Integral_t>>(*this); }
+  void CopyTo(SegmentStorage& storage) const override { storage.Create<Segment>(*this); }
 
 private:
   Integral_t number_;
-  unsigned size_required_ {};
+  unsigned size_required_{};
 };
 
 //! \brief Template specialization for DateTime segments.
 template<>
 struct Segment<time::DateTime> : public BaseSegment {
   explicit Segment(time::DateTime dt, const char* fmt_begin, const char* fmt_end)
-      : BaseSegment(fmt_begin, fmt_end)
+    : BaseSegment(fmt_begin, fmt_end)
       , value_(dt) {}
 
-  char* AddToBuffer([[maybe_unused]] const FormattingSettings& settings,
-                    const formatting::MessageInfo&,
-                    char* start,
-                    [[maybe_unused]] char* end) const override {
-    return formatting::FormatDateTo(start, end, value_);
+  void AddToBuffer([[maybe_unused]] const FormattingSettings& settings,
+                   const formatting::MessageInfo&,
+                   memory::BasicMemoryBuffer<char>& buffer) const override {
+    // FormatDateTo needs 26 characters.
+    auto [start, end] = buffer.Allocate(26);
+    formatting::FormatDateTo(start, end, value_);
   }
 
   NO_DISCARD unsigned SizeRequired([[maybe_unused]] const FormattingSettings& settings,
@@ -1223,7 +1428,7 @@ struct Segment<time::DateTime> : public BaseSegment {
   }
 
   void CopyTo(class SegmentStorage& storage) const override {
-    storage.Create<Segment<time::DateTime>>(*this);
+    storage.Create<Segment>(*this);
   }
 
 private:
@@ -1236,20 +1441,17 @@ struct AnsiColor8Bit : public BaseSegment {
   explicit AnsiColor8Bit(const T& data,
                          std::optional<formatting::AnsiForegroundColor> foreground,
                          std::optional<formatting::AnsiBackgroundColor> background = {})
-      : set_formatting_string_(SetAnsiColorFmt(foreground, background))
+    : set_formatting_string_(SetAnsiColorFmt(foreground, background))
       , segment_(data, nullptr, nullptr) {}
 
-  char* AddToBuffer(const FormattingSettings& settings,
-                    const formatting::MessageInfo& msg_info,
-                    char* start,
-                    [[maybe_unused]] char* end) const override {
+  void AddToBuffer(const FormattingSettings& settings,
+                   const formatting::MessageInfo& msg_info,
+                   memory::BasicMemoryBuffer<char>& buffer) const override {
     if (settings.has_virtual_terminal_processing) {
-      std::copy(set_formatting_string_.begin(), set_formatting_string_.end(), start);
-      start += set_formatting_string_.size();
+      memory::AppendBuffer(buffer, set_formatting_string_);
     }
-    start = segment_.AddToBuffer(settings, msg_info, start, end);
-    start = AnsiResetSegment.AddToBuffer(settings, msg_info, start, end);
-    return start;
+    segment_.AddToBuffer(settings, msg_info, buffer);
+    AnsiResetSegment.AddToBuffer(settings, msg_info, buffer);
   }
 
   NO_DISCARD unsigned SizeRequired(const FormattingSettings& settings,
@@ -1261,7 +1463,7 @@ struct AnsiColor8Bit : public BaseSegment {
     return required_size;
   }
 
-  void CopyTo(class SegmentStorage& storage) const override { storage.Create<AnsiColor8Bit<T>>(*this); }
+  void CopyTo(SegmentStorage& storage) const override { storage.Create<AnsiColor8Bit>(*this); }
 
 private:
   //! \brief Cache the formatting string.
@@ -1270,6 +1472,7 @@ private:
   Segment<std::decay_t<typetraits::remove_cvref_t<T>>> segment_;
 };
 
+
 //! \brief An object that has a bundle of data, to be formatted.
 class RefBundle {
 public:
@@ -1277,17 +1480,15 @@ public:
   template<typename T>
   RefBundle& operator<<(T&& obj);
 
-  explicit RefBundle(unsigned default_size = 10) { segments_.reserve(default_size); }
-
   template<typename Segment_t, typename... Args>
   void CreateSegment(Args&&... args) {
-    segments_.emplace_back();
-    segments_.back().Create<Segment_t>(std::forward<Args>(args)...);
+    segments_.EmplaceBack();
+    segments_.Back().Create<Segment_t>(std::forward<Args>(args)...);
   }
 
   SegmentStorage& AddSegment() {
-    segments_.emplace_back();
-    return segments_.back();
+    segments_.EmplaceBack();
+    return segments_.Back();
   }
 
   NO_DISCARD unsigned SizeRequired(const FormattingSettings& settings,
@@ -1297,8 +1498,9 @@ public:
     msg_info.is_in_message_segment = true;
     // Calculate message length.
     unsigned size_required = 0;
-    for (auto& segment : segments_) {
-      auto size = segment.Get()->SizeRequired(settings, msg_info);
+    for (auto i = 0u; i < segments_.Size(); ++i) {
+      auto& segment = segments_[i];
+      auto size = segment.Get()->SizeRequired(settings, msg_info); // TODO: Refactor things like this.
       size_required += size;
       msg_info.message_length += size;
       msg_info.total_length += size;
@@ -1307,37 +1509,41 @@ public:
     return size_required;
   }
 
-  char* FmtString(const FormattingSettings& settings,
-                  char* start,
-                  char* end,
-                  formatting::MessageInfo& msg_info) const {
+  void FmtString(const FormattingSettings& settings,
+                 memory::BasicMemoryBuffer<char>& buffer,
+                 formatting::MessageInfo& msg_info) const {
     // Reset message length counter.
     msg_info.message_length = 0;
     msg_info.is_in_message_segment = true;
     // Add message.
-    for (auto& bundle : segments_) {
-      auto sz = bundle.Get()->SizeRequired(settings, msg_info);
-      bundle.Get()->AddToBuffer(settings, msg_info, start, std::min(start + sz, end));
-      start += sz;
-      msg_info.message_length += sz;
-      msg_info.total_length += sz;
+    for (auto i = 0u; i < segments_.Size(); ++i) {
+      auto& bundle = segments_[i];
+      const auto size_before = buffer.Size();
+      bundle.Get()->AddToBuffer(settings, msg_info, buffer);
+      const auto size_after = buffer.Size();
+      msg_info.message_length += size_after - size_before;
+      msg_info.total_length += size_after;
     }
     msg_info.is_in_message_segment = false;
-    return start;
   }
 
   //! \brief Returns whether any segment needs the message indentation to be calculated.
   NO_DISCARD bool NeedsMessageIndentation() const {
-    if (segments_.empty()) {
+    if (segments_.Empty()) {
       return false;
     }
-    return std::any_of(segments_.begin(), segments_.end(), [](const SegmentStorage& ss) {
-      return ss.Get()->NeedsMessageIndentation();
-    });
+
+    for (auto i = 0u; i < segments_.Size(); ++i) {
+      if (segments_[i].Get()->NeedsMessageIndentation()) {
+        return true;
+      }
+    }
+    return false;
   }
 
 private:
-  std::vector<SegmentStorage> segments_;
+  //! \brief Segment storage, use a stack size of 10.
+  memory::HybridVector<SegmentStorage, 10> segments_;
 };
 
 //! \brief  Create a type trait that determines if a 'format_logstream' function has been defined for a type.
@@ -1374,6 +1580,9 @@ RefBundle& RefBundle::operator<<(T&& obj) {
 
 //! \brief Base class for "freestanding" attributes that can be attached to logging messages,
 //!  but are not the "permanent" record attributes like severity, time, logger name, etc.
+//!
+//! NOTE(Nate): I have not put a lot of time or attention into this class, so it does not do much right now,
+//!  but it is here for future expansion.
 class Attribute : public ImplBase {
 public:
   class Impl : public ImplBase::Impl {
@@ -1384,9 +1593,11 @@ public:
   NO_DISCARD Attribute Copy() const { return Attribute(impl<Attribute>()->Copy()); }
 
   explicit Attribute(std::unique_ptr<Impl>&& impl)
-      : ImplBase(std::move(impl)) {}
+    : ImplBase(std::move(impl)) {}
+
   Attribute(const Attribute& other)
-      : ImplBase(other.impl<Attribute>()->Copy()) {}
+    : ImplBase(other.impl<Attribute>()->Copy()) {}
+
   Attribute& operator=(const Attribute& other) {
     impl_ = other.impl<Attribute>()->Copy();
     return *this;
@@ -1406,24 +1617,42 @@ enum class Severity : SeverityInt_t {
   Fatal = 0b1000000
 };
 
-//! \brief  Structure storing very common attributes that a logging message will often have.
+static std::vector ALL_SEVERITIES{
+    Severity::Trace,
+    Severity::Debug,
+    Severity::Info,
+    Severity::Major,
+    Severity::Warning,
+    Severity::Error,
+    Severity::Fatal
+};
+
+//! \brief Structure storing very common attributes that a logging message will often have.
 //!
-//!         Additional attributes can be implemented as Attribute objects.
+//! Additional attributes can be implemented as Attribute objects.
 //!
 struct BasicAttributes {
   BasicAttributes() = default;
 
+  //! \brief Create a basic attributes with a particular severity level.
+  //!
+  //! Note that we usually set do_timestamp off, since loggers create their own timestamps with their fast
+  //! datetime generators.
   explicit BasicAttributes(std::optional<Severity> lvl, bool do_timestamp = false)
-      : level(lvl) {
+    : level(lvl) {
     if (do_timestamp)
       time_stamp = time::DateTime::Now();
   }
 
+  //! \brief Create a basic attributes with all possible data.
+  //!
+  //! Note that we usually set do_timestamp off, since loggers create their own timestamps with their fast
+  //! datetime generators.
   explicit BasicAttributes(std::optional<Severity> lvl,
                            const char* file_name,
                            unsigned line_number,
                            bool do_timestamp = false)
-      : level(lvl)
+    : level(lvl)
       , file_name(file_name)
       , line_number(line_number) {
     if (do_timestamp)
@@ -1431,17 +1660,19 @@ struct BasicAttributes {
   }
 
   //! \brief The severity level of the record.
-  std::optional<Severity> level {};
+  std::optional<Severity> level{};
 
   //! \brief The time at which the record was created.
-  std::optional<time::DateTime> time_stamp {};
+  std::optional<time::DateTime> time_stamp{};
 
   //! \brief The name of the logger which sent a message.
-  std::string logger_name {};
+  std::string_view logger_name{};
 
-  const char* file_name {};
+  //! \brief Const char* to the filename.
+  const char* file_name{};
 
-  std::optional<unsigned> line_number {};
+  //! \brief Optionally, the line number that the log is from.
+  std::optional<unsigned> line_number{};
 };
 
 //! \brief A filter that checks whether a record should be accepted solely based on its severity.
@@ -1479,23 +1710,21 @@ private:
 struct RecordAttributes {
   template<typename... Attrs_t>
   explicit RecordAttributes(BasicAttributes basic_attributes = {}, Attrs_t&&... attrs)
-      : basic_attributes(std::move(basic_attributes)) {
+    : basic_attributes(std::move(basic_attributes)) {
     attributes.reserve(sizeof...(attrs));
     (attributes.emplace_back(std::move(attrs)), ...);
   }
 
-  //! \brief  The basic record attributes. These are stored as fields, which is much faster to
-  //!         create and handle than pImpl attribute objects.
-  //!
-  BasicAttributes basic_attributes {};
+  //! \brief The basic record attributes. These are stored as fields, which is much faster to
+  //! create and handle than pImpl attribute objects.
+  BasicAttributes basic_attributes{};
 
-  //! \brief  Additional attributes, beyond the basic attributes.
-  //!
+  //! \brief Additional attributes, beyond the basic attributes.
   std::vector<Attribute> attributes;
 };
 
 namespace filter {
-
+//! \brief Class that can be configured to test whether a record should be accepted based on its attributes.
 class AttributeFilter {
 public:
   virtual ~AttributeFilter() = default;
@@ -1515,7 +1744,7 @@ public:
 
   //! \brief Set the severity levels that will be accepted.
   AttributeFilter& Accept(const std::set<Severity>& acceptable) {
-    for (auto sev : {Severity::Debug, Severity::Info, Severity::Warning, Severity::Error, Severity::Fatal}) {
+    for (auto sev : ALL_SEVERITIES) {
       severity_filter_.SetAcceptance(sev, acceptable.count(sev) != 0);
     }
     return *this;
@@ -1537,8 +1766,7 @@ private:
   //! \brief The filter used to decide if a record should be accepted based on its severity settings.
   BasicSeverityFilter severity_filter_;
 };
-
-}  // namespace filter
+} // namespace filter
 
 // Forward declare core.
 class Core;
@@ -1551,7 +1779,7 @@ public:
 
   template<typename... Attrs_t>
   explicit Record(BasicAttributes basic_attributes = {}, Attrs_t&&... attrs)
-      : attributes_(basic_attributes, std::forward<Attrs_t>(attrs)...) {}
+    : attributes_(basic_attributes, std::forward<Attrs_t>(attrs)...) {}
 
   //! \brief Get the message bundle from the record.
   RefBundle& Bundle() { return bundle_; }
@@ -1572,13 +1800,13 @@ public:
 
 private:
   //! \brief The log message, contained as a RefBundle.
-  RefBundle bundle_ {};
+  RefBundle bundle_{};
 
   //! \brief The attributes collection of the message.
-  RecordAttributes attributes_ {};
+  RecordAttributes attributes_{};
 
   //! \brief The core that the record is destined for, or null if the record is closed.
-  std::shared_ptr<Core> core_ {};
+  std::shared_ptr<Core> core_{};
 };
 
 //! \brief An RAII structure that dispatches the contained record upon the destruction of the
@@ -1590,7 +1818,7 @@ public:
 
   //! \brief Wrap a record in a record handler.
   [[maybe_unused]] explicit RecordDispatcher(Record&& record)
-      : record_(std::move(record))
+    : record_(std::move(record))
       , uncaught_exceptions_(std::uncaught_exceptions()) {}
 
   //! \brief Construct a record handler, constructing the record in-place inside it.
@@ -1598,7 +1826,7 @@ public:
   explicit RecordDispatcher(std::shared_ptr<Core> core,
                             BasicAttributes basic_attributes = {},
                             Attrs_t&&... attrs)
-      : record_(basic_attributes, std::forward<Attrs_t>(attrs)...)
+    : record_(basic_attributes, std::forward<Attrs_t>(attrs)...)
       , uncaught_exceptions_(std::uncaught_exceptions()) {
     record_.TryOpen(std::move(core));
   }
@@ -1626,13 +1854,12 @@ public:
   }
 
 private:
-  Record record_ {};
+  Record record_{};
 
-  int uncaught_exceptions_ {};
+  int uncaught_exceptions_{};
 };
 
 namespace formatting {
-
 //! \brief Base class for attribute formatters, objects that know how to serialize attribute representations
 //! to strings.
 class AttributeFormatter {
@@ -1641,8 +1868,7 @@ public:
   virtual void AddToBuffer(const RecordAttributes& attributes,
                            const FormattingSettings& settings,
                            const formatting::MessageInfo& msg_info,
-                           char* start,
-                           char* end) const = 0;
+                           memory::BasicMemoryBuffer<char>& buffer) const = 0;
   NO_DISCARD virtual unsigned RequiredSize(const RecordAttributes& attributes,
                                            const FormattingSettings& settings,
                                            const formatting::MessageInfo& msg_info) const = 0;
@@ -1654,15 +1880,12 @@ public:
   void AddToBuffer(const RecordAttributes& attributes,
                    const FormattingSettings& settings,
                    const formatting::MessageInfo& msg_info,
-                   char* start,
-                   char* end) const override {
+                   memory::BasicMemoryBuffer<char>& buffer) const override {
     if (attributes.basic_attributes.level) {
-      start =
-          colorSegment(attributes.basic_attributes.level.value()).AddToBuffer(settings, msg_info, start, end);
+      colorSegment(attributes.basic_attributes.level.value()).AddToBuffer(settings, msg_info, buffer);
       auto& str = getString(attributes.basic_attributes.level.value());
-      std::copy(str.begin(), str.end(), start);
-      start += str.size();
-      AnsiResetSegment.AddToBuffer(settings, msg_info, start, end);
+      memory::AppendBuffer(buffer, str);
+      AnsiResetSegment.AddToBuffer(settings, msg_info, buffer);
     }
   }
 
@@ -1785,13 +2008,13 @@ private:
   std::string error_ = "Error  ";
   std::string fatal_ = "Fatal  ";
 
-  AnsiColorSegment trace_colors_ {AnsiForegroundColor::White};
-  AnsiColorSegment debug_colors_ {AnsiForegroundColor::BrightWhite};
-  AnsiColorSegment info_colors_ {AnsiForegroundColor::Green};
-  AnsiColorSegment major_colors_ {AnsiForegroundColor::BrightBlue};
-  AnsiColorSegment warn_colors_ {AnsiForegroundColor::Yellow};
-  AnsiColorSegment error_colors_ {AnsiForegroundColor::Red};
-  AnsiColorSegment fatal_colors_ {AnsiForegroundColor::BrightRed};
+  AnsiColorSegment trace_colors_{AnsiForegroundColor::White};
+  AnsiColorSegment debug_colors_{AnsiForegroundColor::BrightWhite};
+  AnsiColorSegment info_colors_{AnsiForegroundColor::Green};
+  AnsiColorSegment major_colors_{AnsiForegroundColor::BrightBlue};
+  AnsiColorSegment warn_colors_{AnsiForegroundColor::Yellow};
+  AnsiColorSegment error_colors_{AnsiForegroundColor::Red};
+  AnsiColorSegment fatal_colors_{AnsiForegroundColor::BrightRed};
 };
 
 class DateTimeAttributeFormatter final : public AttributeFormatter {
@@ -1799,18 +2022,18 @@ class DateTimeAttributeFormatter final : public AttributeFormatter {
 public:
   void AddToBuffer(const RecordAttributes& attributes,
                    const FormattingSettings&,
-                   const formatting::MessageInfo&,
-                   char* start,
-                   char* end) const override {
+                   const MessageInfo&,
+                   memory::BasicMemoryBuffer<char>& buffer) const override {
     if (attributes.basic_attributes.time_stamp) {
       auto& dt = attributes.basic_attributes.time_stamp.value();
+      auto [start, end] = buffer.Allocate(26);
       formatting::FormatDateTo(start, end, dt);
     }
   }
 
   NO_DISCARD unsigned RequiredSize(const RecordAttributes& attributes,
                                    const FormattingSettings&,
-                                   const formatting::MessageInfo&) const override {
+                                   const MessageInfo&) const override {
     return attributes.basic_attributes.time_stamp ? 26 : 0u;
   }
 };
@@ -1819,17 +2042,14 @@ class LoggerNameAttributeFormatter final : public AttributeFormatter {
 public:
   void AddToBuffer(const RecordAttributes& attributes,
                    const FormattingSettings&,
-                   const formatting::MessageInfo&,
-                   char* start,
-                   char*) const override {
-    std::copy(attributes.basic_attributes.logger_name.begin(),
-              attributes.basic_attributes.logger_name.end(),
-              start);
+                   const MessageInfo&,
+                   memory::BasicMemoryBuffer<char>& buffer) const override {
+    memory::AppendBuffer(buffer, attributes.basic_attributes.logger_name);
   }
 
   NO_DISCARD unsigned RequiredSize(const RecordAttributes& attributes,
                                    const FormattingSettings&,
-                                   const formatting::MessageInfo&) const override {
+                                   const MessageInfo&) const override {
     return static_cast<unsigned>(attributes.basic_attributes.logger_name.size());
   }
 };
@@ -1838,30 +2058,27 @@ public:
 class FileNameAttributeFormatter final : public AttributeFormatter {
 public:
   explicit FileNameAttributeFormatter(bool only_file_name = false)
-      : only_file_name_(only_file_name) {}
+    : only_file_name_(only_file_name) {}
 
   void AddToBuffer(const RecordAttributes& attributes,
-                   const FormattingSettings& settings,
-                   const formatting::MessageInfo& info,
-                   char* start,
-                   char*) const override {
+                   [[maybe_unused]] const FormattingSettings& settings,
+                   [[maybe_unused]] const MessageInfo& info,
+                   memory::BasicMemoryBuffer<char>& buffer) const override {
     if (attributes.basic_attributes.file_name) {
       if (only_file_name_) {
         auto [first, last] = getRange(attributes.basic_attributes.file_name);
-        std::copy(attributes.basic_attributes.file_name + first,
-                  attributes.basic_attributes.file_name + last,
-                  start);
+        buffer.Append(attributes.basic_attributes.file_name + first,
+                      attributes.basic_attributes.file_name + last);
       }
       else {
-        auto size = RequiredSize(attributes, settings, info);
-        std::copy(attributes.basic_attributes.file_name, attributes.basic_attributes.file_name + size, start);
+        AppendBuffer(buffer, attributes.basic_attributes.file_name);
       }
     }
   }
 
   NO_DISCARD unsigned RequiredSize(const RecordAttributes& attributes,
                                    const FormattingSettings&,
-                                   const formatting::MessageInfo&) const override {
+                                   const MessageInfo&) const override {
     if (attributes.basic_attributes.file_name) {
       if (only_file_name_) {
         auto [first, last] = getRange(attributes.basic_attributes.file_name);
@@ -1885,7 +2102,7 @@ private:
   }
 
   //! \brief If true, only the file name is displayed, not the full path.
-  bool only_file_name_ = true;
+  bool only_file_name_;
 };
 
 //! \brief Formatter for the file name attribute.
@@ -1893,27 +2110,29 @@ class FileLineAttributeFormatter final : public AttributeFormatter {
 public:
   void AddToBuffer(const RecordAttributes& attributes,
                    [[maybe_unused]] const FormattingSettings& settings,
-                   [[maybe_unused]] const formatting::MessageInfo& info,
-                   char* start,
-                   char* end) const override {
+                   [[maybe_unused]] const MessageInfo& info,
+                   memory::BasicMemoryBuffer<char>& buffer) const override {
     if (attributes.basic_attributes.line_number) {
+      // Calculate the length, base 10, of line_number
+      auto size = NumberOfDigits(*attributes.basic_attributes.line_number);
+      // Reserve this much additional size
+      auto [start, end] = buffer.Allocate(size);
       std::to_chars(start, end, *attributes.basic_attributes.line_number);
     }
   }
 
   NO_DISCARD unsigned RequiredSize(const RecordAttributes& attributes,
                                    const FormattingSettings&,
-                                   const formatting::MessageInfo&) const override {
+                                   const MessageInfo&) const override {
     if (attributes.basic_attributes.line_number) {
-      return formatting::NumberOfDigits(*attributes.basic_attributes.line_number);
+      return NumberOfDigits(*attributes.basic_attributes.line_number);
     }
     return 0;
   }
 };
 
 //! \brief  Function to calculate how far the start of the message is from the last newline in the header,
-//! counting only visible
-//!         (non ansi virtual terminal) characters.
+//! counting only visible (non ansi virtual terminal) characters.
 inline unsigned CalculateMessageIndentation(char* buffer_end, const MessageInfo& msg_info) {
   if (msg_info.total_length == 0) {
     return 0;
@@ -1934,8 +2153,9 @@ inline unsigned CalculateMessageIndentation(char* buffer_end, const MessageInfo&
 class BaseMessageFormatter {
 public:
   virtual ~BaseMessageFormatter() = default;
-  NO_DISCARD virtual std::string Format(const Record& record,
-                                        const FormattingSettings& sink_settings) const = 0;
+  virtual void Format(const Record& record,
+                      const FormattingSettings& sink_settings,
+                      memory::BasicMemoryBuffer<char>& buffer) const = 0;
   NO_DISCARD virtual std::unique_ptr<BaseMessageFormatter> Copy() const = 0;
 };
 
@@ -1947,13 +2167,12 @@ constexpr inline MSG_t MSG;
 
 template<typename... Types>
 class MsgFormatter : public BaseMessageFormatter {
-private:
-  static_assert(((std::is_base_of_v<AttributeFormatter, Types> || std::is_same_v<MSG_t, Types>)&&...),
+  static_assert(((std::is_base_of_v<AttributeFormatter, Types> || std::is_same_v<MSG_t, Types>) && ...),
                 "All types must be AttributeFormatters or a MSG tag.");
 
 public:
   explicit MsgFormatter(const std::string& fmt_string, const Types&... types)
-      : formatters_(types...) {
+    : formatters_(types...) {
     // Find the segments, ensure that there are the right number of arguments.
     auto count_slots = 0;
     literals_.emplace_back();
@@ -1962,11 +2181,10 @@ public:
         // Always advance i, since it is either an escaped '{' or we need to find the end of the "{...}"
         if (i + 1 < fmt_string.size() && fmt_string[++i] != '{') {
           // Start of a slot, end of the literal.
-          literals_.emplace_back();  // start a new literal
+          literals_.emplace_back(); // start a new literal
           ++count_slots;
-          // Find the closing '}' TODO: Capture formatting string?
-          for (; i < fmt_string.size() && fmt_string[i] != '}'; ++i)
-            ;
+          // Find the closing '}' TODO: Capture a formatting string?
+          for (; i < fmt_string.size() && fmt_string[i] != '}'; ++i);
           ++i;
           continue;
         }
@@ -1978,42 +2196,22 @@ public:
     // Make sure there are the right number of slots.
     LL_ASSERT(count_slots == sizeof...(Types),
               "mismatch in the number of slots (" << count_slots << ") and the number of formatters ("
-                                                  << sizeof...(Types) << ")");
+              << sizeof...(Types) << ")");
     LL_ASSERT(literals_.size() == sizeof...(Types) + 1,
               "not the right number of literals, needed " << sizeof...(Types) + 1 << ", but had "
-                                                          << literals_.size());
+              << literals_.size());
   }
 
-  NO_DISCARD std::string Format(const Record& record,
-                                const FormattingSettings& sink_settings) const override {
-    auto needs_message_indentation = record.Bundle().NeedsMessageIndentation();
+  void Format(const Record& record,
+              const FormattingSettings& sink_settings,
+              memory::BasicMemoryBuffer<char>& buffer) const override {
+    MessageInfo msg_info{};
+    msg_info.needs_message_indentation = record.Bundle().NeedsMessageIndentation();
 
-    MessageInfo msg_info {};
-    msg_info.needs_message_indentation = needs_message_indentation;
-
-    auto required_size = getRequiredSize<0>(record, sink_settings, msg_info);
-    required_size += static_cast<unsigned>(sink_settings.message_terminator.size());
-    std::string buffer(required_size, ' ');
-
-    // Reset message info.
-    msg_info = MessageInfo {};
-    msg_info.needs_message_indentation = needs_message_indentation;
-
-    if (0 < required_size) {
-      auto c = &buffer[0];
-      // Format all the segments.
-      c = format<0>(c, record, sink_settings, msg_info);
-      // Add the terminator.
-      std::copy(sink_settings.message_terminator.begin(), sink_settings.message_terminator.end(), c);
-      c += sink_settings.message_terminator.size();
-
-      // Erase any unused bits at the end.
-      auto actual_length = std::distance(&buffer[0], c);
-      LL_ASSERT(actual_length <= required_size, "formatted message overflowed buffer");
-      buffer.resize(static_cast<unsigned long>(actual_length));
-    }
-
-    return buffer;
+    // Format all the segments.
+    format<0>(buffer, record, sink_settings, msg_info);
+    // Add the terminator.
+    AppendBuffer(buffer, sink_settings.message_terminator);
   }
 
   NO_DISCARD std::unique_ptr<BaseMessageFormatter> Copy() const override {
@@ -2022,49 +2220,12 @@ public:
 
 private:
   template<std::size_t N>
-  NO_DISCARD unsigned getRequiredSize([[maybe_unused]] const Record& record,
-                                      [[maybe_unused]] const FormattingSettings& sink_settings,
-                                      [[maybe_unused]] MessageInfo& msg_info) const {
-    if constexpr (N == sizeof...(Types)) {
-      auto usize = static_cast<unsigned>(literals_[N].size());
-      msg_info.total_length += usize;
-      return usize;
-    }
-    else {
-      unsigned required_size {};
-      auto usize = static_cast<unsigned>(literals_[N].size());
-      msg_info.total_length += usize;
-
-      if constexpr (std::is_same_v<MSG_t, std::tuple_element_t<N, decltype(formatters_)>>) {
-        if (msg_info.needs_message_indentation) {
-          // Can't calculate the number of invisible characters (e.g. from a virtual terminal control
-          // sequence), or if there were newlines in the header, so conservatively estimate that the
-          // indentation is the message length so far.
-          msg_info.message_indentation = msg_info.total_length;
-        }
-        else {
-          msg_info.message_indentation = 0;
-        }
-
-        // Bundle::SizeRequired handles incrementing the MessageInfo data, and sets the is_in_message_segment
-        // variable.
-        required_size = record.Bundle().SizeRequired(sink_settings, msg_info);
-      }
-      else {
-        required_size = std::get<N>(formatters_).RequiredSize(record.Attributes(), sink_settings, msg_info);
-        msg_info.total_length += required_size;
-      }
-      return usize + required_size + getRequiredSize<N + 1>(record, sink_settings, msg_info);
-    }
-  }
-
-  template<std::size_t N>
-  char* format(char*& buffer,
-               const Record& record,
-               const FormattingSettings& sink_settings,
-               MessageInfo& msg_info) const {
-    // First, the literal.
-    buffer = std::copy(literals_[N].begin(), literals_[N].end(), buffer);
+  void format(memory::BasicMemoryBuffer<char>& buffer,
+              const Record& record,
+              const FormattingSettings& sink_settings,
+              MessageInfo& msg_info) const {
+    // First, the next literal segment.
+    AppendBuffer(buffer, literals_[N]);
     msg_info.total_length += static_cast<unsigned>(literals_[N].size());
 
     if constexpr (N != sizeof...(Types)) {
@@ -2074,27 +2235,21 @@ private:
         if (msg_info.needs_message_indentation) {
           // At this point, we can calculate the true message indentation by looking for the last newline
           // (if any), and not counting escape characters.
-          msg_info.message_indentation = CalculateMessageIndentation(buffer, msg_info);
+          msg_info.message_indentation = CalculateMessageIndentation(buffer.End(), msg_info);
         }
         else {
           msg_info.message_indentation = 0;
         }
-
-        auto required_size = record.Bundle().SizeRequired(sink_settings, msg_info);
-        buffer = record.Bundle().FmtString(sink_settings, buffer, buffer + required_size, msg_info);
+        // Bundle's FmtString function will set msg_info.is_in_message_segment to true, so we don't need to here.
+        record.Bundle().FmtString(sink_settings, buffer, msg_info);
       }
       else {
-        auto required_size =
-            std::get<N>(formatters_).RequiredSize(record.Attributes(), sink_settings, msg_info);
         std::get<N>(formatters_)
-            .AddToBuffer(record.Attributes(), sink_settings, msg_info, buffer, buffer + required_size);
-        msg_info.total_length += required_size;
-        buffer += required_size;
+            .AddToBuffer(record.Attributes(), sink_settings, msg_info, buffer);
+        msg_info.total_length += buffer.Size();
       }
-      return format<N + 1>(buffer, record, sink_settings, msg_info);
-    }
-    else {
-      return buffer;
+      // Recursively format the next literal and (if it does not terminate) segment.
+      format<N + 1>(buffer, record, sink_settings, msg_info);
     }
   }
 
@@ -2108,10 +2263,13 @@ auto MakeMsgFormatter(const std::string& fmt_string, const Types&... types) {
   return std::unique_ptr<BaseMessageFormatter>(new MsgFormatter(fmt_string, types...));
 }
 
+//! \brief Helper function that makes the "standard" MsgFormatter. What is standard may change, and only be
+//! "standard" in the eye of the beholder, but I am the beholder, and these are the basic things I want in
+//! a simple logging formatter.
 inline auto MakeStandardFormatter() {
   return MakeMsgFormatter("[{}] [{}] {}",
-                          formatting::SeverityAttributeFormatter {},
-                          formatting::DateTimeAttributeFormatter {},
+                          formatting::SeverityAttributeFormatter{},
+                          formatting::DateTimeAttributeFormatter{},
                           formatting::MSG);
 }
 
@@ -2120,70 +2278,29 @@ public:
   //! \brief The default record formatter just prints the message.
   RecordFormatter() { AddMsgSegment(); }
 
-  NO_DISCARD std::string Format(const Record& record,
-                                const FormattingSettings& sink_settings) const override {
-    std::optional<unsigned> msg_size {};
-    MessageInfo msg_info;
-
-    unsigned required_size = 0;
+  void Format(const Record& record,
+              const FormattingSettings& sink_settings,
+              memory::BasicMemoryBuffer<char>& buffer) const override {
+    MessageInfo msg_info{};
     for (const auto& formatter : formatters_) {
-      unsigned size = 0;
-      switch (formatter.index()) {
-        case 0: {
-          if (!msg_size)
-            msg_size = record.Bundle().SizeRequired(sink_settings, msg_info);
-          size = msg_size.value();
-          break;
-        }
-        case 1: {
-          size = std::get<1>(formatter)->RequiredSize(record.Attributes(), sink_settings, msg_info);
-          break;
-        }
-        case 2: {
-          size = static_cast<unsigned>(std::get<2>(formatter).size());
-          break;
-        }
-      }
-
-      required_size += size;
-    }
-
-    // Account for message terminator.
-    required_size += static_cast<unsigned>(sink_settings.message_terminator.size());
-
-    std::string buffer(required_size, ' ');
-    char *c = &buffer[0], *end = c + required_size;
-
-    // Reset the message info.
-    msg_info = MessageInfo {};
-    for (const auto& formatter : formatters_) {
-      unsigned segment_size = 0;
       switch (formatter.index()) {
         case 0: {
           // TODO: Update for LogNewLine type alignment.
-          segment_size = record.Bundle().SizeRequired(sink_settings, msg_info);
-          record.Bundle().FmtString(sink_settings, c, end, msg_info);
+          record.Bundle().FmtString(sink_settings, buffer, msg_info);
           break;
         }
         case 1: {
-          segment_size = std::get<1>(formatter)->RequiredSize(record.Attributes(), sink_settings, msg_info);
-          std::get<1>(formatter)->AddToBuffer(record.Attributes(), sink_settings, msg_info, c, end);
+          std::get<1>(formatter)->AddToBuffer(record.Attributes(), sink_settings, msg_info, buffer);
           break;
         }
         case 2: {
-          segment_size = static_cast<unsigned>(std::get<2>(formatter).size());
-          std::copy(std::get<2>(formatter).begin(), std::get<2>(formatter).end(), c);
+          memory::AppendBuffer(buffer, std::get<2>(formatter));
           break;
         }
       }
-
-      c += segment_size;
     }
     // Add terminator.
-    std::copy(sink_settings.message_terminator.begin(), sink_settings.message_terminator.end(), c);
-
-    // Return the formatted message.
-    return buffer;
+    memory::AppendBuffer(buffer, sink_settings.message_terminator);
   }
 
   NO_DISCARD std::unique_ptr<BaseMessageFormatter> Copy() const override {
@@ -2215,11 +2332,9 @@ public:
 private:
   std::vector<std::variant<MSG_t, std::shared_ptr<AttributeFormatter>, std::string>> formatters_;
 };
-
-}  // namespace formatting
+} // namespace formatting
 
 namespace flush {
-
 //! \brief Base class for objects that determine whether a sink should be flushed.
 class FlushHandler : public ImplBase {
 public:
@@ -2229,8 +2344,9 @@ public:
   };
 
   bool DoFlush(const Record& record) { return impl<FlushHandler>()->DoFlush(record); }
+
   explicit FlushHandler(const std::shared_ptr<Impl>& impl)
-      : ImplBase(impl) {}
+    : ImplBase(impl) {}
 };
 
 //! \brief Flush after every message.
@@ -2242,7 +2358,7 @@ public:
   };
 
   AutoFlush()
-      : FlushHandler(std::make_shared<Impl>()) {}
+    : FlushHandler(std::make_shared<Impl>()) {}
 };
 
 //! \brief Flush after every N messages.
@@ -2251,7 +2367,7 @@ public:
   class Impl : public FlushHandler::Impl {
   public:
     explicit Impl(std::size_t N)
-        : N_(N) {
+      : N_(N) {
       LL_REQUIRE(0 < N, "N cannot be 0");
     }
 
@@ -2262,11 +2378,11 @@ public:
     }
 
   private:
-    std::size_t count_ {}, N_;
+    std::size_t count_{}, N_;
   };
 
   explicit FlushEveryN(std::size_t N)
-      : FlushHandler(std::make_shared<Impl>(N)) {}
+    : FlushHandler(std::make_shared<Impl>(N)) {}
 };
 
 class DisjunctionFlushHandler : public FlushHandler {
@@ -2274,15 +2390,17 @@ public:
   class Impl : public FlushHandler::Impl {
   public:
     Impl(FlushHandler lhs, FlushHandler rhs)
-        : lhs_(std::move(lhs))
+      : lhs_(std::move(lhs))
         , rhs_(std::move(rhs)) {}
+
     bool DoFlush(const Record& record) override { return lhs_.DoFlush(record) || rhs_.DoFlush(record); }
 
   private:
     FlushHandler lhs_, rhs_;
   };
+
   DisjunctionFlushHandler(FlushHandler lhs, FlushHandler rhs)
-      : FlushHandler(std::make_shared<Impl>(std::move(lhs), std::move(rhs))) {}
+    : FlushHandler(std::make_shared<Impl>(std::move(lhs), std::move(rhs))) {}
 };
 
 class ConjunctionFlushHandler : public FlushHandler {
@@ -2290,15 +2408,17 @@ public:
   class Impl : public FlushHandler::Impl {
   public:
     Impl(FlushHandler lhs, FlushHandler rhs)
-        : lhs_(std::move(lhs))
+      : lhs_(std::move(lhs))
         , rhs_(std::move(rhs)) {}
+
     bool DoFlush(const Record& record) override { return lhs_.DoFlush(record) && rhs_.DoFlush(record); }
 
   private:
     FlushHandler lhs_, rhs_;
   };
+
   ConjunctionFlushHandler(FlushHandler lhs, FlushHandler rhs)
-      : FlushHandler(std::make_shared<Impl>(std::move(lhs), std::move(rhs))) {}
+    : FlushHandler(std::make_shared<Impl>(std::move(lhs), std::move(rhs))) {}
 };
 
 inline DisjunctionFlushHandler operator||(const FlushHandler& lhs, const FlushHandler& rhs) {
@@ -2308,20 +2428,18 @@ inline DisjunctionFlushHandler operator||(const FlushHandler& lhs, const FlushHa
 inline ConjunctionFlushHandler operator&&(const FlushHandler& lhs, const FlushHandler& rhs) {
   return {lhs, rhs};
 }
-
-}  // namespace flush
+} // namespace flush
 
 //! \brief  Base class for sink backends, which are responsible for actually handling the record and
-//!         doing something with it.
-//!         Not responsible for thread synchronization, this is the job of the frontend.
+//! doing something with it. Not responsible for thread synchronization, this is the job of the frontend.
 class SinkBackend {
 public:
   //! \brief Flush the sink upon deletion.
   virtual ~SinkBackend() { Flush(); }
 
   //! \brief Dispatch a record.
-  void Dispatch(std::optional<std::string>&& formatted_message, const Record& record) {
-    dispatch(std::move(formatted_message), record);
+  void Dispatch(memory::BasicMemoryBuffer<char>& buffer, const Record& record) {
+    dispatch(buffer, record);
     if (flush_handler_ && flush_handler_->DoFlush(record)) {
       Flush();
     }
@@ -2353,7 +2471,7 @@ public:
   }
 
 protected:
-  virtual void dispatch(std::optional<std::string>&& formatted_message, const Record& record) = 0;
+  virtual void dispatch(memory::BasicMemoryBuffer<char>& buffer, const Record& record) = 0;
 
   //! \brief Protected implementation of flushing the sink.
   virtual void flush() {}
@@ -2361,19 +2479,20 @@ protected:
   //! \brief The sink formatting settings.
   FormattingSettings settings_;
 
-  std::optional<flush::FlushHandler> flush_handler_ {};
+  //! \brief An optional flush handler, which determines whether the sink should be flushed based on the record.
+  std::optional<flush::FlushHandler> flush_handler_{};
 
   //! \brief Whether to automatically flush the sink after each message.
   bool auto_flush_ = false;
 };
 
-//! \brief  Base class for sink frontends. These are responsible for common tasks, like filtering
-//!         and controlling access to the sink backend, i.e. synchronization.
+//! \brief Base class for sink frontends. These are responsible for common tasks, like filtering
+//! and controlling access to the sink backend, i.e. synchronization.
 class Sink {
 public:
   //! \brief
   explicit Sink(std::unique_ptr<SinkBackend>&& backend)
-      : sink_backend_(std::move(backend))
+    : sink_backend_(std::move(backend))
       , formatter_(formatting::MakeStandardFormatter()) {}
 
   virtual ~Sink() = default;
@@ -2408,13 +2527,14 @@ public:
     return *this;
   }
 
+  //! \brief Get the sink backend.
   SinkBackend& GetBackend() { return *sink_backend_; }
 
 protected:
   virtual void dispatch(const Record& record) = 0;
 
   //! \brief The sink backend, to which the frontend feeds record.
-  std::unique_ptr<SinkBackend> sink_backend_ {};
+  std::unique_ptr<SinkBackend> sink_backend_{};
 
   //! \brief The Sink's attribute filters.
   filter::AttributeFilter filter_;
@@ -2422,14 +2542,14 @@ protected:
   //! \brief The sink's formatter.
   std::unique_ptr<formatting::BaseMessageFormatter> formatter_;
 
-  std::optional<flush::FlushHandler> flush_handler_ {};
+  std::optional<flush::FlushHandler> flush_handler_{};
 };
 
 //! \brief  Sink frontend that uses no synchronization methods.
 class UnlockedSink : public Sink {
 public:
   explicit UnlockedSink(std::unique_ptr<SinkBackend>&& backend)
-      : Sink(std::move(backend)) {}
+    : Sink(std::move(backend)) {}
 
   template<typename SinkBackend_t, typename... Args_t>
   static std::shared_ptr<UnlockedSink> From(Args_t&&... args) {
@@ -2439,8 +2559,9 @@ public:
 
 private:
   void dispatch(const Record& record) override {
-    auto message = formatter_->Format(record, sink_backend_->GetFormattingSettings());
-    sink_backend_->Dispatch(std::move(message), record);
+    memory::MemoryBuffer<char> buffer;
+    formatter_->Format(record, sink_backend_->GetFormattingSettings(), buffer);
+    sink_backend_->Dispatch(buffer, record);
   }
 };
 
@@ -2448,7 +2569,7 @@ private:
 class SynchronousSink : public Sink {
 public:
   explicit SynchronousSink(std::unique_ptr<SinkBackend>&& backend)
-      : Sink(std::move(backend)) {}
+    : Sink(std::move(backend)) {}
 
   template<typename SinkBackend_t, typename... Args_t>
   static std::shared_ptr<SynchronousSink> From(Args_t&&... args) {
@@ -2458,10 +2579,11 @@ public:
 
 private:
   void dispatch(const Record& record) override {
-    auto message = formatter_->Format(record, sink_backend_->GetFormattingSettings());
+    memory::MemoryBuffer<char> buffer;
+    formatter_->Format(record, sink_backend_->GetFormattingSettings(), buffer);
     {
       std::lock_guard guard(lock_);
-      sink_backend_->Dispatch(std::move(message), record);
+      sink_backend_->Dispatch(buffer, record);
     }
   }
 
@@ -2474,8 +2596,8 @@ std::shared_ptr<Sink> NewSink(Args_t&&... args) {
   return std::make_shared<Frontend_t>(std::make_unique<Backend_t>(std::forward<Args_t>(args)...));
 }
 
-//! \brief  Object that can receive records from multiple loggers, and dispatches them to multiple sinks.
-//!         The core has its own filter, which is checked before any of the individual sinks' filters.
+//! \brief Object that can receive records from multiple loggers, and dispatches them to multiple sinks.
+//! The core has its own filter, which is checked before any of the individual sinks' filters.
 class Core {
 public:
   bool WillAccept(const RecordAttributes& attributes) {
@@ -2489,7 +2611,9 @@ public:
     }
     // Check that at least one sink will accept.
     return std::any_of(
-        sinks_.begin(), sinks_.end(), [attributes](auto& sink) { return sink->WillAccept(attributes); });
+        sinks_.begin(),
+        sinks_.end(),
+        [attributes](auto& sink) { return sink->WillAccept(attributes); });
   }
 
   bool WillAccept(std::optional<Severity> severity) {
@@ -2498,11 +2622,13 @@ public:
     }
     // Check that at least one sink will accept.
     return std::any_of(
-        sinks_.begin(), sinks_.end(), [severity](auto& sink) { return sink->WillAccept(severity); });
+        sinks_.begin(),
+        sinks_.end(),
+        [severity](auto& sink) { return sink->WillAccept(severity); });
   }
 
   //! \brief Dispatch a ref bundle to the sinks.
-  void Dispatch(const Record& record) {
+  void Dispatch(const Record& record) const {
     for (auto& sink : sinks_) {
       sink->Dispatch(record);
     }
@@ -2516,7 +2642,7 @@ public:
 
   //! \brief Set the formatter for every sink the core points at.
   Core& SetAllFormatters(const std::unique_ptr<formatting::BaseMessageFormatter>& formatter) {
-    for (auto& sink : sinks_) {
+    for (const auto& sink : sinks_) {
       sink->SetFormatter(formatter->Copy());
     }
     return *this;
@@ -2566,7 +2692,7 @@ Record::operator bool() const {
 void Record::Dispatch() {
   if (core_) {
     core_->Dispatch(*this);
-    core_ = nullptr;  // One time use.
+    core_ = nullptr; // One time use.
   }
 }
 
@@ -2586,24 +2712,24 @@ class Logger {
 public:
   //! \brief Create a logger with a new core.
   Logger()
-      : core_(std::make_shared<Core>()) {}
+    : core_(std::make_shared<Core>()) {}
 
   //! \brief Create a logger without a logging core.
   explicit Logger(NoCore_t)
-      : core_(nullptr) {}
+    : core_(nullptr) {}
 
   //! \brief Create a logger with a new core and a single sink.
   explicit Logger(const std::shared_ptr<Sink>& sink)
-      : core_(std::make_shared<Core>()) {
+    : core_(std::make_shared<Core>()) {
     core_->AddSink(sink);
   }
 
   //! \brief Create a logger with the specified logging core.
   explicit Logger(std::shared_ptr<Core> core)
-      : core_(std::move(core)) {}
+    : core_(std::move(core)) {}
 
   ~Logger() {
-    Flush();  // Make sure all sinks that the logger is connected to is flushed.
+    Flush(); // Make sure all sinks that the logger is connected to is flushed.
   }
 
   template<typename... Attrs_t>
@@ -2625,8 +2751,7 @@ public:
     return Log(BasicAttributes(severity), attrs...);
   }
 
-  //! \brief  Create a record dispatcher, setting severity, file name, line number,
-  //!         and any other attributes.
+  //! \brief Create a record dispatcher, setting severity, file name, line number, and any other attributes.
   template<typename... Attrs_t>
   RecordDispatcher LogWithLocation(std::optional<Severity> severity,
                                    const char* file_name,
@@ -2672,7 +2797,7 @@ private:
   time::FastDateGenerator generator_;
 
   //! \brief A name for the logger.
-  std::string logger_name_ {};
+  std::string logger_name_{};
 
   //! \brief The logger's core.
   std::shared_ptr<Core> core_;
@@ -2687,15 +2812,14 @@ public:
   EmptySink() { settings_.needs_formatting = false; }
 
 private:
-  void dispatch(std::optional<std::string>&&, const Record&) override {}
+  void dispatch(memory::BasicMemoryBuffer<char>&, const Record&) override {}
 };
 
 //! \brief A sink, used for testing, that formats a record, but does not stream the result anywhere.
 //!
 //! Primarily for timing and testing.
 class TrivialDispatchSink : public SinkBackend {
-private:
-  void dispatch([[maybe_unused]] std::optional<std::string>&& formatted_message,
+  void dispatch([[maybe_unused]] memory::BasicMemoryBuffer<char>& buffer,
                 [[maybe_unused]] const Record& record) override {}
 };
 
@@ -2703,14 +2827,15 @@ private:
 class FileSink : public SinkBackend {
 public:
   explicit FileSink(const std::string& file)
-      : fout_(file) {}
+    : fout_(file) {}
+
   ~FileSink() override { fout_.flush(); }
 
 private:
-  void dispatch([[maybe_unused]] std::optional<std::string>&& formatted_message,
+  void dispatch([[maybe_unused]] memory::BasicMemoryBuffer<char>& buffer,
                 [[maybe_unused]] const Record& record) override {
-    if (formatted_message) {
-      fout_.write(formatted_message->c_str(), static_cast<std::streamsize>(formatted_message->size()));
+    if (!buffer.Empty()) {
+      fout_.write(buffer.Data(), static_cast<std::streamsize>(buffer.Size()));
     }
   }
 
@@ -2725,21 +2850,21 @@ public:
   ~OstreamSink() override { out_.flush(); }
 
   explicit OstreamSink(std::ostringstream& stream)
-      : out_(stream) {
+    : out_(stream) {
     // By default, string streams do not support vterm.
     settings_.has_virtual_terminal_processing = false;
   }
 
   explicit OstreamSink(std::ostream& stream = std::cout)
-      : out_(stream) {
-    settings_.has_virtual_terminal_processing = true;  // Default this to true
+    : out_(stream) {
+    settings_.has_virtual_terminal_processing = true; // Default this to true
   }
 
 private:
-  void dispatch([[maybe_unused]] std::optional<std::string>&& formatted_message,
+  void dispatch([[maybe_unused]] memory::BasicMemoryBuffer<char>& buffer,
                 [[maybe_unused]] const Record& record) override {
-    if (formatted_message) {
-      out_.write(formatted_message->c_str(), static_cast<std::streamsize>(formatted_message->size()));
+    if (!buffer.Empty()) {
+      out_.write(buffer.Data(), static_cast<std::streamsize>(buffer.Size()));
     }
   }
 
@@ -2754,7 +2879,6 @@ private:
 // ==============================================================================
 
 //! \brief  The global interface for logging.
-//!
 class Global {
 public:
   Global() = delete;
@@ -2767,7 +2891,6 @@ public:
   }
 
   //! \brief  Get the global logger.
-  //!
   static Logger& GetLogger() {
     if (!logger_) {
       logger_ = Logger(GetCore());
@@ -2777,7 +2900,7 @@ public:
 
 private:
   inline static std::shared_ptr<Core> global_core_ = std::shared_ptr<Core>();
-  inline static std::optional<Logger> logger_ {};
+  inline static std::optional<Logger> logger_{};
 };
 
 // ==============================================================================
@@ -2802,134 +2925,4 @@ private:
 
 #define LOG() LOG_TO(::lightning::Global::GetLogger())
 
-namespace formatting {
-
-namespace detail {
-
-template<std::size_t I, typename... Args_t>
-unsigned sizeRequired(const std::tuple<Segment<Args_t>...>& segments,
-                      std::size_t count_placed,
-                      const FormattingSettings& settings,
-                      MessageInfo& msg_info) {
-  if (count_placed == I) {
-    return 0u;
-  }
-  msg_info.message_length = 0;
-  unsigned size = std::get<I>(segments).SizeRequired(settings, msg_info);
-  if constexpr (I + 1 < sizeof...(Args_t)) {
-    size += sizeRequired<I + 1>(segments, count_placed, settings, msg_info);
-    msg_info.message_length += size;
-  }
-  return size;
-}
-
-template<std::size_t I, typename... Args_t, std::size_t... Indices>
-void formatHelper(char* c,
-                  const char* const* starts,
-                  const char* const* ends,
-                  std::size_t actual_substitutions,
-                  const std::tuple<Segment<Args_t>...>& segments,
-                  const FormattingSettings& settings,
-                  MessageInfo& msg_info,
-                  std::index_sequence<Indices...> is) {
-  constexpr auto N = sizeof...(Indices);
-  // Write formatting segment, then arg segment, then call formatHelper again.
-  if (starts[I] < ends[I]) {
-    c = std::copy(starts[I], ends[I], c);
-  }
-  if (I == actual_substitutions) {
-    return;
-  }
-  if constexpr (I < sizeof...(Args_t)) {
-    auto& segment = std::get<I>(segments);
-    auto size = segment.SizeRequired(settings, msg_info);
-    segment.AddToBuffer(settings, msg_info, c, c + size);
-    msg_info.message_length += size;
-    c += size;
-  }
-  if constexpr (I < N) {
-    formatHelper<I + 1>(c, starts, ends, actual_substitutions, segments, settings, msg_info, is);
-  }
-}
-
-}  // namespace detail
-
-template<typename... Args_t>
-std::string Format(const FormattingSettings& settings, const char* fmt_string, const Args_t&... args) {
-  constexpr auto N = sizeof...(args);
-  const char *starts[N + 1], *ends[N + 1];
-
-  unsigned count_placed = 0, str_length = 0;
-  starts[0] = fmt_string;
-  auto c = fmt_string;
-  for (; *c != 0; ++c) {
-    if (*c == '%' && count_placed < N) {
-      ends[count_placed++] = c;
-      starts[count_placed] = c + 1;
-    }
-    else {
-      ++str_length;
-    }
-  }
-  ends[count_placed] = c;
-
-  auto segments =
-      std::make_tuple(Segment<std::decay_t<typetraits::remove_cvref_t<Args_t>>>(args, nullptr, nullptr)...);
-  MessageInfo msg_info;
-  unsigned format_size = detail::sizeRequired<0>(segments, count_placed, settings, msg_info);
-  std::string buffer(format_size + str_length, ' ');
-  detail::formatHelper<0>(&buffer[0],
-                          starts,
-                          ends,
-                          count_placed,
-                          segments,
-                          settings,
-                          msg_info,
-                          std::make_index_sequence<sizeof...(args)> {});
-  return buffer;
-}
-
-template<typename... Args_t>
-std::string FormatTo(char* buffer,
-                     const char* end,
-                     const FormattingSettings& settings,
-                     const char* fmt_string,
-                     const Args_t&... args) {
-  LL_REQUIRE(buffer <= end, "cannot have the buffer start after the buffer end");
-  constexpr auto N = sizeof...(args);
-  const char *starts[N + 1], *ends[N + 1];
-
-  unsigned count_placed = 0, str_length = 0;
-  starts[0] = fmt_string;
-  auto c = fmt_string;
-  for (; *c != 0; ++c) {
-    if (*c == '%' && count_placed < N) {
-      ends[count_placed++] = std::min(c, end);
-      starts[count_placed] = std::min(c + 1, end);
-    }
-    else {
-      ++str_length;
-    }
-  }
-  ends[count_placed] = std::min(c, end);
-
-  auto segments =
-      std::make_tuple(Segment<std::decay_t<typetraits::remove_cvref_t<Args_t>>>(args, nullptr, nullptr)...);
-  detail::formatHelper<0>(&buffer[0],
-                          starts,
-                          ends,
-                          count_placed,
-                          segments,
-                          settings,
-                          std::make_index_sequence<sizeof...(args)> {});
-  return buffer;
-}
-
-template<typename... Args_t>
-std::string Format(const char* fmt_string, const Args_t&... args) {
-  return Format(FormattingSettings {}, fmt_string, args...);
-}
-
-}  // namespace formatting
-
-}  // namespace lightning
+} // namespace lightning
