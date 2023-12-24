@@ -1,7 +1,8 @@
 # Lightning logging
 
 A small but powerful header-only logging library that depends only on standard C++17 features. Attempts to be a very
-fast streaming logging library without sacrificing too much performance.
+fast streaming logging library without sacrificing too much performance. Current, it is just a bit slower than spdlog, a
+very fast formatting logging library.
 
 Easy to use, easy to customize, makes pretty logs (those are the goals, at least!).
 
@@ -45,9 +46,9 @@ LOG_SEV(Info) << "Done with workflow. Processing next item with name " << item.G
 As usual, whatever is streamed using the logging macros (e.g., function calls) will only be evaluated if the logging
 record opens, which occurs if the set of core-level filters allow the message (given its attributes), and at least one
 sink accepts the message (again, given its attributes). Lightning has very fast message rejection time, in my
-benchmarks, if the message is rejected by its severity at the core level, it can reject around 1.5 billion messages a
-second, and if the message is accepted by the core, but rejected by (the single) sink, it can reject around 800 - 900
-million messages a second (see benchmarking at the bottom).
+benchmarks, if the message is rejected by its severity at the core level, it can reject around 2 billion messages a
+second, and if the message is accepted by the core, but rejected by the (single) sink, it can reject around 1 billion
+messages a second (on my platform - see benchmarking at the bottom).
 
 ### Severity level filtering
 
@@ -83,6 +84,7 @@ of ```AttributeFormatter``` instances as arguments, and returns a unique pointer
 will replace the N-th ```{}``` in the format string with the formatted attribute from the N-th attribute formatter.
 
 For example,
+
 ```C++
 // Set to display the date, logger name, severity, and print the message
 fs->SetFormatter(MakeMsgFormatter("[{}] [{}] [{}] {}",
@@ -96,14 +98,19 @@ LOG_SEV_TO(logger, Info) << "Hello world!";
 ```
 
 ### Logger name
+
 The logger name can be set via the ```Logger::SetName``` function, e.g.
+
 ```C++
 logger.SetName("main-logger");
 ```
+
 There is a built-in attribute formatter ```LoggerNameAttributeFormatter``` that can write the logger name as a string.
 
-### Logging time
-The logging time is by default attached to every logging message, though this can be disabled by 
+### Logging time stamp
+
+The logging time is by default attached to every logging message, though this can be disabled by
+
 ```C++
 logger.SetDoTimeStamp(false);
 ```
@@ -125,6 +132,7 @@ formatting::SeverityAttributeFormatter{}
                         formatting::AnsiForegroundColor::Red, 
                         formatting::AnsiBackgroundColor::Yellow);
 ```
+
 would create a formatter that prints "INFO" in red letters on a yellow background (if the sink supports colors).
 
 ## User defined formatting
@@ -198,7 +206,8 @@ Note that this uses both color formatting and NewLineIndent formatting.
 I have tried to take a "profiling driven" approach to this version of Lightning logging, aimed to keep it competitive or
 faster than other commonly used logging frameworks such as spdlog and boost logging. At the present, I have mostly
 focused on single threaded logging performance. The code containing these experiments and generating this table can be
-found in [applications/profile-table-generation.cpp](applications/profile-table-generation.cpp), and there is more extensive profiling (that doesn't generate
+found in [applications/profile-table-generation.cpp](applications/profile-table-generation.cpp), and there is more
+extensive profiling (that doesn't generate
 markdown tables)
 in [applications/profile-lightning.cpp](applications/profile-lightning.cpp).
 
@@ -206,49 +215,49 @@ in [applications/profile-lightning.cpp](applications/profile-lightning.cpp).
 
 Single threaded: 250,000 messages
 
-| Experiment Name                            |Elapsed time (secs)     |Rate               |
-|--------------------------------------------|:----------------------:|-------------------|
-|MsgFormatter                                |0.044316                |5,641,314/sec      |
-|std::ofstream, with message, static header  |0.060310                |4,145,235/sec      |
-|EmptySink                                   |0.025524                |9,794,735/sec      |
-|TrivialDispatchSink                         |0.024978                |10,008,774/sec     |
+| Experiment Name                            | Elapsed time (secs) | Rate           |
+|--------------------------------------------|:-------------------:|----------------|
+| MsgFormatter                               |      0.044316       | 5,641,314/sec  |
+| std::ofstream, with message, static header |      0.060310       | 4,145,235/sec  |
+| EmptySink                                  |      0.025524       | 9,794,735/sec  |
+| TrivialDispatchSink                        |      0.024978       | 10,008,774/sec |
 
 ******************************************************************************************
 
 Single threaded, Types: 250,000 messages
 
-| Experiment Name                            |Elapsed time (secs)     |Rate               |
-|--------------------------------------------|:----------------------:|-------------------|
-|C-string                                    |0.046936                |5,326,378/sec      |
-|Long C-string                               |0.063292                |3,949,930/sec      |
-|Many C-strings                              |0.093344                |2,678,260/sec      |
-|String                                      |0.056923                |4,391,913/sec      |
-|Integer                                     |0.045571                |5,485,980/sec      |
-|Many integers                               |0.099563                |2,510,977/sec      |
-|Colored Integer                             |0.058169                |4,297,794/sec      |
-|Bool                                        |0.083083                |3,009,025/sec      |
-|Float                                       |0.077367                |3,231,332/sec      |
-|Thread ID                                   |0.088423                |2,827,305/sec      |
-|Combo                                       |0.106442                |2,348,690/sec      |
-|Use-defined exception formatting            |0.407737                |613,140/sec        |
+| Experiment Name                  | Elapsed time (secs) | Rate          |
+|----------------------------------|:-------------------:|---------------|
+| C-string                         |      0.046936       | 5,326,378/sec |
+| Long C-string                    |      0.063292       | 3,949,930/sec |
+| Many C-strings                   |      0.093344       | 2,678,260/sec |
+| String                           |      0.056923       | 4,391,913/sec |
+| Integer                          |      0.045571       | 5,485,980/sec |
+| Many integers                    |      0.099563       | 2,510,977/sec |
+| Colored Integer                  |      0.058169       | 4,297,794/sec |
+| Bool                             |      0.083083       | 3,009,025/sec |
+| Float                            |      0.077367       | 3,231,332/sec |
+| Thread ID                        |      0.088423       | 2,827,305/sec |
+| Combo                            |      0.106442       | 2,348,690/sec |
+| Use-defined exception formatting |      0.407737       | 613,140/sec   |
 
 ******************************************************************************************
 
 Single threaded: 250,000 messages, non-acceptance
 
-| Experiment Name                            |Elapsed time (secs)     |Rate               |
-|--------------------------------------------|:----------------------:|-------------------|
-|Non-accepting sink                          |0.000243                |1,030,927,835/sec  |
-|Non-accepting core                          |0.000120                |2,084,775,302/sec  |
+| Experiment Name    | Elapsed time (secs) | Rate              |
+|--------------------|:-------------------:|-------------------|
+| Non-accepting sink |      0.000243       | 1,030,927,835/sec |
+| Non-accepting core |      0.000120       | 2,084,775,302/sec |
 
 ******************************************************************************************
 
 Multi threaded (4 threads): 250,000 messages
 
-| Experiment Name                            |Elapsed time (secs)     |Rate               |
-|--------------------------------------------|:----------------------:|-------------------|
-|One logger, multiple threads                |0.041597                |6,010,036/sec      |
-|Multiple loggers, same sink                 |0.092153                |2,712,891/sec      |
+| Experiment Name              | Elapsed time (secs) | Rate          |
+|------------------------------|:-------------------:|---------------|
+| One logger, multiple threads |      0.041597       | 6,010,036/sec |
+| Multiple loggers, same sink  |      0.092153       | 2,712,891/sec |
 
 # Building and installing
 
