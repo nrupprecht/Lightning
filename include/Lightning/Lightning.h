@@ -121,11 +121,11 @@ NEW_TYPE_TRAIT(has_to_chars,
                std::to_chars(std::declval<char*>(), std::declval<char*>(), std::declval<Value_t>()))
 
 //! \brief Define remove_cvref_t, which is not available everywhere.
-template<typename T>
+template <typename T>
 using remove_cvref_t = std::remove_cv_t<std::remove_reference_t<T>>;
 
 namespace detail_always_false {
-template<typename T>
+template <typename T>
 struct always_false {
   static constexpr bool value = false;
 };
@@ -203,9 +203,12 @@ protected:
 namespace memory {
 //! \brief Basic contiguous memory buffer. Not thread safe.
 //!
-template<typename T>
+template <typename T>
 class BasicMemoryBuffer {
-public:
+ public:
+  explicit BasicMemoryBuffer(bool needs_normalization = true)
+      : needs_normalization_(needs_normalization) {}
+
   virtual ~BasicMemoryBuffer() = default;
 
   NO_DISCARD T* Data() {
@@ -226,7 +229,8 @@ public:
 
   void PushBack(const T& value) {
     reserve(size_ + 1);
-    data_[size_++] = value;
+    data_[size_] = value;
+    increaseSize(1);
   }
 
   //! \brief Append a range of values to the buffer.
@@ -234,13 +238,13 @@ public:
     auto count = std::distance(begin, end);
     reserve(size_ + static_cast<std::size_t>(count));
     std::uninitialized_copy(begin, end, data_ + size_);
-    size_ += static_cast<std::size_t>(count);
+    increaseSize(static_cast<std::size_t>(count));
   }
 
   void AppendN(const T& object, std::size_t n_copies) {
     reserve(size_ + n_copies);
     std::uninitialized_fill_n(data_ + size_, n_copies, object);
-    size_ += n_copies;
+    increaseSize(n_copies);
   }
 
   //! \brief Get the size of the buffer.
@@ -257,27 +261,27 @@ public:
     reserve(size_ + additional);
   }
 
-  //! \brief Allocate an additional chunk of storage and return pointers to the beginning and (element after) end of
-  //! the chunk.
+  //! \brief Allocate an additional chunk of storage and return pointers to the beginning and (element after)
+  //! end of the chunk.
   std::pair<T*, T*> Allocate(std::size_t additional) {
     reserve(size_ + additional);
     auto begin = End();
-    size_ += additional;
+    increaseSize(additional);
     return {begin, End()};
   }
 
   //! \brief If the storage type is char, return a string copy of the data.
-  template<LL_ENABLE_IF(std::is_same_v<T, char>)>
+  template <LL_ENABLE_IF(std::is_same_v<T, char>)>
   NO_DISCARD std::string ToString() const {
     return std::string(Data(), End());
   }
 
-  template<LL_ENABLE_IF(std::is_same_v<T, char>)>
+  template <LL_ENABLE_IF(std::is_same_v<T, char>)>
   NO_DISCARD std::string_view ToView() const {
     return std::string_view(Data(), Size());
   }
 
-protected:
+ protected:
   void reserve(std::size_t new_capacity) {
     // Note: only makes a virtual call if the capacity is too small.
     if (capacity_ < new_capacity) {
@@ -285,7 +289,27 @@ protected:
     }
   }
 
+  //! \brief Allocate the buffer to contain at least this much space.
   virtual void allocate(std::size_t size) = 0;
+
+  //! \brief Perform any normalization that is needed after the buffer is modified.
+  void normalize() {
+    // If the data type is char, we want the buffer to act like a c-style string, so we need to null terminate.
+    if constexpr (std::is_same_v<T, char>) {
+      if (needs_normalization_) {
+        data_[size_] = '\0';
+      }
+    }
+  }
+
+  //! \brief Increase the size by the requested amount and call normalize(). There must be enough capacity.
+  void increaseSize(std::size_t increase_by) {
+    size_ += increase_by;
+    normalize();
+  }
+
+  //! \brief How much space is needed in the buffer by the
+  constexpr static std::size_t reserved_space = std::is_same_v<T, char> ? 1 : 0;
 
   //! \brief Pointer to the data that is being used.
   T* data_{};
@@ -293,14 +317,16 @@ protected:
   std::size_t size_{};
   //! \brief The current capacity of the buffer.
   std::size_t capacity_{};
+  //! \brief Whether the buffer needs to be normalized.
+  const bool needs_normalization_ = true;
 };
 
 //! \brief Basic memory buffer that has a predetermined amount of stack storage and a concrete method for allocating
 //! new data on the heap.
 //!
-template<typename T, std::size_t stack_size_v = 256>
+template <typename T, std::size_t stack_size_v = 256>
 class MemoryBuffer final : public BasicMemoryBuffer<T> {
-public:
+ public:
   MemoryBuffer() {
     this->data_ = buffer_;
     this->capacity_ = stack_size_v;
@@ -310,7 +336,7 @@ public:
     deallocate();
   }
 
-private:
+ private:
   void allocate(std::size_t size) override {
     auto trial_capacity = this->capacity_ + this->capacity_ / 2;
     trial_capacity = std::max(size, trial_capacity);
@@ -325,7 +351,7 @@ private:
 
   void deallocate() {
     if (this->data_ != buffer_) {
-      delete [] this->data_;
+      delete[] this->data_;
     }
   }
 
