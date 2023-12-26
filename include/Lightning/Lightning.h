@@ -359,6 +359,38 @@ class MemoryBuffer final : public BasicMemoryBuffer<T> {
   T buffer_[stack_size_v];
 };
 
+//! \brief A memory buffer that manages a string. This is useful if you want to build up a string in a buffer
+//! and then return it as a string.
+class StringMemoryBuffer final : public BasicMemoryBuffer<char> {
+ public:
+  explicit StringMemoryBuffer(std::size_t initial_capacity = 256) : BasicMemoryBuffer<char>(false) {
+    allocateBuffer(initial_capacity);
+  }
+
+  std::string&& MoveString() {
+    buffer_.resize(size_);
+    data_ = nullptr;
+    size_ = 0;
+    capacity_ = 0;
+    return std::move(buffer_);
+  }
+
+ private:
+  void allocate(std::size_t size) override {
+    allocateBuffer(size);
+  }
+
+  //! \brief Reallocate the string. This is a separate function so that it can be called from the constructor.
+  void allocateBuffer(std::size_t size) {
+    auto trial_capacity = this->capacity_ + this->capacity_ / 2;
+    trial_capacity = std::max(size, trial_capacity);
+    buffer_.resize(trial_capacity);
+    data_ = buffer_.data();
+  }
+
+  std::string buffer_{};
+};
+
 
 //! \brief Helper function to append a string to a memory buffer of chars.
 inline void AppendBuffer(BasicMemoryBuffer<char>& buffer, const std::string& str) {
@@ -373,6 +405,14 @@ inline void AppendBuffer(BasicMemoryBuffer<char>& buffer, const std::string_view
 //! \brief Helper function to append a c-style string to a memory buffer of chars.
 inline void AppendBuffer(BasicMemoryBuffer<char>& buffer, const char* str) {
   for (auto c = str; *c != '\0'; ++c) {
+    buffer.PushBack(*c);
+  }
+}
+
+//! \brief Helper function to append a range of characters to a buffer.
+inline void AppendBuffer(BasicMemoryBuffer<char>& buffer, const char* start, const char* end) {
+  LL_REQUIRE(start <= end, "start of buffer must not be after end of buffer");
+  for (auto c = start; c != end; ++c) {
     buffer.PushBack(*c);
   }
 }
