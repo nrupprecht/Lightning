@@ -12,7 +12,7 @@ using namespace lightning;
 using namespace lightning::formatting;
 
 namespace Testing {
-TEST(Lightning, NewLineIndent) {
+TEST(DispatchTimeFormatting, NewLineIndent) {
   // Set up logger.
   std::ostringstream stream;
   auto sink = UnlockedSink::From<OstreamSink>(stream);
@@ -41,7 +41,7 @@ TEST(Lightning, NewLineIndent) {
             "[Top]: A is for apple.\n       B is for bear.\n[Repeated]: A is for apple.\n            B is for bear.\n");
 }
 
-TEST(Lightning, PadTill) {
+TEST(DispatchTimeFormatting, PadTill) {
   // Set up logger.
   std::ostringstream stream;
   auto sink = UnlockedSink::From<OstreamSink>(stream);
@@ -73,7 +73,7 @@ TEST(Lightning, PadTill) {
   }
 }
 
-TEST(Lightning, RepeatChar) {
+TEST(DispatchTimeFormatting, RepeatChar) {
   // Set up logger.
   std::ostringstream stream;
   auto sink = UnlockedSink::From<OstreamSink>(stream);

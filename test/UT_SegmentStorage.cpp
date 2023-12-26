@@ -18,7 +18,7 @@ TEST(SegmentStorage, StackVsHeap) {
   { // Object small enough to go on the stack.
     SegmentStorage container;
     EXPECT_FALSE(container.HasData());
-    container.Create<Segment<int>>(15, nullptr, nullptr);
+    container.Create<Segment<int>>(15);
     EXPECT_TRUE(container.HasData());
     EXPECT_TRUE(container.IsUsingBuffer());
 
