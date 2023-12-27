@@ -2494,7 +2494,7 @@ class FormatterBySeverity : public BaseMessageFormatter {
   }
 
   NO_DISCARD std::unique_ptr<BaseMessageFormatter> Copy() const override {
-    auto formatter = std::unique_ptr<FormatterBySeverity>();
+    auto formatter = std::make_unique<FormatterBySeverity>();
     for (auto i = 0u; i < 7; ++i) {
       formatter->formatters_[i] = formatters_[i] ? formatters_[i]->Copy() : nullptr;
     }
