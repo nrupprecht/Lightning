@@ -1308,7 +1308,7 @@ const inline AnsiResetSegment_t AnsiResetSegment{};
 //! part of the formatted string, or the entire length of the formatted string.
 enum class FmtDistanceType : unsigned char {
   MESSAGE_LENGTH,
-  TOTAL_LENGTH
+  TOTAL_LENGTH,
 };
 
 //! \brief Inject spaces until the message length or total formatted length reaches a specified length.
@@ -1808,6 +1808,28 @@ static std::vector ALL_SEVERITIES{
     Severity::Error,
     Severity::Fatal
 };
+
+//! \brief Return the index of a severity level in the ALL_SEVERITIES vector.
+inline int SeverityIndex(Severity severity) {
+  switch (severity) {
+    case Severity::Trace:
+      return 0;
+    case Severity::Debug:
+      return 1;
+    case Severity::Info:
+      return 2;
+    case Severity::Major:
+      return 3;
+    case Severity::Warning:
+      return 4;
+    case Severity::Error:
+      return 5;
+    case Severity::Fatal:
+      return 6;
+    default:
+      return -1;
+  }
+}
 
 //! \brief Structure storing very common attributes that a logging message will often have.
 //!
@@ -2345,6 +2367,10 @@ struct MSG_t {};
 //! \brief Global prototypical MSG_t object.
 constexpr inline MSG_t MSG;
 
+//! \brief Currently the main and most useful message formatter, this formatter is templated by the types of
+//! the segments that it contains. It is defined with a string that contains literal segments and segments
+//! that are replaced by the values of the attributes. There are several helper functions, below, that make
+//! creating a MsgFormatter easier.
 template <typename... Types>
 class MsgFormatter : public BaseMessageFormatter {
   static_assert(((std::is_base_of_v<AttributeFormatter, Types> || std::is_same_v<MSG_t, Types>) && ...),
@@ -2453,6 +2479,65 @@ inline auto MakeStandardFormatter() {
                           formatting::MSG);
 }
 
+class FormatterBySeverity : public BaseMessageFormatter {
+ public:
+  void Format(const Record &record,
+              const FormattingSettings &sink_settings,
+              memory::BasicMemoryBuffer<char> &buffer) const override {
+    // Format all the segments.
+    auto formatter = getFormatter(record.Attributes().basic_attributes.level);
+    if (formatter) {
+      MessageInfo msg_info{};
+      msg_info.needs_message_indentation = record.Bundle().NeedsMessageIndentation();
+      formatter->Format(record, sink_settings, buffer);
+    }
+  }
+
+  NO_DISCARD std::unique_ptr<BaseMessageFormatter> Copy() const override {
+    auto formatter = std::unique_ptr<FormatterBySeverity>();
+    for (auto i = 0u; i < 7; ++i) {
+      formatter->formatters_[i] = formatters_[i] ? formatters_[i]->Copy() : nullptr;
+    }
+    formatter->default_formatter_ = default_formatter_ ? default_formatter_->Copy() : nullptr;
+    return formatter;
+  }
+
+  FormatterBySeverity& SetFormatterForSeverity(Severity severity, std::unique_ptr<BaseMessageFormatter>&& formatter) {
+    if (auto index = SeverityIndex(severity); index != -1) {
+      formatters_[index] = std::move(formatter);
+      return *this;
+    }
+    LL_FAIL("unrecognized severity");
+  }
+
+  FormatterBySeverity& SetDefaultFormatter(std::unique_ptr<BaseMessageFormatter>&& formatter) {
+    default_formatter_ = std::move(formatter);
+    return *this;
+  }
+
+ private:
+    //! \brief A function that, given the severity level, returns the formatter for that level.
+    //! If the severity is not recognized, returns the default formatter.
+  NO_DISCARD const BaseMessageFormatter* getFormatter(std::optional<Severity> severity) const {
+    if (severity) {
+      if (auto index = SeverityIndex(*severity); index != -1) {
+        if (formatters_[index]) {
+          return formatters_[index].get();
+        }
+        return default_formatter_.get();
+      }
+      LL_FAIL("unrecognized severity");
+    }
+    return default_formatter_.get();
+  }
+
+  //! \brief The formatters for each severity level.
+  std::unique_ptr<BaseMessageFormatter> formatters_[7];
+  std::unique_ptr<BaseMessageFormatter> default_formatter_;
+};
+
+//! \brief Another type of BaseMessageFormatter, this one can be created and added to without being templated by
+//! the segment types, but is generally lower performance.
 class RecordFormatter : public BaseMessageFormatter {
  public:
   //! \brief The default record formatter just prints the message.
@@ -2694,8 +2779,9 @@ class Sink {
   formatting::BaseMessageFormatter &GetFormatter() { return *formatter_; }
 
   //! \brief Set the sink's formatter.
-  void SetFormatter(std::unique_ptr<formatting::BaseMessageFormatter> &&formatter) {
+  Sink& SetFormatter(std::unique_ptr<formatting::BaseMessageFormatter> &&formatter) {
     formatter_ = std::move(formatter);
+    return *this;
   }
 
   //! \brief 'Flush' the sink. This is implementation defined.

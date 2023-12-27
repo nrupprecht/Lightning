@@ -186,6 +186,29 @@ void bench_st(int howmany) {
                   << formatting::Format("{:L}/sec", static_cast<int>(howmany / delta_d));
   }
 
+  {  // Benchmark using FormatterBySeverity
+    ++count;
+    auto [fs, file_name] = make_sink();
+    Logger logger(fs);
+    logger.SetName("basic_st/backtrace-off");
+
+    auto formatter = std::make_unique<formatting::FormatterBySeverity>();
+    formatter->SetDefaultFormatter(MakeMsgFormatter("[{}] [{}] [{}] {}",
+                                                    formatting::DateTimeAttributeFormatter{},
+                                                    formatting::LoggerNameAttributeFormatter{},
+                                                    formatting::SeverityAttributeFormatter{},
+                                                    formatting::MSG));
+    fs->SetFormatter(std::move(formatter));
+
+    auto start = high_resolution_clock::now();
+    for (auto i = 0; i < howmany; ++i) {
+      LOG_SEV_TO(logger, Info) << "Hello logger: msg number " << i;
+    }
+    auto delta_d = duration_cast<duration<double>>(high_resolution_clock::now() - start).count();
+    LOG_SEV(Info) << "FormatterBySeverity:" << PadUntil(pad_width) << "Elapsed: " << delta_d << " secs "
+                  << formatting::Format("{:L}/sec", static_cast<int>(howmany / delta_d));
+  }
+
   {  // Benchmark using MsgFormatter
     ++count;
     auto [fs, file_name] = make_sink();
