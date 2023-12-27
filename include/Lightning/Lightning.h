@@ -1176,43 +1176,13 @@ class SegmentStorage {
   //! \brief Default construct an empty SegmentStorage object.
   SegmentStorage() = default;
 
-  //! \brief Copy a segment storage.
-  SegmentStorage(const SegmentStorage &storage) {
-    if (storage.segment_pointer_)
-      storage.segment_pointer_->CopyTo(*this);
-  }
-
   //! \brief Move SegmentStorage.
   SegmentStorage(SegmentStorage &&storage) noexcept {
-    if (storage.IsUsingBuffer()) {
-      // TODO: BaseSegment should have a MoveTo function, and call that.
-      std::memcpy(buffer_, storage.buffer_, sizeof(buffer_));
-      segment_pointer_ = reinterpret_cast<BaseSegment *>(buffer_);
-    }
-    else {
-      segment_pointer_ = storage.segment_pointer_;
-    }
-    storage.segment_pointer_ = nullptr;
-  }
-
-  SegmentStorage &operator=(const SegmentStorage &storage) {
-    if (this == &storage) {
-      return *this;
-    }
-    storage.segment_pointer_->CopyTo(*this);
-    return *this;
+    moveFrom(std::move(storage));
   }
 
   SegmentStorage &operator=(SegmentStorage &&storage) noexcept {
-    if (storage.IsUsingBuffer()) {
-      // TODO: BaseSegment should have a MoveTo function, and call that.
-      std::memcpy(buffer_, storage.buffer_, sizeof(buffer_));
-      segment_pointer_ = reinterpret_cast<BaseSegment *>(buffer_);
-    }
-    else {
-      segment_pointer_ = storage.segment_pointer_;
-    }
-    storage.segment_pointer_ = nullptr;
+    moveFrom(std::move(storage));
     return *this;
   }
 
@@ -1238,21 +1208,50 @@ class SegmentStorage {
     return *this;
   }
 
-  BaseSegment *Get() { return segment_pointer_; }
+  BaseSegment *Get() {
+    if (segment_pointer_ == nullptr) { // In the buffer.
+      return reinterpret_cast<BaseSegment *>(buffer_);
+    }
+    return segment_pointer_;
+  }
 
-  NO_DISCARD const BaseSegment *Get() const { return segment_pointer_; }
+  NO_DISCARD const BaseSegment *Get() const {
+    if (segment_pointer_ == nullptr) { // In the buffer.
+      return reinterpret_cast<const BaseSegment*>(buffer_);
+    }
+    return segment_pointer_;
+  }
 
   NO_DISCARD bool IsUsingBuffer() const {
     const auto this_ptr = reinterpret_cast<const char *>(this);
     const auto seg_ptr = reinterpret_cast<const char *>(segment_pointer_);
-    return seg_ptr - this_ptr < static_cast<long>(sizeof(SegmentStorage));
+    auto difference = seg_ptr - this_ptr;
+    // We can probably just check if this and seg pointer are equal.
+    return 0 <= difference && difference < static_cast<long long>(sizeof(SegmentStorage));
   }
 
   NO_DISCARD bool HasData() const { return segment_pointer_; }
 
-  static constexpr std::size_t BufferSize() { return sizeof(buffer_); }
+  [[maybe_unused]] static constexpr std::size_t BufferSize() { return sizeof(buffer_); }
 
  private:
+  void moveFrom(SegmentStorage &&storage) {
+    if (!storage.segment_pointer_) {
+      segment_pointer_ = nullptr;
+    }
+    else {
+      if (storage.IsUsingBuffer()) {
+        // TODO: BaseSegment should have a MoveTo function, and call that.
+        std::memcpy(buffer_, storage.buffer_, sizeof(buffer_));
+        segment_pointer_ = reinterpret_cast<BaseSegment *>(buffer_);
+      }
+      else {
+        segment_pointer_ = storage.segment_pointer_;
+      }
+      storage.segment_pointer_ = nullptr;
+    }
+  }
+
   constexpr static std::size_t default_buffer_size = 3 * sizeof(void *);
 
   //! \brief Pointer to the data that is either on the stack or heap. Allows for polymorphically accessing the
