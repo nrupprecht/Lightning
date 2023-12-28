@@ -32,6 +32,7 @@ SOFTWARE.
 #include <fstream>
 #include <iostream>
 #include <map>
+#include <memory>
 #include <optional>
 #include <set>
 #include <sstream>
@@ -41,6 +42,7 @@ SOFTWARE.
 #include <variant>
 #include <vector>
 #include <string_view>
+#include <cstring> // For std::strlen, std::memcpy, etc.
 
 namespace lightning {
 // ==============================================================================
@@ -3161,6 +3163,12 @@ class Global {
     return *logger_;
   }
 
+  //! \brief Flush all sinks associated with the global core.
+  static void Flush() {
+    auto &&core = GetCore();
+    core->Flush();
+  }
+
  private:
   inline static std::shared_ptr<Core> global_core_ = std::shared_ptr<Core>();
   inline static std::optional<Logger> logger_{};
@@ -3189,7 +3197,9 @@ class Global {
 #define LOG() LOG_TO(::lightning::Global::GetLogger())
 
 
-// ========
+// ==============================================================================
+//  Formatting functions.
+// ==============================================================================
 
 namespace formatting {
 namespace detail {
@@ -3283,7 +3293,9 @@ void formatTo(memory::BasicMemoryBuffer<char> &buffer,
 }
 } // namespace detail
 
-
+//! \brief Format data to a memory buffer. This is the main formatting function.
+//!
+//! This is all very similar to, but much less powerful than, std::format or fmt lib. The format string
 template <typename... Args_t>
 void FormatTo(memory::BasicMemoryBuffer<char> &buffer,
               const FormattingSettings &settings,
@@ -3298,13 +3310,15 @@ void FormatTo(memory::BasicMemoryBuffer<char> &buffer,
   }
 }
 
+//! \brief Format data to a string.
 template <typename... Args_t>
 std::string Format(const FormattingSettings &settings, const char *fmt_string, const Args_t &... args) {
-  memory::MemoryBuffer<char> buffer;
+  memory::StringMemoryBuffer buffer;
   FormatTo(buffer, settings, fmt_string, args...);
   return buffer.ToString();
 }
 
+//! \brief Format data to a string with default formatting settings.
 template <typename... Args_t>
 std::string Format(const char *fmt_string, const Args_t &... args) {
   FormattingSettings settings{};

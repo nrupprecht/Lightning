@@ -70,6 +70,7 @@ TEST(FormatterBySeverity, DefaultFormatter) {
 TEST(FormatterBySeverity, NoSeverity) {
   auto formatter = std::make_unique<FormatterBySeverity>();
   formatter->SetDefaultFormatter(MakeMsgFormatter("DEFAULT: {}", formatting::MSG));
+  auto ptr = formatter.get();
 
   std::ostringstream stream;
   auto sink = UnlockedSink::From<OstreamSink>(stream);
@@ -83,6 +84,9 @@ TEST(FormatterBySeverity, NoSeverity) {
   stream.str("");
   EXPECT_NO_THROW(LOG_SEV_TO(logger, Info) << "B");
   EXPECT_EQ(stream.str(), "DEFAULT: B\n");
+
+  // Make sure Copy works.
+  EXPECT_NO_THROW(ptr->Copy());
 }
 
 }
