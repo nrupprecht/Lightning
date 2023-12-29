@@ -10,13 +10,17 @@ class LightningProject(ConanFile):
     description = "Lightning logging"
     topics = ("conan", "lightning", "logging")  # Specify relevant topics or keywords
     settings = "os", "compiler", "build_type", "arch"
-    generators = "cmake"
     exports_sources = "include/**", "source/**", "CMakeLists.txt", "cmake/**", "test/**"
+
+    generators = "CMakeToolchain", "CMakeDeps", "VirtualRunEnv", "cmake"
 
     def build(self):
         cmake = CMake(self)
         cmake.configure()
         cmake.build()
+
+    def layout(self):
+        self.folders.generators = "conan"
 
     def package(self):
         include_folder = "include"
