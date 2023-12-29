@@ -83,7 +83,8 @@ jobs:
     - name: Conan install dependencies
       run: |
         conan install . -s build_type=${{ matrix.build_type }} --install-folder=${{ github.workspace }}/conan -pr default -b=missing
-        ls ${{ github.workspace }}/build
+        echo "Inspect conan directory:"
+        ls ${{ github.workspace }}/conan
 
     - name: Configure CMake
       run: >
