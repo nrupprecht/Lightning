@@ -85,8 +85,8 @@ TEST(FormatterBySeverity, NoSeverity) {
   EXPECT_NO_THROW(LOG_SEV_TO(logger, Info) << "B");
   EXPECT_EQ(stream.str(), "DEFAULT: B\n");
 
-  // Make sure Copy works.
-  EXPECT_NO_THROW(ptr->Copy());
+  // Make sure Copy works (doesn't crash or throw).
+  EXPECT_NO_THROW([[maybe_unused]] auto x = ptr->Copy());
 }
 
 }

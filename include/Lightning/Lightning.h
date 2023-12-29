@@ -56,9 +56,9 @@ namespace lightning {
 
 //! \brief  Macro that allows you to create a type trait based on whether a statement about a type called
 //! Value_t is valid.
-//!         For example, to make a type trait called can_i_stream_this_v<T> that will be true if T can be
-//!         streamed into std::cout, you can write: NEW_TYPE_TRAIT(can_i_stream_this_v, std::cout <<
-//!         std::declval<T>());
+//!
+//! For example, to make a type trait called can_i_stream_this_v<T> that will be true if T can be streamed into
+//! std::cout, you can write: NEW_TYPE_TRAIT(can_i_stream_this_v, std::cout << std::declval<T>());
 //!
 #define NEW_TYPE_TRAIT(trait_name, trait_test) \
   namespace detail_traits_##trait_name { \
