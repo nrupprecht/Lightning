@@ -81,7 +81,9 @@ jobs:
         echo "build-output-dir=${{ github.workspace }}/build" >> "$GITHUB_OUTPUT"
 
     - name: Conan install dependencies
-      run: conan install . -s build_type=${{ matrix.build_type }} --install-folder=${{ github.workspace }}/build -pr default -b=missing
+      run: |
+        conan install . -s build_type=${{ matrix.build_type }} --install-folder=${{ github.workspace }}/build -pr default -b=missing
+        ls ${{ github.workspace }}/build
 
     - name: Configure CMake
       run: >
