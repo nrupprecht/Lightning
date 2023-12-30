@@ -1,10 +1,12 @@
 # Lightning logging
 
-A small but powerful header-only logging library that depends only on standard C++17 features. Attempts to be a very
-fast streaming logging library without sacrificing too much performance. Current, it is just a bit slower than spdlog, a
-very fast formatting logging library.
+A small but powerful header-only logging library that depends only on standard C++17 features and the standard library.
+Attempts to be a very fast streaming logging library without sacrificing too much performance. Current, it is just a bit
+slower than spdlog, a very fast formatting logging library.
 
-Easy to use, easy to customize, makes pretty logs (those are the goals, at least!).
+Very fast, easy to use, easy to customize, and makes pretty logs.
+
+![Alt text](./images/example-log-1.png)
 
 ## Quick start
 
@@ -96,6 +98,33 @@ LOG_SEV_TO(logger, Info) << "Hello world!";
 // Possible output (time and logger name will vary): 
 // [2023-07-24 15:07:01.152403] [main-logger] [Info   ] Hello world!
 ```
+
+Another built in formatter is a formatter that defines different formatters for each severity level.
+    
+```C++
+auto formatter = std::make_unique<formatting::FormatterBySeverity>();
+{
+    auto default_fmt = MakeMsgFormatter("[{}] [{}] {}",
+                                        formatting::DateTimeAttributeFormatter{},
+                                        formatting::SeverityAttributeFormatter{},
+                                        formatting::MSG);
+    // Formatter for "low levels" of severity displace file and line number.
+    auto low_level_fmt = MakeMsgFormatter("[{}] [{}:{}] [{}] {}",
+                                          formatting::DateTimeAttributeFormatter{},
+                                          formatting::FileNameAttributeFormatter{true},
+                                          formatting::FileLineAttributeFormatter{},
+                                          formatting::SeverityAttributeFormatter{},
+                                          formatting::MSG);
+   
+    formatter->
+        // Set formatter for Trace and Debug severities.
+        SetFormatterForSeverity(LoggingSeverity <= Severity::Debug, *low_level_fmt)
+        // Set formatter for all other severities (including records without severities).
+        .SetDefaultFormatter(std::move(default_fmt));
+}
+Global::GetCore()->SetAllFormatters(*formatter);
+```
+
 
 ### Logger name
 

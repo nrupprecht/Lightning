@@ -29,7 +29,7 @@ TEST(TypeTraits, Basic) {
   EXPECT_FALSE(typetraits::is_ostreamable_v<Nonstreamable>);
 }
 
-TEST(Lightning, IsOstreamable) {
+TEST(TypeTraits, IsOstreamable) {
   EXPECT_TRUE(typetraits::is_ostreamable_v<std::string>);
   EXPECT_TRUE(typetraits::is_ostreamable_v<char[14]>);
   EXPECT_TRUE(typetraits::is_ostreamable_v<bool>);
@@ -37,14 +37,14 @@ TEST(Lightning, IsOstreamable) {
   EXPECT_FALSE(typetraits::is_ostreamable_v<Nonstreamable>);
 }
 
-TEST(Lightning, Unconst_t) {
+TEST(TypeTraits, Unconst_t) {
   EXPECT_TRUE((std::is_same_v<typetraits::Unconst_t<const char*>, char*>));
   EXPECT_TRUE((std::is_same_v<typetraits::Unconst_t<char*>, char*>));
   EXPECT_TRUE((std::is_same_v<typetraits::Unconst_t<char const* const>, char*>));
   EXPECT_TRUE((std::is_same_v<typetraits::Unconst_t<const double>, double>));
 }
 
-TEST(Lightning, IsCstrRelated_v) {
+TEST(TypeTraits, IsCstrRelated_v) {
   EXPECT_TRUE(typetraits::IsCstrRelated_v<char*>);
   EXPECT_TRUE(typetraits::IsCstrRelated_v<const char*>);
   EXPECT_TRUE(typetraits::IsCstrRelated_v<char[5]>);
@@ -54,7 +54,7 @@ TEST(Lightning, IsCstrRelated_v) {
   EXPECT_FALSE(typetraits::IsCstrRelated_v<double>);
 }
 
-TEST(Lightning, HasToString) {
+TEST(TypeTraits, HasToString) {
   EXPECT_TRUE(lightning::typetraits::has_to_string_v<ToStringable>);
 
   EXPECT_FALSE(lightning::typetraits::has_to_string_v<std::string>);

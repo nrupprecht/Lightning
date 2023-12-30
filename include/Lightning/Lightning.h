@@ -1834,6 +1834,80 @@ inline int SeverityIndex(Severity severity) {
   }
 }
 
+//! \brief A "severity set," which acts as a filter of which severities are "acceptable." This is encoded as a bit mask.
+//! Boolean operations can be performed on SeveritySets to create more complex filters, and the set can be used to check
+//! whether a severity is acceptable.
+class SeveritySet {
+ public:
+  explicit SeveritySet(bool all_or_none) { severity_mask_ = all_or_none ? 0xFFFF : 0; }
+  explicit SeveritySet(const std::set<Severity> &severities) : severity_mask_(0) {
+    for (auto severity : ALL_SEVERITIES) {
+      if (severities.count(severity) != 0) severity_mask_ |= static_cast<int>(severity);
+    }
+  }
+
+  NO_DISCARD bool Check(Severity severity) const { return severity_mask_ & static_cast<int>(severity); }
+  NO_DISCARD bool operator()(Severity severity) const { return Check(severity); }
+  NO_DISCARD int GetMask() const { return severity_mask_; }
+
+  SeveritySet &SetAcceptance(Severity severity, bool does_accept) {
+    if (does_accept) severity_mask_ |= static_cast<int>(severity);
+    else severity_mask_ &= (0b1111111 & ~static_cast<int>(severity));
+    return *this;
+  }
+
+  friend SeveritySet operator||(SeveritySet lhs, SeveritySet rhs);
+  friend SeveritySet operator&&(SeveritySet lhs, SeveritySet rhs);
+  friend SeveritySet operator!(SeveritySet set);
+ private:
+  explicit SeveritySet(int mask) : severity_mask_(mask) {}
+  //! \brief The acceptance mask.
+  int severity_mask_ = 0xFFFF;
+};
+
+// ==============================================================================================
+//  SeveritySet operators.
+// ==============================================================================================
+
+inline SeveritySet operator||(SeveritySet lhs, SeveritySet rhs) { return SeveritySet{lhs.GetMask() | rhs.GetMask()}; }
+inline SeveritySet operator&&(SeveritySet lhs, SeveritySet rhs) { return SeveritySet{lhs.GetMask() & rhs.GetMask()}; }
+inline SeveritySet operator!(SeveritySet set) { return SeveritySet{~set.GetMask()}; }
+
+//! \brief A type that can be used to specify the severity level of a logging message, for creating SeveritySets using boolean operators.
+struct LoggingSeverity_t {};
+//! \brief Prototypical LoggingSeverity_t object.
+constexpr inline LoggingSeverity_t LoggingSeverity;
+
+inline SeveritySet operator>(Severity severity, LoggingSeverity_t) {
+  SeveritySet severity_set(false);
+  for (auto sev : ALL_SEVERITIES) {
+    if (static_cast<int>(sev) < static_cast<int>(severity)) severity_set.SetAcceptance(sev, true);
+  }
+  return severity_set;
+}
+
+inline SeveritySet operator>=(Severity severity, LoggingSeverity_t) {
+  return (severity > LoggingSeverity).SetAcceptance(severity, true);
+}
+
+inline SeveritySet operator<(Severity severity, LoggingSeverity_t) { return !(severity >= LoggingSeverity); }
+inline SeveritySet operator<=(Severity severity, LoggingSeverity_t) {
+  return !(severity > LoggingSeverity);
+}
+inline SeveritySet operator==(Severity severity, LoggingSeverity_t) {
+  return SeveritySet({severity});
+}
+inline SeveritySet operator!=(Severity severity, LoggingSeverity_t) { return !(severity == LoggingSeverity); }
+
+// Order reversed operators.
+inline SeveritySet operator>(LoggingSeverity_t, Severity severity) { return severity < LoggingSeverity; }
+inline SeveritySet operator>=(LoggingSeverity_t, Severity severity) { return severity <= LoggingSeverity; }
+inline SeveritySet operator<(LoggingSeverity_t, Severity severity) { return severity > LoggingSeverity; }
+inline SeveritySet operator<=(LoggingSeverity_t, Severity severity) { return severity >= LoggingSeverity; }
+inline SeveritySet operator==(LoggingSeverity_t, Severity severity) { return severity == LoggingSeverity; }
+inline SeveritySet operator!=(LoggingSeverity_t, Severity severity) { return severity != LoggingSeverity; }
+
+
 //! \brief Structure storing very common attributes that a logging message will often have.
 //!
 //! Additional attributes can be implemented as Attribute objects.
@@ -1847,21 +1921,18 @@ struct BasicAttributes {
   //! datetime generators.
   explicit BasicAttributes(std::optional<Severity> lvl, bool do_timestamp = false)
       : level(lvl) {
-    if (do_timestamp)
-      time_stamp = time::DateTime::Now();
+    if (do_timestamp) time_stamp = time::DateTime::Now();
   }
 
   //! \brief Create a basic attributes with all possible data.
   //!
-  //! Note that we usually set do_timestamp off, since loggers create their own timestamps with their fast
-  //! datetime generators.
+  //! Note that we usually set do_timestamp off, since loggers create their own timestamps with their fast datetime generators.
   explicit BasicAttributes(std::optional<Severity> lvl,
                            const char *file_name,
                            unsigned line_number,
                            bool do_timestamp = false)
       : level(lvl), file_name(file_name), line_number(line_number) {
-    if (do_timestamp)
-      time_stamp = time::DateTime::Now();
+    if (do_timestamp) time_stamp = time::DateTime::Now();
   }
 
   //! \brief The severity level of the record.
@@ -1881,20 +1952,23 @@ struct BasicAttributes {
 };
 
 //! \brief A filter that checks whether a record should be accepted solely based on its severity.
+//!
+//! Essentially, this is a wrapper around a SeveritySet, plus an option to accept messages that do not have a
+//! severity attribute.
 class BasicSeverityFilter {
  public:
   NO_DISCARD bool Check(std::optional<Severity> severity) const {
-    if (severity) {
-      return mask_ & static_cast<int>(severity.value());
-    }
+    if (severity) return filter_(*severity);
     return allow_if_no_severity_;
   }
 
   BasicSeverityFilter &SetAcceptance(Severity severity, bool does_accept) {
-    if (does_accept)
-      mask_ |= static_cast<int>(severity);
-    else
-      mask_ &= (0b1111111 & ~static_cast<int>(severity));
+    filter_.SetAcceptance(severity, does_accept);
+    return *this;
+  }
+
+  BasicSeverityFilter &SetAcceptance(SeveritySet acceptable) {
+    filter_ = acceptable;
     return *this;
   }
 
@@ -1904,8 +1978,8 @@ class BasicSeverityFilter {
   }
 
  private:
-  //! \brief The acceptance mask.
-  int mask_ = 0xFFFF;
+  //! \brief The severity acceptance filter.
+  SeveritySet filter_{true};
 
   //! \brief Whether to accept a message that does not contain the severity attribute.
   bool allow_if_no_severity_ = false;
@@ -1929,6 +2003,7 @@ struct RecordAttributes {
 };
 
 namespace filter {
+
 //! \brief Class that can be configured to test whether a record should be accepted based on its attributes.
 class AttributeFilter {
  public:
@@ -1955,6 +2030,17 @@ class AttributeFilter {
     return *this;
   }
 
+  AttributeFilter &Accept(SeveritySet acceptable) {
+    severity_filter_.SetAcceptance(acceptable);
+    return *this;
+  }
+
+  //! \brief Shortcut for accepting all severities.
+  AttributeFilter &Accept(LoggingSeverity_t) {
+    severity_filter_.SetAcceptance(SeveritySet(true));
+    return *this;
+  }
+
   //! \brief Set whether a message with no severity level should be accepted.
   AttributeFilter &AcceptNoSeverity(bool flag) {
     severity_filter_.AcceptNoSeverity(flag);
@@ -1971,6 +2057,7 @@ class AttributeFilter {
   //! \brief The filter used to decide if a record should be accepted based on its severity settings.
   BasicSeverityFilter severity_filter_;
 };
+
 } // namespace filter
 
 // Forward declare core.
@@ -2065,6 +2152,7 @@ class RecordDispatcher {
 };
 
 namespace formatting {
+
 //! \brief Base class for attribute formatters, objects that know how to serialize attribute representations
 //! to strings.
 class AttributeFormatter {
@@ -2482,6 +2570,7 @@ inline auto MakeStandardFormatter() {
                           formatting::MSG);
 }
 
+//! \brief A message formatter that delegates formatting to a different formatter based on the severity of the record.
 class FormatterBySeverity : public BaseMessageFormatter {
  public:
   void Format(const Record &record,
@@ -2512,15 +2601,33 @@ class FormatterBySeverity : public BaseMessageFormatter {
     }
     LL_FAIL("unrecognized severity");
   }
+  FormatterBySeverity &SetFormatterForSeverity(Severity severity, const BaseMessageFormatter &formatter) {
+    if (auto index = SeverityIndex(severity); index != -1) {
+      formatters_[index] = formatter.Copy();
+      return *this;
+    }
+    LL_FAIL("unrecognized severity");
+  }
+
+  FormatterBySeverity &SetFormatterForSeverity(SeveritySet condition, const BaseMessageFormatter &formatter) {
+    for (auto severity : ALL_SEVERITIES) {
+      if (condition(severity)) formatters_[SeverityIndex(severity)] = formatter.Copy();
+    }
+    return *this;
+  }
 
   FormatterBySeverity& SetDefaultFormatter(std::unique_ptr<BaseMessageFormatter>&& formatter) {
     default_formatter_ = std::move(formatter);
     return *this;
   }
+  FormatterBySeverity &SetDefaultFormatter(BaseMessageFormatter &formatter) {
+    default_formatter_ = formatter.Copy();
+    return *this;
+  }
 
  private:
-    //! \brief A function that, given the severity level, returns the formatter for that level.
-    //! If the severity is not recognized, returns the default formatter.
+  //! \brief A function that, given the severity level, returns the formatter for that level.
+  //! If the severity is not recognized, returns the default formatter.
   NO_DISCARD const BaseMessageFormatter* getFormatter(std::optional<Severity> severity) const {
     if (severity) {
       if (auto index = SeverityIndex(*severity); index != -1) {
@@ -2529,6 +2636,7 @@ class FormatterBySeverity : public BaseMessageFormatter {
         }
         return default_formatter_.get();
       }
+      // Severity provided but it is ill-formed.
       LL_FAIL("unrecognized severity");
     }
     return default_formatter_.get();
@@ -2600,9 +2708,11 @@ class RecordFormatter : public BaseMessageFormatter {
  private:
   std::vector<std::variant<MSG_t, std::shared_ptr<AttributeFormatter>, std::string>> formatters_;
 };
+
 } // namespace formatting
 
 namespace flush {
+
 //! \brief Base class for objects that determine whether a sink should be flushed.
 class FlushHandler : public ImplBase {
  public:
@@ -2694,6 +2804,7 @@ inline DisjunctionFlushHandler operator||(const FlushHandler &lhs, const FlushHa
 inline ConjunctionFlushHandler operator&&(const FlushHandler &lhs, const FlushHandler &rhs) {
   return {lhs, rhs};
 }
+
 } // namespace flush
 
 //! \brief  Base class for sink backends, which are responsible for actually handling the record and
@@ -2808,6 +2919,7 @@ class Sink {
   //! \brief The sink's formatter.
   std::unique_ptr<formatting::BaseMessageFormatter> formatter_;
 
+  //! \brief An optional flush handler, which determines whether the sink should be flushed based on the record.
   std::optional<flush::FlushHandler> flush_handler_{};
 };
 
@@ -2907,9 +3019,9 @@ class Core {
   }
 
   //! \brief Set the formatter for every sink the core points at.
-  Core &SetAllFormatters(const std::unique_ptr<formatting::BaseMessageFormatter> &formatter) {
+  Core &SetAllFormatters(const formatting::BaseMessageFormatter &formatter) {
     for (const auto &sink : sinks_) {
-      sink->SetFormatter(formatter->Copy());
+      sink->SetFormatter(formatter.Copy());
     }
     return *this;
   }

@@ -89,4 +89,32 @@ TEST(FormatterBySeverity, NoSeverity) {
   EXPECT_NO_THROW([[maybe_unused]] auto x = ptr->Copy());
 }
 
+TEST(FormatterBySeverity, ComplexExample) {
+  auto formatter = std::make_unique<formatting::FormatterBySeverity>();
+  {
+    auto default_fmt = MakeMsgFormatter("[{}] [time] {}",
+                                        formatting::SeverityAttributeFormatter{},
+                                        formatting::MSG);
+    auto low_level_fmt = MakeMsgFormatter("[{}] [file:line] [time] {}",
+                                          formatting::SeverityAttributeFormatter{},
+                                          formatting::MSG);
+    // Set formatter for Trace and Debug severities.
+    formatter->SetFormatterForSeverity(LoggingSeverity <= Severity::Debug, *low_level_fmt)
+        .SetDefaultFormatter(std::move(default_fmt));
+  }
+
+  std::ostringstream stream;
+  auto sink = UnlockedSink::From<OstreamSink>(stream);
+  sink->SetFormatter(std::move(formatter)).GetFilter().Accept(LoggingSeverity); // Accept all severities.
+  Logger logger(sink);
+
+  LOG_SEV_TO(logger, Debug) << "Debug";
+  EXPECT_EQ(stream.str(), "[Debug  ] [file:line] [time] Debug\n");
+  stream.str("");
+
+  LOG_SEV_TO(logger, Info) << "Info";
+  EXPECT_EQ(stream.str(), "[Info   ] [time] Info\n");
+  stream.str("");
+}
+
 }
