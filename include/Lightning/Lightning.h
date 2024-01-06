@@ -114,8 +114,14 @@ namespace typetraits {
 //! \brief  Type trait that determines whether a type can be ostream'ed.
 NEW_TYPE_TRAIT(is_ostreamable_v, std::declval<std::ostream &>() << std::declval<Value_t>())
 
-//! \brief  Type trait that determines whether a type has a to_string function.
-NEW_TYPE_TRAIT(has_to_string_v, to_string(std::declval<Value_t>()))
+//! \brief  Type trait that determines whether a type has an overload of the std::to_string function.
+NEW_TYPE_TRAIT(has_std_to_string_v, std::to_string(std::declval<Value_t>()))
+//! \brief Type trait that determines whether a type has an ADL findable to_string function.
+NEW_TYPE_TRAIT(has_adl_to_string_v, to_string(std::declval<Value_t>()))
+
+//! \brief A type is "to-stringable" if it has either a std::to_string or an ADL to_string.
+template <typename T>
+inline constexpr bool has_to_string_v = has_std_to_string_v<T> || has_adl_to_string_v<T>;
 
 //! \brief  Type trait that determines if there is std::to_chars support for a type. Some compilers, like clang,
 //! have std::to_chars for integral types, but not for doubles, so we can't just check the feature test macro
@@ -170,6 +176,51 @@ template <typename T>
 constexpr inline bool IsCstrRelated_v =
     std::is_same_v<Unconst_t<std::decay_t<T>>, char *> || std::is_same_v<remove_cvref_t<T>, std::string>;
 } // namespace typetraits.
+
+// ==============================================================================
+//  Current function.
+// ==============================================================================
+
+
+// Current function, from BOOST, taken from https://www.boost.org/doc/libs/1_78_0/boost/current_function.hpp
+
+//  boost/current_function.hpp - LL_CURRENT_FUNCTION
+//
+//  Copyright 2002-2018 Peter Dimov
+//
+//  Distributed under the Boost Software License, Version 1.0.
+//  See accompanying file LICENSE_1_0.txt or copy at
+//  http://www.boost.org/LICENSE_1_0.txt
+//
+//  http://www.boost.org/libs/assert
+//
+
+namespace detail {
+
+inline void current_function_helper() {
+#if defined( LL_DISABLE_CURRENT_FUNCTION )
+# define LL_CURRENT_FUNCTION "(unknown)"
+#elif defined(__GNUC__) || (defined(__MWERKS__) && (__MWERKS__ >= 0x3000)) || (defined(__ICC) && (__ICC >= 600)) || defined(__ghs__) || defined(__clang__)
+# define LL_CURRENT_FUNCTION __PRETTY_FUNCTION__
+#elif defined(__DMC__) && (__DMC__ >= 0x810)
+# define LL_CURRENT_FUNCTION __PRETTY_FUNCTION__
+#elif defined(__FUNCSIG__)
+# define LL_CURRENT_FUNCTION __FUNCSIG__
+#elif (defined(__INTEL_COMPILER) && (__INTEL_COMPILER >= 600)) || (defined(__IBMCPP__) && (__IBMCPP__ >= 500))
+# define LL_CURRENT_FUNCTION __FUNCTION__
+#elif defined(__BORLANDC__) && (__BORLANDC__ >= 0x550)
+# define LL_CURRENT_FUNCTION __FUNC__
+#elif defined(__STDC_VERSION__) && (__STDC_VERSION__ >= 199901)
+# define LL_CURRENT_FUNCTION __func__
+#elif defined(__cplusplus) && (__cplusplus >= 201103)
+# define LL_CURRENT_FUNCTION __func__
+#else
+# define LL_CURRENT_FUNCTION "(unknown)"
+#endif
+}
+
+} // namespace detail
+
 
 //! \brief Convenient base class for pImpl type objects. Note that here, we use PImpl to give value semantics to objects
 //! that would otherwise need to be stored as shared pointers to base objects. This is in contrast to why PImpl is
@@ -248,6 +299,14 @@ class BasicMemoryBuffer {
     reserve(size_ + n_copies);
     std::uninitialized_fill_n(data_ + size_, n_copies, object);
     increaseSize(n_copies);
+  }
+
+  //! \brief Clear the buffer, resetting the size to zero.
+  //!
+  //! How tmemory is managed is implementation dependent, but by default, we set the size to zero and normalize.
+  virtual void Clear() {
+    size_ = 0;
+    normalize();
   }
 
   //! \brief Get the size of the buffer.
@@ -865,7 +924,7 @@ constexpr int log10_max_ull_power_of_ten = 19;
 } // namespace detail
 
 //! \brief Returns how many digits the decimal representation of a ull will have.
-//!        The optional bound "upper" means that the number has at most "upper" digits.
+//! The optional bound "upper" means that the number has at most "upper" digits.
 inline unsigned NumberOfDigitsULL(unsigned long long x, int upper = detail::log10_max_ull_power_of_ten) {
   using namespace detail;
   upper = std::max(0, std::min(upper, 19));
@@ -1706,8 +1765,8 @@ class RefBundle {
       const auto size_before = buffer.Size();
       bundle.Get()->AddToBuffer(settings, msg_info, buffer);
       const auto size_after = buffer.Size();
-      msg_info.message_length += size_after - size_before;
-      msg_info.total_length += size_after;
+      msg_info.message_length += static_cast<unsigned>(size_after - size_before);
+      msg_info.total_length = static_cast<unsigned>(buffer.Size());
     }
     msg_info.is_in_message_segment = false;
   }
@@ -1907,6 +1966,21 @@ inline SeveritySet operator<=(LoggingSeverity_t, Severity severity) { return sev
 inline SeveritySet operator==(LoggingSeverity_t, Severity severity) { return severity == LoggingSeverity; }
 inline SeveritySet operator!=(LoggingSeverity_t, Severity severity) { return severity != LoggingSeverity; }
 
+namespace detail {
+
+inline std::string ThreadIDAsString() {
+  std::ostringstream stream;
+  stream << std::this_thread::get_id();
+  return stream.str();
+}
+
+} // namespace detail
+
+//! \brief Get a const reference to the thread ID string.
+inline const std::string &GetThreadID() {
+  static thread_local auto thread_id = detail::ThreadIDAsString();
+  return thread_id;
+}
 
 //! \brief Structure storing very common attributes that a logging message will often have.
 //!
@@ -1929,23 +2003,30 @@ struct BasicAttributes {
   //! Note that we usually set do_timestamp off, since loggers create their own timestamps with their fast datetime generators.
   explicit BasicAttributes(std::optional<Severity> lvl,
                            const char *file_name,
+                           const char *function_name,
                            unsigned line_number,
                            bool do_timestamp = false)
-      : level(lvl), file_name(file_name), line_number(line_number) {
+      : level(lvl), file_name(file_name), function_name(function_name), line_number(line_number) {
     if (do_timestamp) time_stamp = time::DateTime::Now();
   }
 
   //! \brief The severity level of the record.
   std::optional<Severity> level{};
 
+  //! \brief String representation of the thread ID.
+  const std::string &thread_id = GetThreadID();
+
   //! \brief The time at which the record was created.
   std::optional<time::DateTime> time_stamp{};
 
-  //! \brief The name of the logger which sent a message.
+  //! \brief A string view of the name of the logger which sent a message.
   std::string_view logger_name{};
 
-  //! \brief Const char* to the filename.
+  //! \brief Const char* to the file name.
   const char *file_name{};
+
+  //! \brief Const char* to the function name.
+  const char *function_name{};
 
   //! \brief Optionally, the line number that the log is from.
   std::optional<unsigned> line_number{};
@@ -1982,7 +2063,7 @@ class BasicSeverityFilter {
   SeveritySet filter_{true};
 
   //! \brief Whether to accept a message that does not contain the severity attribute.
-  bool allow_if_no_severity_ = false;
+  bool allow_if_no_severity_ = true;
 };
 
 //! \brief Object containing all attributes for a record.
@@ -2044,6 +2125,12 @@ class AttributeFilter {
   //! \brief Set whether a message with no severity level should be accepted.
   AttributeFilter &AcceptNoSeverity(bool flag) {
     severity_filter_.AcceptNoSeverity(flag);
+    return *this;
+  }
+
+  //! \brief Reset the filter.
+  AttributeFilter &Clear() {
+    severity_filter_ = BasicSeverityFilter();
     return *this;
   }
 
@@ -2172,6 +2259,11 @@ class AttributeFormatter {
 //! \brief Format the severity attribute.
 class SeverityAttributeFormatter : public AttributeFormatter {
  public:
+  SeverityAttributeFormatter(bool aligned_names = true) {
+    if (aligned_names) setAlignedNames();
+    else setUnalignedNames();
+  }
+
   void AddToBuffer(const RecordAttributes &attributes,
                    const FormattingSettings &settings,
                    const formatting::MessageInfo &msg_info,
@@ -2211,6 +2303,26 @@ class SeverityAttributeFormatter : public AttributeFormatter {
   }
 
  private:
+  void setAlignedNames() {
+    trace_ = "Trace  ";
+    debug_ = "Debug  ";
+    info_ = "Info   ";
+    major_ = "Major  ";
+    warn_ = "Warning";
+    error_ = "Error  ";
+    fatal_ = "Fatal  ";
+  }
+
+  void setUnalignedNames() {
+    trace_ = "Trace";
+    debug_ = "Debug";
+    info_ = "Info";
+    major_ = "Major";
+    warn_ = "Warning";
+    error_ = "Error";
+    fatal_ = "Fatal";
+  }
+
   NO_DISCARD const std::string &getString(Severity severity) const {
     switch (severity) {
       case Severity::Trace:
@@ -2396,6 +2508,29 @@ class FileNameAttributeFormatter final : public AttributeFormatter {
   bool only_file_name_;
 };
 
+
+//! \brief Formatter for the function name attribute.
+class FunctionNameAttributeFormatter final : public AttributeFormatter {
+ public:
+  void AddToBuffer(const RecordAttributes &attributes,
+                   [[maybe_unused]] const FormattingSettings &settings,
+                   [[maybe_unused]] const MessageInfo &info,
+                   memory::BasicMemoryBuffer<char> &buffer) const override {
+    if (attributes.basic_attributes.function_name) {
+      AppendBuffer(buffer, attributes.basic_attributes.function_name);
+    }
+  }
+
+  NO_DISCARD unsigned RequiredSize(const RecordAttributes &attributes,
+                                   const FormattingSettings &,
+                                   const MessageInfo &) const override {
+    if (attributes.basic_attributes.function_name) {
+      return static_cast<unsigned>(std::strlen(attributes.basic_attributes.function_name));
+    }
+    return 0;
+  }
+};
+
 //! \brief Formatter for the file name attribute.
 class FileLineAttributeFormatter final : public AttributeFormatter {
  public:
@@ -2422,6 +2557,23 @@ class FileLineAttributeFormatter final : public AttributeFormatter {
   }
 };
 
+//! \brief Formatter for the file name attribute.
+class ThreadAttributeFormatter final : public AttributeFormatter {
+ public:
+  void AddToBuffer(const RecordAttributes &attributes,
+                   [[maybe_unused]] const FormattingSettings &settings,
+                   [[maybe_unused]] const MessageInfo &info,
+                   memory::BasicMemoryBuffer<char> &buffer) const override {
+    AppendBuffer(buffer, attributes.basic_attributes.thread_id);
+  }
+
+  NO_DISCARD unsigned RequiredSize(const RecordAttributes &attributes,
+                                   const FormattingSettings &,
+                                   const MessageInfo &) const override {
+    return static_cast<unsigned>(attributes.basic_attributes.thread_id.size());
+  }
+};
+
 //! \brief  Function to calculate how far the start of the message is from the last newline in the header,
 //! counting only visible (non ansi virtual terminal) characters.
 inline unsigned CalculateMessageIndentation(char *buffer_end, const MessageInfo &msg_info) {
@@ -2429,12 +2581,9 @@ inline unsigned CalculateMessageIndentation(char *buffer_end, const MessageInfo 
     return 0;
   }
   auto c = buffer_end - 1;
-  for (; c != buffer_end - msg_info.total_length; --c) {
-    if (*c == '\n') {
-      ++c;
-      break;
-    }
-  }
+  auto rend = c - msg_info.total_length;
+  for (; c != rend && *c != '\n'; --c);
+  ++c; // Start after the '\n' or char-before-begin.
   return CountNonAnsiSequenceCharacters(c, buffer_end);
 }
 
@@ -2518,12 +2667,12 @@ class MsgFormatter : public BaseMessageFormatter {
  private:
   template <std::size_t N>
   void format(memory::BasicMemoryBuffer<char> &buffer,
-              const Record &record,
-              const FormattingSettings &sink_settings,
+              [[maybe_unused]] const Record &record,
+              [[maybe_unused]] const FormattingSettings &sink_settings,
               MessageInfo &msg_info) const {
     // First, the next literal segment.
     AppendBuffer(buffer, literals_[N]);
-    msg_info.total_length += static_cast<unsigned>(literals_[N].size());
+    msg_info.total_length = static_cast<unsigned>(buffer.Size());
 
     if constexpr (N != sizeof...(Types)) {
       // Then the formatter from the slot.
@@ -2535,15 +2684,14 @@ class MsgFormatter : public BaseMessageFormatter {
           msg_info.message_indentation = CalculateMessageIndentation(buffer.End(), msg_info);
         }
         else {
-          msg_info.message_indentation = 0;
+          msg_info.message_indentation = 0u;
         }
         // Bundle's FmtString function will set msg_info.is_in_message_segment to true, so we don't need to here.
         record.Bundle().FmtString(sink_settings, buffer, msg_info);
       }
       else {
-        std::get<N>(formatters_)
-            .AddToBuffer(record.Attributes(), sink_settings, msg_info, buffer);
-        msg_info.total_length += buffer.Size();
+        std::get<N>(formatters_).AddToBuffer(record.Attributes(), sink_settings, msg_info, buffer);
+        msg_info.total_length = static_cast<unsigned>(buffer.Size());
       }
       // Recursively format the next literal and (if it does not terminate) segment.
       format < N + 1 > (buffer, record, sink_settings, msg_info);
@@ -2719,9 +2867,11 @@ class FlushHandler : public ImplBase {
   class Impl : public ImplBase::Impl {
    public:
     virtual bool DoFlush(const Record &record) = 0;
+    virtual std::shared_ptr<Impl> Clone() const = 0;
   };
 
   bool DoFlush(const Record &record) { return impl<FlushHandler>()->DoFlush(record); }
+  FlushHandler Clone() const { return FlushHandler(impl<FlushHandler>()->Clone()); }
 
   explicit FlushHandler(const std::shared_ptr<Impl> &impl)
       : ImplBase(impl) {}
@@ -2733,6 +2883,7 @@ class AutoFlush : public FlushHandler {
   class Impl : public FlushHandler::Impl {
    public:
     bool DoFlush(const Record &) override { return true; }
+    std::shared_ptr<FlushHandler::Impl> Clone() const override { return std::make_shared<Impl>(); }
   };
 
   AutoFlush()
@@ -2755,6 +2906,8 @@ class FlushEveryN : public FlushHandler {
       return count_ == 0;
     }
 
+    std::shared_ptr<FlushHandler::Impl> Clone() const override { return std::make_shared<Impl>(N_); }
+
    private:
     std::size_t count_{}, N_;
   };
@@ -2772,6 +2925,9 @@ class DisjunctionFlushHandler : public FlushHandler {
 
     bool DoFlush(const Record &record) override { return lhs_.DoFlush(record) || rhs_.DoFlush(record); }
 
+    std::shared_ptr<FlushHandler::Impl> Clone() const override {
+      return std::make_shared<Impl>(lhs_.Clone(), rhs_.Clone());
+    }
    private:
     FlushHandler lhs_, rhs_;
   };
@@ -2789,6 +2945,9 @@ class ConjunctionFlushHandler : public FlushHandler {
 
     bool DoFlush(const Record &record) override { return lhs_.DoFlush(record) && rhs_.DoFlush(record); }
 
+    std::shared_ptr<FlushHandler::Impl> Clone() const override {
+      return std::make_shared<Impl>(lhs_.Clone(), rhs_.Clone());
+    }
    private:
     FlushHandler lhs_, rhs_;
   };
@@ -2816,8 +2975,10 @@ class SinkBackend {
 
   //! \brief Dispatch a record.
   void Dispatch(memory::BasicMemoryBuffer<char> &buffer, const Record &record) {
+    preMessage();
     dispatch(buffer, record);
-    if (flush_handler_ && flush_handler_->DoFlush(record)) {
+    postMessage();
+    if (auto_flush_ || (flush_handler_ && flush_handler_->DoFlush(record))) {
       Flush();
     }
   }
@@ -2830,6 +2991,7 @@ class SinkBackend {
 
   //! \brief Get the sink formatting settings.
   NO_DISCARD const FormattingSettings &GetFormattingSettings() const { return settings_; }
+  NO_DISCARD FormattingSettings &GetFormattingSettings() { return settings_; }
 
   template <typename FlushHandler_t, typename... Args_t>
   SinkBackend &CreateFlushHandler(Args_t &&... args) {
@@ -2847,11 +3009,30 @@ class SinkBackend {
     return *this;
   }
 
+  SinkBackend &SetAutoFlush(bool auto_flush) {
+    auto_flush_ = auto_flush;
+    return *this;
+  }
+
+  NO_DISCARD virtual std::unique_ptr<SinkBackend> Clone() const = 0;
+
+  void CopySettings(const SinkBackend &other) {
+    settings_ = other.settings_;
+    flush_handler_ = other.flush_handler_;
+    auto_flush_ = other.auto_flush_;
+  }
  protected:
   virtual void dispatch(memory::BasicMemoryBuffer<char> &buffer, const Record &record) = 0;
 
   //! \brief Protected implementation of flushing the sink.
   virtual void flush() {}
+
+  std::optional<flush::FlushHandler> copyFlushHandler() const {
+    return flush_handler_ ? std::optional(flush_handler_->Clone()) : std::nullopt;
+  }
+
+  virtual void preMessage() {}
+  virtual void postMessage() {}
 
   //! \brief The sink formatting settings.
   FormattingSettings settings_;
@@ -2892,6 +3073,18 @@ class Sink {
   //! \brief Get the record formatter.
   formatting::BaseMessageFormatter &GetFormatter() { return *formatter_; }
 
+  //! \brief Set the severity filter.
+  Sink &SetFilter(SeveritySet severity_set) {
+    filter_.Accept(severity_set);
+    return *this;
+  }
+
+  //! \brief Set the filter back to default.
+  Sink &ClearFilters() {
+    filter_ = filter::AttributeFilter{};
+    return *this;
+  }
+
   //! \brief Set the sink's formatter.
   Sink& SetFormatter(std::unique_ptr<formatting::BaseMessageFormatter> &&formatter) {
     formatter_ = std::move(formatter);
@@ -2907,8 +3100,25 @@ class Sink {
   //! \brief Get the sink backend.
   SinkBackend &GetBackend() { return *sink_backend_; }
 
+  //! \brief Get the sink backend, cast to a specific type.
+  //!
+  //! returns nullptr if the type was not correct.
+  template <typename SinkBackend_t>
+  SinkBackend_t *GetBackendAs() {
+    return dynamic_cast<SinkBackend_t *>(sink_backend_.get());
+  }
+
+  std::shared_ptr<Sink> Clone() const {
+    auto sink = clone();
+    sink->filter_ = filter_;
+    sink->formatter_ = formatter_->Copy();
+    return sink;
+  }
+
  protected:
   virtual void dispatch(const Record &record) = 0;
+
+  virtual std::shared_ptr<Sink> clone() const = 0;
 
   //! \brief The sink backend, to which the frontend feeds record.
   std::unique_ptr<SinkBackend> sink_backend_{};
@@ -2918,9 +3128,6 @@ class Sink {
 
   //! \brief The sink's formatter.
   std::unique_ptr<formatting::BaseMessageFormatter> formatter_;
-
-  //! \brief An optional flush handler, which determines whether the sink should be flushed based on the record.
-  std::optional<flush::FlushHandler> flush_handler_{};
 };
 
 //! \brief  Sink frontend that uses no synchronization methods.
@@ -2941,6 +3148,8 @@ class UnlockedSink : public Sink {
     formatter_->Format(record, sink_backend_->GetFormattingSettings(), buffer);
     sink_backend_->Dispatch(buffer, record);
   }
+
+  std::shared_ptr<Sink> clone() const override { return std::make_shared<UnlockedSink>(sink_backend_->Clone()); }
 };
 
 //! \brief  Sink frontend that uses a mutex to control access.
@@ -2964,6 +3173,8 @@ class SynchronousSink : public Sink {
       sink_backend_->Dispatch(buffer, record);
     }
   }
+
+  NO_DISCARD std::shared_ptr<Sink> clone() const override { return std::make_shared<SynchronousSink>(sink_backend_->Clone()); }
 
   std::mutex lock_;
 };
@@ -3018,6 +3229,9 @@ class Core {
     return *this;
   }
 
+  //! \brief Get the number of sinks the core points at.
+  NO_DISCARD std::size_t GetNumSinks() const { return sinks_.size(); }
+
   //! \brief Set the formatter for every sink the core points at.
   Core &SetAllFormatters(const formatting::BaseMessageFormatter &formatter) {
     for (const auto &sink : sinks_) {
@@ -3026,21 +3240,50 @@ class Core {
     return *this;
   }
 
+  //! \brief Set the formatter for every sink the core points at.
+  Core &SetAllFormatters(const std::unique_ptr<formatting::BaseMessageFormatter> &formatter) {
+    return SetAllFormatters(*formatter);
+  }
+
   //! \brief Get the core level filter.
   filter::AttributeFilter &GetFilter() { return core_filter_; }
 
+  //! \brief Reset the core's filters.
+  Core &ClearFilters() {
+    core_filter_.Clear();
+    return *this;
+  }
+
+  //! \brief Get the vector of all sinks.
   NO_DISCARD const std::vector<std::shared_ptr<Sink>> &GetSinks() const { return sinks_; }
 
-  // TODO: Unit test.
-  template <typename Func>
-  Core &ApplyToAllSink(Func &&func) {
-    std::for_each(sinks_.begin(), sinks_.end(), [f = std::forward<Func>(func)](auto &sink) { f(*sink); });
+  //! \brief Apply a function to all sinks.
+  template <typename Func_t>
+  Core &ApplyToAllSink(Func_t &&func) {
+    std::for_each(sinks_.begin(), sinks_.end(), [f = std::forward<Func_t>(func)](auto &sink) { f(*sink); });
+    return *this;
+  }
+
+  //! \brief Remove all sinks from the core.
+  Core &ClearSinks() {
+    sinks_.clear();
     return *this;
   }
 
   //! \brief Flush all sinks.
-  void Flush() const {
+  const Core &Flush() const {
     std::for_each(sinks_.begin(), sinks_.end(), [](auto &sink) { sink->Flush(); });
+    return *this;
+  }
+
+  //! \brief Make a deep copy of the core, including deep copies of all sinks.
+  std::shared_ptr<Core> Clone() const {
+    auto core = std::make_shared<Core>();
+    core->core_filter_ = core_filter_;
+    for (const auto &sink : sinks_) {
+      core->sinks_.emplace_back(sink->Clone());
+    }
+    return core;
   }
 
  private:
@@ -3133,9 +3376,10 @@ class Logger {
   template <typename... Attrs_t>
   RecordDispatcher LogWithLocation(std::optional<Severity> severity,
                                    const char *file_name,
+                                   const char *function_name,
                                    unsigned line_number,
-                                   Attrs_t &&... attrs) {
-    return Log(BasicAttributes(severity, file_name, line_number), attrs...);
+                                   Attrs_t &&... attrs) const {
+    return Log(BasicAttributes(severity, file_name, function_name, line_number), attrs...);
   }
 
   NO_DISCARD bool WillAccept(std::optional<Severity> severity) const {
@@ -3145,6 +3389,8 @@ class Logger {
   }
 
   NO_DISCARD const std::shared_ptr<Core> &GetCore() const { return core_; }
+
+  NO_DISCARD bool HasCore() const { return static_cast<bool>(core_); }
 
   Logger &SetCore(std::shared_ptr<Core> core) {
     core_ = std::move(core);
@@ -3165,6 +3411,46 @@ class Logger {
   void Flush() const {
     if (core_)
       core_->Flush();
+  }
+
+  //! \brief Get all sinks that have the specified type of backend.
+  template <typename SinkBackend_t>
+  std::vector<std::pair<Sink *, SinkBackend_t *>> GetSinks() const {
+    if (!HasCore()) {
+      return {};
+    }
+    std::vector<std::pair<Sink *, SinkBackend_t *>> output;
+    for (auto &sink : GetCore()->GetSinks()) {
+      if (auto back_ptr = dynamic_cast<SinkBackend_t *>(&sink->GetBackend())) {
+        output.emplace_back(sink.get(), back_ptr);
+      }
+    }
+    return output;
+  }
+
+  //! \brief Map a function on every sink of the specified type that is in the logger's core.
+  template <typename SinkBackend_t, typename Func_t>
+  void MapOnSinks(Func_t &&func) const {
+    auto &&sinks = GetSinks<SinkBackend_t>();
+    for (auto &sink : sinks) {
+      if (auto back_ptr = dynamic_cast<SinkBackend_t *>(&sink->GetBackend())) {
+        func(*sink, *back_ptr);
+      }
+    }
+  }
+
+  //! \brief Set the formatters of all sinks in the logger's core.
+  //!
+  //! Warning: this may be ill-advised if many loggers share the same core.
+  void SetAllFormats(const std::unique_ptr<formatting::BaseMessageFormatter> &formatter) const {
+    if (auto core = GetCore()) {
+      core->SetAllFormatters(*formatter);
+    }
+  }
+  void SetAllFormats(const formatting::BaseMessageFormatter &formatter) const {
+    if (auto core = GetCore()) {
+      core->SetAllFormatters(formatter);
+    }
   }
 
  private:
@@ -3189,6 +3475,7 @@ class EmptySink : public SinkBackend {
  public:
   EmptySink() { settings_.needs_formatting = false; }
 
+  std::unique_ptr<SinkBackend> Clone() const override { return std::make_unique<EmptySink>(); }
  private:
   void dispatch(memory::BasicMemoryBuffer<char> &, const Record &) override {}
 };
@@ -3197,6 +3484,9 @@ class EmptySink : public SinkBackend {
 //!
 //! Primarily for timing and testing.
 class TrivialDispatchSink : public SinkBackend {
+ public:
+  std::unique_ptr<SinkBackend> Clone() const override { return std::make_unique<TrivialDispatchSink>(); }
+ private:
   void dispatch([[maybe_unused]] memory::BasicMemoryBuffer<char> &buffer,
                 [[maybe_unused]] const Record &record) override {}
 };
@@ -3205,10 +3495,11 @@ class TrivialDispatchSink : public SinkBackend {
 class FileSink : public SinkBackend {
  public:
   explicit FileSink(const std::string &file)
-      : fout_(file) {}
+      : fout_(file), filename_(file) {}
 
   ~FileSink() override { fout_.flush(); }
 
+  std::unique_ptr<SinkBackend> Clone() const override { return std::make_unique<FileSink>(filename_); }
  private:
   void dispatch([[maybe_unused]] memory::BasicMemoryBuffer<char> &buffer,
                 [[maybe_unused]] const Record &record) override {
@@ -3220,6 +3511,7 @@ class FileSink : public SinkBackend {
   void flush() override { fout_.flush(); }
 
   std::ofstream fout_;
+  std::string filename_;
 };
 
 //! \brief A sink that writes to any ostream.
@@ -3238,6 +3530,7 @@ class OstreamSink : public SinkBackend {
     settings_.has_virtual_terminal_processing = true; // Default this to true
   }
 
+  std::unique_ptr<SinkBackend> Clone() const override { return std::make_unique<OstreamSink>(); }
  private:
   void dispatch([[maybe_unused]] memory::BasicMemoryBuffer<char> &buffer,
                 [[maybe_unused]] const Record &record) override {
@@ -3296,7 +3589,7 @@ class Global {
 //! If it will be, creates a handler, constructing the record in-place inside the handler.
 #define LOG_SEV_TO(logger, severity) \
   if ((logger).WillAccept(::lightning::Severity::severity)) \
-    if (auto handler = (logger).LogWithLocation(::lightning::Severity::severity, __FILE__, __LINE__)) \
+    if (auto handler = (logger).LogWithLocation(::lightning::Severity::severity, __FILE__, LL_CURRENT_FUNCTION, __LINE__)) \
   handler.GetRecord().Bundle()
 
 //! \brief Log with a severity attribute to the global logger.
@@ -3304,7 +3597,7 @@ class Global {
 
 #define LOG_TO(logger) \
   if ((logger).WillAccept(::std::nullopt)) \
-    if (auto handler = (logger).LogWithLocation(::std::nullopt, __FILE__, __LINE__)) \
+    if (auto handler = (logger).LogWithLocation(::std::nullopt, __FILE__, LL_CURRENT_FUNCTION, __LINE__)) \
   handler.GetRecord().Bundle()
 
 #define LOG() LOG_TO(::lightning::Global::GetLogger())

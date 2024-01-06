@@ -15,33 +15,33 @@ TEST(HybridVector, Basic) {
 
   memory::HybridVector<int, 3> hvector{};
 
-  EXPECT_EQ(hvector.Size(), 0);
+  EXPECT_EQ(hvector.Size(), 0u);
   EXPECT_TRUE(hvector.Empty());
 
   hvector.PushBack(1);
-  EXPECT_EQ(hvector.Size(), 1);
-  EXPECT_EQ(hvector.HeapSize(), 0);
+  EXPECT_EQ(hvector.Size(), 1u);
+  EXPECT_EQ(hvector.HeapSize(), 0u);
   EXPECT_FALSE(hvector.Empty());
   EXPECT_EQ(hvector[0], 1);
   EXPECT_EQ(hvector.Back(), 1);
 
   hvector.PushBack(3);
-  EXPECT_EQ(hvector.Size(), 2);
-  EXPECT_EQ(hvector.HeapSize(), 0);
+  EXPECT_EQ(hvector.Size(), 2u);
+  EXPECT_EQ(hvector.HeapSize(), 0u);
   EXPECT_FALSE(hvector.Empty());
   EXPECT_EQ(hvector[1], 3);
   EXPECT_EQ(hvector.Back(), 3);
 
   hvector.PushBack(5);
-  EXPECT_EQ(hvector.Size(), 3);
-  EXPECT_EQ(hvector.HeapSize(), 0);
+  EXPECT_EQ(hvector.Size(), 3u);
+  EXPECT_EQ(hvector.HeapSize(), 0u);
   EXPECT_FALSE(hvector.Empty());
   EXPECT_EQ(hvector[2], 5);
   EXPECT_EQ(hvector.Back(), 5);
 
   hvector.PushBack(7);
-  EXPECT_EQ(hvector.Size(), 4);
-  EXPECT_EQ(hvector.HeapSize(), 1);
+  EXPECT_EQ(hvector.Size(), 4u);
+  EXPECT_EQ(hvector.HeapSize(), 1u);
   EXPECT_FALSE(hvector.Empty());
   EXPECT_EQ(hvector[3], 7);
   EXPECT_EQ(hvector.Back(), 7);

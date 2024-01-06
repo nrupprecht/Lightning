@@ -126,7 +126,7 @@ int main() {
 
 void bench_st(int howmany) {
   { // Benchmark using MsgFormatter
-    auto fs = UnlockedSink::From<FileSink>("logs/greased_lightning_basic_st.log");
+    auto fs = UnlockedSink::From<FileSink>("logs/lightning_basic_st.log");
     Logger logger(fs);
     logger.SetName("basic_st/backtrace-off");
     fs->SetFormatter(MakeMsgFormatter("[{}] [{}] [{}] {}",
@@ -145,7 +145,7 @@ void bench_st(int howmany) {
   }
 
   { // Benchmark using just an ofstream
-    std::ofstream fout("logs/greased_lightning_basic_st-ofstream.log");
+    std::ofstream fout("logs/lightning_basic_st-ofstream.log");
 
     auto start = high_resolution_clock::now();
     for (auto i = 0; i < howmany; ++i) {
@@ -194,7 +194,7 @@ void bench_st(int howmany) {
 
 void bench_st_types(int howmany) {
   auto make_logger = []() {
-    auto fs = UnlockedSink::From<FileSink>("logs/greased_lightning_basic_st-types.log");
+    auto fs = UnlockedSink::From<FileSink>("logs/lightning_basic_st-types.log");
     Logger logger(fs);
     logger.SetName("basic_st/backtrace-off");
     fs->SetFormatter(MakeMsgFormatter("[{}] [{}] [{}] {}",
@@ -348,7 +348,7 @@ void bench_st_types(int howmany) {
 
 void bench_nonaccepting(int howmany) {
   {
-    auto fs = UnlockedSink::From<FileSink>("logs/greased_lightning_basic_st_nonaccepting.log");
+    auto fs = UnlockedSink::From<FileSink>("logs/lightning_basic_st_nonaccepting.log");
     fs->GetFilter().Accept({Severity::Error});
     Logger logger(fs);
     logger.SetName("basic_st/backtrace-off");
@@ -366,7 +366,7 @@ void bench_nonaccepting(int howmany) {
     AddRow("Non-accepting sink", delta_d, howmany);
   }
   {
-    auto fs = UnlockedSink::From<FileSink>("logs/greased_lightning_basic_st_nonaccepting.log");
+    auto fs = UnlockedSink::From<FileSink>("logs/lightning_basic_st_nonaccepting.log");
     Logger logger(fs);
     logger.GetCore()->GetFilter().Accept({Severity::Error});
     logger.SetName("basic_st/backtrace-off");
@@ -387,7 +387,7 @@ void bench_nonaccepting(int howmany) {
 
 void bench_mt(int howmany, std::size_t thread_count) {
   {
-    auto fs = UnlockedSink::From<FileSink>("logs/greased_lightning_basic_mt.log");
+    auto fs = UnlockedSink::From<FileSink>("logs/lightning_basic_mt.log");
     Logger logger(fs);
     logger.SetName("basic_mt/backtrace-off");
     fs->SetFormatter(formatting::MakeMsgFormatter("[{}] [{}] [{}] {}",
@@ -415,7 +415,7 @@ void bench_mt(int howmany, std::size_t thread_count) {
     AddRow("One logger, multiple threads", delta_d, howmany);
   }
   {
-    auto fs = UnlockedSink::From<FileSink>("logs/greased_lightning_basic_mt_multiple_logger.log");
+    auto fs = UnlockedSink::From<FileSink>("logs/lightning_basic_mt_multiple_logger.log");
     fs->SetFormatter(formatting::MakeMsgFormatter("[{}] [{}] [{}] {}",
                                                   formatting::DateTimeAttributeFormatter{},
                                                   formatting::LoggerNameAttributeFormatter{},

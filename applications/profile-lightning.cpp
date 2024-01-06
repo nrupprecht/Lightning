@@ -136,7 +136,7 @@ void bench_st(int howmany) {
   std::size_t count = 0;
 
   auto make_sink = [&count]() {
-    std::string file_name = "logs/greased_lightning_basic_st-" + std::to_string(count) + ".log";
+    std::string file_name = "logs/lightning_basic_st-" + std::to_string(count) + ".log";
     return std::pair{NewSink<UnlockedSink, FileSink>(file_name), file_name};
   };
 
@@ -295,10 +295,33 @@ void bench_st(int howmany) {
                   << " secs " << formatting::Format("{:L}/sec", static_cast<int>(howmany / delta_d));
   }
 
+  {  // Benchmark using MsgFormatter and log the file name, function name, and line number
+    ++count;
+    auto [fs, file_name] = make_sink();
+    Logger logger(fs);
+    logger.SetName("basic_st/backtrace-off");
+    fs->SetFormatter(MakeMsgFormatter("[{}] [{}:{}] [{}] [{}] [{}] {}",
+                                      formatting::DateTimeAttributeFormatter{},
+                                      formatting::FileNameAttributeFormatter{false},
+                                      formatting::FileLineAttributeFormatter{},
+                                      formatting::FunctionNameAttributeFormatter{},
+                                      formatting::LoggerNameAttributeFormatter{},
+                                      formatting::SeverityAttributeFormatter{},
+                                      formatting::MSG));
+
+    auto start = high_resolution_clock::now();
+    for (auto i = 0; i < howmany; ++i) {
+      LOG_SEV_TO(logger, Info) << "Hello logger: msg number " << i;
+    }
+    auto delta_d = duration_cast<duration<double>>(high_resolution_clock::now() - start).count();
+    LOG_SEV(Info) << "MsgFormatter, file, function, and line:" << PadUntil(pad_width) << "Elapsed: " << delta_d
+                  << " secs " << formatting::Format("{:L}/sec", static_cast<int>(howmany / delta_d));
+  }
+
   {
     ++count;
     auto fs =
-        SynchronousSink::From<FileSink>("logs/greased_lightning_basic_st-" + std::to_string(count)
+        SynchronousSink::From<FileSink>("logs/lightning_basic_st-" + std::to_string(count)
                                         + ".log");
     Logger logger(fs);
     logger.SetName("synchronous-sink-logger");
@@ -370,7 +393,7 @@ void bench_st(int howmany) {
   }
 
   {  // Benchmark using just an ofstream
-    std::ofstream fout("logs/greased_lightning_basic_st-ofstream.log");
+    std::ofstream fout("logs/lightning_basic_st-ofstream.log");
 
     auto start = high_resolution_clock::now();
     for (auto i = 0; i < howmany; ++i) {
@@ -421,7 +444,7 @@ void bench_st(int howmany) {
   }
 
   {  // Benchmark using MsgFormatter, not really formatting.
-    std::string file_name = "logs/greased_lightning_basic_st-nonformatting.log";
+    std::string file_name = "logs/lightning_basic_st-nonformatting.log";
     auto fs = NewSink<UnlockedSink, FileSink>(file_name);
     Logger logger(fs);
     fs->SetFormatter(MakeMsgFormatter(
@@ -438,7 +461,7 @@ void bench_st(int howmany) {
   }
 
   {  // Benchmark using MsgFormatter, not really formatting.
-    std::string file_name = "logs/greased_lightning_basic_st-format-date.log";
+    std::string file_name = "logs/lightning_basic_st-format-date.log";
     auto fs = NewSink<UnlockedSink, FileSink>(file_name);
     Logger logger(fs);
     fs->SetFormatter(MakeMsgFormatter("[{}] [basic_st/backtrace-off] [Info   ] {}",
@@ -457,7 +480,7 @@ void bench_st(int howmany) {
 
 void bench_st_types(int howmany) {
   auto make_logger = []() {
-    auto fs = NewSink<UnlockedSink, FileSink>("logs/greased_lightning_basic_st-types.log");
+    auto fs = NewSink<UnlockedSink, FileSink>("logs/lightning_basic_st-types.log");
     Logger logger(fs);
     logger.SetName("basic_st/backtrace-off");
     fs->SetFormatter(MakeMsgFormatter("[{}] [{}] [{}] {}",
@@ -639,7 +662,7 @@ void bench_st_types(int howmany) {
 
 void bench_nonaccepting(int howmany) {
   {
-    auto fs = NewSink<UnlockedSink, FileSink>("logs/greased_lightning_basic_st_nonaccepting.log");
+    auto fs = NewSink<UnlockedSink, FileSink>("logs/lightning_basic_st_nonaccepting.log");
     fs->GetFilter().Accept({Severity::Error});
     Logger logger(fs);
     logger.SetName("basic_st/backtrace-off");
@@ -659,7 +682,7 @@ void bench_nonaccepting(int howmany) {
                   << formatting::Format("{:L}/sec", static_cast<int>(howmany / delta_d));
   }
   {
-    auto fs = NewSink<UnlockedSink, FileSink>("logs/greased_lightning_basic_st_nonaccepting.log");
+    auto fs = NewSink<UnlockedSink, FileSink>("logs/lightning_basic_st_nonaccepting.log");
     Logger logger(fs);
     logger.GetCore()->GetFilter().Accept({Severity::Error});
     logger.SetName("basic_st/backtrace-off");
@@ -679,7 +702,7 @@ void bench_nonaccepting(int howmany) {
                   << formatting::Format("{:L}/sec", static_cast<int>(howmany / delta_d));
   }
   {
-    auto fs = NewSink<UnlockedSink, FileSink>("logs/greased_lightning_basic_st_nocore.log");
+    auto fs = NewSink<UnlockedSink, FileSink>("logs/lightning_basic_st_nocore.log");
     Logger logger(NoCore);
     logger.SetName("basic_st/backtrace-off");
     fs->SetFormatter(MakeMsgFormatter("[{}] [{}] [{}] {}",
@@ -815,6 +838,7 @@ void bench_segments(int howmany) {
     memory::MemoryBuffer<char> buffer;
     auto start = high_resolution_clock::now();
     for (auto i = 0; i < howmany; ++i) {
+      buffer.Clear();
       severity_formatter.AddToBuffer(attributes, settings, msg_info, buffer);
     }
     auto delta_d = duration_cast<duration<double>>(high_resolution_clock::now() - start).count();
@@ -828,6 +852,7 @@ void bench_segments(int howmany) {
     Segment<int> segment(4869244);
     auto start = high_resolution_clock::now();
     for (auto i = 0; i < howmany; ++i) {
+      buffer.Clear();
       segment.AddToBuffer(settings, msg_info, buffer);
     }
     auto delta_d = duration_cast<duration<double>>(high_resolution_clock::now() - start).count();
@@ -841,6 +866,7 @@ void bench_segments(int howmany) {
     Segment<int> segment(4869244);
     auto start = high_resolution_clock::now();
     for (auto i = 0; i < howmany; ++i) {
+      buffer.Clear();
       segment.AddToBuffer(settings, msg_info, buffer, "L");
     }
     auto delta_d = duration_cast<duration<double>>(high_resolution_clock::now() - start).count();
@@ -855,6 +881,7 @@ void bench_segments(int howmany) {
 
     auto start = high_resolution_clock::now();
     for (auto i = 0; i < howmany; ++i) {
+      buffer.Clear();
       segment.AddToBuffer(settings, msg_info, buffer);
     }
     auto delta_d = duration_cast<duration<double>>(high_resolution_clock::now() - start).count();
@@ -892,24 +919,25 @@ void bench_fmtdatetime(int howmany) {
     memory::MemoryBuffer<char> buffer;
     auto start = high_resolution_clock::now();
     for (auto i = 0; i < howmany; ++i) {
-//      formatting::FormatTo(buffer, settings,
-//                           "{}-{}-{} {}:{}:{}.{}",
-//                           x.GetYear(),
-//                           x.GetMonthInt(),
-//                           x.GetDay(),
-//                           x.GetHour(),
-//                           x.GetMinute(),
-//                           x.GetSecond(),
-//                           x.GetMicrosecond());
+      buffer.Clear();
       formatting::FormatTo(buffer, settings,
                            "{}-{}-{} {}:{}:{}.{}",
-                           2023,
-                           1,
-                           3,
-                           12,
-                           34,
-                           12,
-                           34'567);
+                           x.GetYear(),
+                           x.GetMonthInt(),
+                           x.GetDay(),
+                           x.GetHour(),
+                           x.GetMinute(),
+                           x.GetSecond(),
+                           x.GetMicrosecond());
+//      formatting::FormatTo(buffer, settings,
+//                           "{}-{}-{} {}:{}:{}.{}",
+//                           2023,
+//                           1,
+//                           3,
+//                           12,
+//                           34,
+//                           12,
+//                           34'567);
     }
     auto delta_d = duration_cast<duration<double>>(high_resolution_clock::now() - start).count();
     LOG_SEV(Info) << "Format date (FormatTo):" << PadUntil(pad_width) << "Elapsed: " << delta_d << " secs "
@@ -932,7 +960,7 @@ void bench_fmtdatetime(int howmany) {
 
 void bench_mt(int howmany, std::size_t thread_count) {
   {
-    auto fs = SynchronousSink::From<FileSink>("logs/greased_lightning_basic_mt.log");
+    auto fs = SynchronousSink::From<FileSink>("logs/lightning_basic_mt.log");
     Logger logger(fs);
     fs->SetFormatter(formatting::MakeMsgFormatter("[{}] [basic_mt/backtrace-off] [{}] {}",
                                                   formatting::DateTimeAttributeFormatter{},
@@ -959,7 +987,7 @@ void bench_mt(int howmany, std::size_t thread_count) {
                   << formatting::Format("{:L}/sec", static_cast<int>(howmany / delta_d));
   }
   {
-    auto fs = SynchronousSink::From<FileSink>("logs/greased_lightning_basic_mt_multiple_logger.log");
+    auto fs = SynchronousSink::From<FileSink>("logs/lightning_basic_mt_multiple_logger.log");
     fs->SetFormatter(formatting::MakeMsgFormatter("[{}] [{}] [{}] {}",
                                                   formatting::DateTimeAttributeFormatter{},
                                                   formatting::LoggerNameAttributeFormatter{},
@@ -1002,7 +1030,7 @@ void bench_mt(int howmany, std::size_t thread_count) {
       threads.emplace_back([&, t]() {
         // Since each thread gets its own logger, we can use unlocked sinks.
         auto fs =
-            UnlockedSink::From<FileSink>("logs/greased_lightning_basic_mt_mt_" + std::to_string(t) + ".log");
+            UnlockedSink::From<FileSink>("logs/lightning_basic_mt_mt_" + std::to_string(t) + ".log");
         fs->SetFormatter(formatter->Copy());
         Logger logger(fs);
         logger.SetName("basic_mt/logger-" + std::to_string(t));
