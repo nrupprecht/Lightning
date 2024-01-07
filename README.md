@@ -240,6 +240,8 @@ extensive profiling (that doesn't generate
 markdown tables)
 in [applications/profile-lightning.cpp](applications/profile-lightning.cpp).
 
+Profiling done on a 2019 MacBook Pro, Apple M1 Pro, 10 core, 16GB memory.
+
 ******************************************************************************************
 
 Single threaded: 250,000 messages
