@@ -220,6 +220,7 @@ inline void current_function_helper() {
 }
 
 } // namespace detail
+// NOTE: End of code from boost.
 
 
 //! \brief Convenient base class for pImpl type objects. Note that here, we use PImpl to give value semantics to objects
@@ -265,22 +266,25 @@ class BasicMemoryBuffer {
 
   virtual ~BasicMemoryBuffer() = default;
 
-  NO_DISCARD T *Data() {
-    return data_;
-  }
+  //! \brief Returns a pointer to the beginning of the current buffer.
+  //!
+  //! NOTE that this is not *guaranteed* to be the beginning of all the data loaded into the buffer, allowing for cases
+  //! where the buffer flushes to some other storage periodically. It is, however, the beginning of the current buffer.
+  NO_DISCARD T *Data() { return data_; }
+  NO_DISCARD const T *Data() const { return data_; }
 
-  NO_DISCARD const T *Data() const {
-    return data_;
-  }
+  //! \brief Returns a pointer to the end (one past the last element) of the buffer.
+  NO_DISCARD const T *End() const { return data_ + size_; }
+  NO_DISCARD T *End() { return data_ + size_; }
 
-  NO_DISCARD const T *End() const {
-    return data_ + size_;
-  }
+  //! \brief begin() function, for compatibility with range-based for loops.
+  NO_DISCARD const T *begin() const { return data_; }
+  NO_DISCARD T *begin() { return data_; }
+  //! \brief end() function, for compatibility with range-based for loops.
+  NO_DISCARD const T *end() const { return data_ + size_; }
+  NO_DISCARD T *end() { return data_ + size_; }
 
-  NO_DISCARD T *End() {
-    return data_ + size_;
-  }
-
+  //! \brief Add an element to the buffer, first resizing if necessary.
   void PushBack(const T &value) {
     reserve(size_ + 1);
     data_[size_] = value;
@@ -295,6 +299,7 @@ class BasicMemoryBuffer {
     increaseSize(static_cast<std::size_t>(count));
   }
 
+  //! \brief Append n_copies copies of an object to the buffer.
   void AppendN(const T &object, std::size_t n_copies) {
     reserve(size_ + n_copies);
     std::uninitialized_fill_n(data_ + size_, n_copies, object);
@@ -303,7 +308,7 @@ class BasicMemoryBuffer {
 
   //! \brief Clear the buffer, resetting the size to zero.
   //!
-  //! How tmemory is managed is implementation dependent, but by default, we set the size to zero and normalize.
+  //! How memory is managed is implementation dependent, but by default, we set the size to zero and normalize.
   virtual void Clear() {
     size_ = 0;
     normalize();
@@ -323,8 +328,8 @@ class BasicMemoryBuffer {
     reserve(size_ + additional);
   }
 
-  //! \brief Allocate an additional chunk of storage and return pointers to the beginning and (element after)
-  //! end of the chunk.
+  //! \brief Allocate an additional chunk of storage and return pointers to the beginning and end (element after last
+  //! valid element) of the chunk.
   std::pair<T *, T *> Allocate(std::size_t additional) {
     reserve(size_ + additional);
     auto begin = End();
@@ -338,16 +343,20 @@ class BasicMemoryBuffer {
     return std::string(Data(), End());
   }
 
+  //! \brief If the storage type is char, return a string_view of the data.
   template <LL_ENABLE_IF(std::is_same_v<T, char>)>
   NO_DISCARD std::string_view ToView() const {
     return std::string_view(Data(), Size());
   }
 
  protected:
+  //! \brief Make sure the capacity is at least as much as new_capacity.
   void reserve(std::size_t new_capacity) {
     // Note: only makes a virtual call if the capacity is too small.
-    if (capacity_ < new_capacity) {
-      allocate(new_capacity);
+    // Note: If normalization is needed we always need at least one more element, for the null terminator.
+    auto normalization_capacity = needs_normalization_ ? new_capacity + 1 : new_capacity;
+    if (capacity_ < normalization_capacity) {
+      allocate(normalization_capacity);
     }
   }
 
@@ -359,6 +368,7 @@ class BasicMemoryBuffer {
     // If the data type is char, we want the buffer to act like a c-style string, so we need to null terminate.
     if constexpr (std::is_same_v<T, char>) {
       if (needs_normalization_) {
+        // If normalization is true, we always make sure that we have capacity of at least size + 1, so this is valid.
         data_[size_] = '\0';
       }
     }
@@ -370,16 +380,14 @@ class BasicMemoryBuffer {
     normalize();
   }
 
-  //! \brief How much space is needed in the buffer by the
-  constexpr static std::size_t reserved_space = std::is_same_v<T, char> ? 1 : 0;
-
   //! \brief Pointer to the data that is being used.
   T *data_{};
   //! \brief The current size of the data stored in the buffer (number of entries).
   std::size_t size_{};
   //! \brief The current capacity of the buffer.
   std::size_t capacity_{};
-  //! \brief Whether the buffer needs to be normalized.
+  //! \brief Whether the buffer needs to be "normalized." This means, we need to add a null terminator if the
+  //! data type is char, making the buffer compatible with c-style string functions.
   const bool needs_normalization_ = true;
 };
 
@@ -394,9 +402,8 @@ class MemoryBuffer final : public BasicMemoryBuffer<T> {
     this->capacity_ = stack_size_v;
   }
 
-  ~MemoryBuffer() override {
-    deallocate();
-  }
+  //! \brief Clean up by deallocating any heap memory.
+  ~MemoryBuffer() override { deallocate(); }
 
  private:
   void allocate(std::size_t size) override {
@@ -429,6 +436,7 @@ class StringMemoryBuffer final : public BasicMemoryBuffer<char> {
     allocateBuffer(initial_capacity);
   }
 
+  //! \brief Move the string buffer out of the memory buffer.
   std::string &&MoveString() {
     buffer_.resize(size_);
     data_ = nullptr;
@@ -450,6 +458,7 @@ class StringMemoryBuffer final : public BasicMemoryBuffer<char> {
     data_ = buffer_.data();
   }
 
+  //! \brief The internal string buffer.
   std::string buffer_{};
 };
 
@@ -491,6 +500,7 @@ inline void AppendBuffer(BasicMemoryBuffer<char> &buffer, const char *start, con
 template <typename T, std::size_t stack_size_v>
 class HybridVector {
  public:
+  //! \brief Move an element onto the back of the hybrid vector.
   void PushBack(T &&x) {
     if (stack_size_ == stack_size_v) {
       heap_buffer_.push_back(std::move(x));
@@ -500,6 +510,7 @@ class HybridVector {
     }
   }
 
+  //! \brief Construct an element on the back of the hybrid vector.
   template <typename... Args_t>
   void EmplaceBack(Args_t &&... args) {
     if (stack_size_ == stack_size_v) {
@@ -511,6 +522,7 @@ class HybridVector {
     }
   }
 
+  //! \brief Get a reference to the last element in the hybrid vector.
   T &Back() {
     if (!heap_buffer_.empty()) {
       return heap_buffer_.back();
@@ -520,6 +532,7 @@ class HybridVector {
     }
   }
 
+  //! \brief Access the index'th element of the hybrid vector.
   T &operator[](std::size_t index) {
     if (index < stack_size_v) {
       return stack_buffer_[index];
@@ -534,15 +547,21 @@ class HybridVector {
     return heap_buffer_[index - stack_size_v];
   }
 
+  //! \brief Get the total size (stack and heap) of the hybrid vector.
   NO_DISCARD std::size_t Size() const { return stack_size_ + heap_buffer_.size(); }
 
+  //! \brief Get the heap size of the hybrid vector.
   NO_DISCARD std::size_t HeapSize() const { return heap_buffer_.size(); }
 
+  //! \brief Check whether the hybrid vector is empty.
   NO_DISCARD bool Empty() const { return stack_size_ == 0; }
 
  private:
+  //! \brief Stack storage space.
   T stack_buffer_[stack_size_v];
+  //! \brief Regular vector, for the remaining storage.
   std::vector<T> heap_buffer_;
+  //! \brief The utilized size of the stack storage.
   std::size_t stack_size_{};
 };
 
@@ -551,6 +570,7 @@ inline std::string_view MakeStringView(const char *begin, const char *end) {
   LL_REQUIRE(begin <= end, "begin must not be after end")
   return {begin, static_cast<std::size_t>(std::distance(begin, end))};
 }
+
 } // namespace memory
 
 // ==============================================================================
@@ -558,6 +578,7 @@ inline std::string_view MakeStringView(const char *begin, const char *end) {
 // ==============================================================================
 
 namespace time {
+
 //! \brief Compute whether a year is a leap year.
 //!
 inline bool IsLeapYear(int year) {
@@ -584,19 +605,23 @@ inline int DaysInMonth(int month, int year) {
   return IsLeapYear(year) ? 29 : 28;
 }
 
+//! \brief Enumeration for the months of the year.
+//!
+//! Starting january as 1 is enough to make the others 2 - 12, but to be explicit that this numbering is important (we
+//! use it in functions, casting month to int), we set them all.
 enum class Month {
   January = 1,
-  February,
-  March,
-  April,
-  May,
-  June,
-  July,
-  August,
-  September,
-  October,
-  November,
-  December
+  February = 2,
+  March = 3,
+  April = 4,
+  May = 5,
+  June = 6,
+  July = 7,
+  August = 8,
+  September = 9,
+  October = 10,
+  November = 11,
+  December = 12
 };
 
 inline const char *MonthAbbreviation(Month m) {
@@ -660,7 +685,6 @@ class DateTime {
     //    std::tm* now = std::localtime(&t);
     localtime_r(&t, &now);
 #endif
-
     setYMD(now.tm_year + 1900, now.tm_mon + 1, now.tm_mday, false);
     setHMSUS(now.tm_hour, now.tm_min, now.tm_sec, ms, false);
   }
@@ -668,30 +692,34 @@ class DateTime {
   explicit DateTime(int yyyymmdd)
       : DateTime(yyyymmdd / 10000, (yyyymmdd / 100) % 100, yyyymmdd % 100) {}
 
+  //! \brief Get an integer representation of the date, in the form yyyymmdd.
   NO_DISCARD int AsYYYYMMDD() const { return GetYear() * 10000 + GetMonthInt() * 100 + GetDay(); }
 
+  //! \brief Get the year from the date.
   NO_DISCARD int GetYear() const { return static_cast<int>(y_m_d_h_m_s_um_ >> shift_year_); }
 
-  NO_DISCARD int GetMonthInt() const {
-    return static_cast<int>((y_m_d_h_m_s_um_ >> shift_month_) & month_mask_);
-  }
+  //! \brief Get the month of the date, as an integer.
+  NO_DISCARD int GetMonthInt() const { return static_cast<int>((y_m_d_h_m_s_um_ >> shift_month_) & month_mask_); }
 
+  //! \brief Get the month of the date.
   NO_DISCARD Month GetMonth() const { return MonthIntToMonth(GetMonthInt()); }
 
+  //! \brief Get the day of the month from the date.
   NO_DISCARD int GetDay() const { return static_cast<int>((y_m_d_h_m_s_um_ >> shift_day_) & day_mask_); }
 
+  //! \brief Get the hour from the datetime.
   NO_DISCARD int GetHour() const { return static_cast<int>(y_m_d_h_m_s_um_ >> shift_hour_) & hour_mask_; }
 
-  NO_DISCARD int GetMinute() const {
-    return static_cast<int>((y_m_d_h_m_s_um_ >> shift_minute_) & minute_mask_);
-  }
+  //! \brief Get the minute from the datetime.
+  NO_DISCARD int GetMinute() const { return static_cast<int>((y_m_d_h_m_s_um_ >> shift_minute_) & minute_mask_); }
 
-  NO_DISCARD int GetSecond() const {
-    return static_cast<int>((y_m_d_h_m_s_um_ >> shift_second_) & second_mask_);
-  }
+  //! \brief Get the second from the datetime.
+  NO_DISCARD int GetSecond() const { return static_cast<int>((y_m_d_h_m_s_um_ >> shift_second_) & second_mask_); }
 
+  //! \brief Get the millisecond from the datetime.
   NO_DISCARD int GetMillisecond() const { return GetMicrosecond() / 1000; }
 
+  //! \brief Get the microsecond from the datetime.
   NO_DISCARD int GetMicrosecond() const { return static_cast<int>(y_m_d_h_m_s_um_ & us_mask_); }
 
   //! \brief Check if the date is a non-null (empty) date.
@@ -710,7 +738,6 @@ class DateTime {
   //!
   //! Note: localtime (and its related variants, and gmtime) are relatively slow functions. Prefer using
   //! FastDateGenerator if you need to repeatedly generate DateTimes.
-  //!
   static DateTime Now() {
     const auto time = std::chrono::system_clock::now();
     return DateTime(time);
@@ -726,7 +753,7 @@ class DateTime {
  private:
   //! \brief Non-validating date constructor.
   DateTime(
-      bool,
+      bool, // Just a flag, so that we can distinguish this constructor from the validating one.
       int year,
       int month,
       int day,
@@ -738,6 +765,7 @@ class DateTime {
     setHMSUS(hour, minute, second, microsecond, false);
   }
 
+  //! \brief Set the year, month, and day of the date, potentially validating beforenhand.
   void setYMD(int year, int month, int day, bool validate = true) {
     if (validate)
       validateYMD(year, month, day);
@@ -748,6 +776,7 @@ class DateTime {
         | (static_cast<std::uint64_t>(day) << shift_day_);
   }
 
+  //! \brief Set the hour, minute, second, and microsecond of the date, potentially validating beforehand.
   void setHMSUS(int hour, int minute, int second, int microseconds, bool validate = true) {
     if (validate)
       validateHMSUS(hour, minute, second, microseconds);
@@ -802,6 +831,7 @@ class DateTime {
   static constexpr int month_mask_ = 0b1111111;
 };
 
+//! \brief Add some number of microseconds to a DateTime, returning the new DateTime.
 inline DateTime AddMicroseconds(const DateTime &time, unsigned long long microseconds) {
   int new_years = time.GetYear(), new_months = time.GetMonthInt(), new_days = time.GetDay();
   int new_hours = time.GetHour(), new_minutes = time.GetMinute(), new_seconds = time.GetSecond();
@@ -884,6 +914,7 @@ class FastDateGenerator {
   //! \brief The DateTime at the time that the generator was created.
   DateTime base_date_time_;
 };
+
 } // namespace time
 
 // ==============================================================================
@@ -892,6 +923,7 @@ class FastDateGenerator {
 
 namespace formatting {
 namespace detail {
+
 //! \brief Store all powers of ten that fit in an unsigned long long.
 constexpr unsigned long long powers_of_ten[] = {
     1,
@@ -921,6 +953,7 @@ constexpr unsigned long long max_ull_power_of_ten = 10'000'000'000'000'000'000ul
 
 //! \brief The largest power of ten that fits in an unsigned long long is (10 ^ log10_max_ull_power_of_ten).
 constexpr int log10_max_ull_power_of_ten = 19;
+
 } // namespace detail
 
 //! \brief Returns how many digits the decimal representation of a ull will have.
@@ -928,14 +961,15 @@ constexpr int log10_max_ull_power_of_ten = 19;
 inline unsigned NumberOfDigitsULL(unsigned long long x, int upper = detail::log10_max_ull_power_of_ten) {
   using namespace detail;
   upper = std::max(0, std::min(upper, 19));
-  if (x == 0)
-    return 1u;
-  if (x >= max_ull_power_of_ten)
-    return 20;
+  if (x == 0) return 1u;
+  if (x >= max_ull_power_of_ten) return 20;
   auto it = std::upper_bound(&powers_of_ten[0], &powers_of_ten[upper], x);
   return static_cast<unsigned>(std::distance(&powers_of_ten[0], it));
 }
 
+//! \brief Get the number of digits that the base 10 representation of an integer will have. Note that this does not
+//! count the sign character - it is the number of *digits*, not the number of characters needed to represent the
+//! integer.
 template <typename Integral_t,
     typename = std::enable_if_t<std::is_integral_v<Integral_t> && !std::is_same_v<Integral_t, bool>>>
 unsigned NumberOfDigits(Integral_t x, int upper = detail::log10_max_ull_power_of_ten) {
@@ -947,6 +981,7 @@ unsigned NumberOfDigits(Integral_t x, int upper = detail::log10_max_ull_power_of
   }
 }
 
+//! \brief Copy an integer into a buffer, with optional padding.
 inline char *CopyPaddedInt(
     char *start,
     char *end,
@@ -963,6 +998,7 @@ inline char *CopyPaddedInt(
 }
 
 namespace detail {
+
 //! \brief Format an integer into a buffer, with commas every three digits.
 inline void formatIntegerWithCommas(memory::BasicMemoryBuffer<char> &buffer, unsigned long long x) {
   const auto num_digits = NumberOfDigitsULL(x);
@@ -1003,9 +1039,10 @@ inline void formatIntegerWithCommas(memory::BasicMemoryBuffer<char> &buffer, uns
     --it_b;
   }
 }
-}
 
-template <typename T, LL_ENABLE_IF(std::is_integral_v<T>)>
+} // namespace detail
+
+template <typename T, LL_ENABLE_IF(std::is_integral_v<T> && !std::is_same_v<T, bool>)>
 void FormatIntegerWithCommas(memory::BasicMemoryBuffer<char> &buffer, T x) {
   if constexpr (std::is_signed_v<T>) {
     if (x < 0) {
@@ -1018,7 +1055,7 @@ void FormatIntegerWithCommas(memory::BasicMemoryBuffer<char> &buffer, T x) {
   }
 }
 
-//! \brief Format a date to a character range.
+//! \brief Format a date to a character range in 'YYYY-mm-dd hh:mm:ss.uuuuuu' format.
 inline char *FormatDateTo(char *c, char *end_c, const time::DateTime &dt) {
   // Store all zero-padded one and two-digit numbers, allows for very fast serialization.
   static const char up_to[] =
@@ -1092,6 +1129,7 @@ struct MessageInfo {
 //  Virtual terminal commands.
 // ==============================================================================
 
+//! \brief All ansi foreground colors.
 enum class AnsiForegroundColor : short {
   Reset = 0,
   Default = 39,
@@ -1113,6 +1151,7 @@ enum class AnsiForegroundColor : short {
   BrightWhite = 97
 };
 
+//! \brief All ansi background colors.
 enum class AnsiBackgroundColor : short {
   Reset = 0,
   Default = 49,
@@ -1205,23 +1244,28 @@ struct FormattingSettings {
 //! For efficiency, each segment needs to know how much space its formatted self will take up.
 struct BaseSegment {
   explicit BaseSegment() = default;
-
   virtual ~BaseSegment() = default;
 
-  virtual void AddToBuffer(const FormattingSettings &settings,
-                           const formatting::MessageInfo &msg_info,
-                           memory::BasicMemoryBuffer<char> &buffer,
-                           const std::string_view &fmt) const = 0;
+  //! \brief Add the segment to the supplied buffer, using the given formatting settings.
+  void AddToBuffer(const FormattingSettings &settings,
+                   const formatting::MessageInfo &msg_info,
+                   memory::BasicMemoryBuffer<char> &buffer,
+                   const std::string_view &fmt) const {
+    addToBuffer(settings, msg_info, buffer, fmt);
+  }
 
+  //! \brief Add the segment to the buffer, not using a string format, but using the other formatting settings.
   void AddToBuffer(const FormattingSettings &settings,
                    const formatting::MessageInfo &msg_info,
                    memory::BasicMemoryBuffer<char> &buffer) const {
     AddToBuffer(settings, msg_info, buffer, {});
   }
 
+  //! \brief Calculate the size required to serialize to a buffer.
   NO_DISCARD virtual unsigned SizeRequired(const FormattingSettings &settings,
                                            const formatting::MessageInfo &msg_info) const = 0;
 
+  //! \brief Copy the segment to the supplied storage.
   virtual void CopyTo(class SegmentStorage &) const = 0;
 
   //! \brief  Some formatting segments need the message indentation (the distance from the start of the
@@ -1229,6 +1273,15 @@ struct BaseSegment {
   //! to do an aligned newline. The indentation is only calculated if needed, to save time, since it is rarely
   //! needed.
   NO_DISCARD virtual bool NeedsMessageIndentation() const { return false; }
+
+ private:
+  //! \brief Add the segment to the supplied buffer, using the given formatting settings.
+  //! We implement this as a private method so we don't have to do a using BaseSegment::AddToBuffer in every class when
+  //! we override this method.
+  virtual void addToBuffer(const FormattingSettings &settings,
+                           const formatting::MessageInfo &msg_info,
+                           memory::BasicMemoryBuffer<char> &buffer,
+                           const std::string_view &fmt) const = 0;
 };
 
 //! \brief  Acts like a unique pointer for an object deriving from BaseSegment, but uses a SBO to put small
@@ -1314,6 +1367,7 @@ class SegmentStorage {
     }
   }
 
+  //! \brief The size of the internal buffer.
   constexpr static std::size_t default_buffer_size = 3 * sizeof(void *);
 
   //! \brief Pointer to the data that is either on the stack or heap. Allows for polymorphically accessing the
@@ -1331,15 +1385,6 @@ struct AnsiColorSegment : public BaseSegment {
                             std::optional<formatting::AnsiBackgroundColor> background = {})
       : fmt_string_(SetAnsiColorFmt(foreground, background)) {}
 
-  void AddToBuffer(const FormattingSettings &settings,
-                   const formatting::MessageInfo &,
-                   memory::BasicMemoryBuffer<char> &buffer,
-                   [[maybe_unused]] const std::string_view &fmt = {}) const override {
-    if (settings.has_virtual_terminal_processing) {
-      AppendBuffer(buffer, fmt_string_);
-    }
-  }
-
   NO_DISCARD unsigned SizeRequired(const FormattingSettings &settings,
                                    const formatting::MessageInfo &) const override {
     return settings.has_virtual_terminal_processing ? static_cast<unsigned>(fmt_string_.size()) : 0u;
@@ -1353,6 +1398,15 @@ struct AnsiColorSegment : public BaseSegment {
   }
 
  private:
+  void addToBuffer(const FormattingSettings &settings,
+                   const formatting::MessageInfo &,
+                   memory::BasicMemoryBuffer<char> &buffer,
+                   [[maybe_unused]] const std::string_view &fmt) const override {
+    if (settings.has_virtual_terminal_processing) {
+      AppendBuffer(buffer, fmt_string_);
+    }
+  }
+
   std::string fmt_string_;
 };
 
@@ -1380,7 +1434,19 @@ struct FillUntil : public BaseSegment {
                      FmtDistanceType pad_type = FmtDistanceType::MESSAGE_LENGTH)
       : pad_length_(pad_length), fill_char_(fill_char), pad_type_(pad_type) {}
 
-  void AddToBuffer(const FormattingSettings &settings,
+  NO_DISCARD unsigned SizeRequired(const FormattingSettings &,
+                                   const formatting::MessageInfo &msg_info) const override {
+    if (pad_type_ == FmtDistanceType::MESSAGE_LENGTH) {
+      return pad_length_ - std::min(msg_info.message_length, pad_length_);
+    }
+    // Otherwise, TOTAL_LENGTH
+    return pad_length_ - std::min(msg_info.total_length, pad_length_);
+  }
+
+  void CopyTo(SegmentStorage &storage) const override { storage.Create<FillUntil>(*this); }
+
+ private:
+  void addToBuffer(const FormattingSettings &settings,
                    const formatting::MessageInfo &msg_info,
                    memory::BasicMemoryBuffer<char> &buffer,
                    [[maybe_unused]] const std::string_view &fmt = {}) const override {
@@ -1388,18 +1454,6 @@ struct FillUntil : public BaseSegment {
     buffer.AppendN(fill_char_, num_chars);
   }
 
-  NO_DISCARD unsigned SizeRequired(const FormattingSettings &,
-                                   const formatting::MessageInfo &msg_info) const override {
-    if (pad_type_ == FmtDistanceType::MESSAGE_LENGTH) {
-      return pad_length_ - std::min(msg_info.message_length, pad_length_);
-    }
-    // TOTAL_LENGTH
-    return pad_length_ - std::min(msg_info.total_length, pad_length_);
-  }
-
-  void CopyTo(SegmentStorage &storage) const override { storage.Create<FillUntil>(*this); }
-
- private:
   unsigned pad_length_{};
   char fill_char_{};
   FmtDistanceType pad_type_;
@@ -1418,13 +1472,6 @@ struct RepeatChar : public BaseSegment {
   RepeatChar(unsigned repeat_length, char c)
       : repeat_length_(repeat_length), c_(c) {}
 
-  void AddToBuffer(const FormattingSettings &,
-                   const formatting::MessageInfo &,
-                   memory::BasicMemoryBuffer<char> &buffer,
-                   [[maybe_unused]] const std::string_view &fmt = {}) const override {
-    buffer.AppendN(c_, repeat_length_);
-  }
-
   NO_DISCARD unsigned SizeRequired(const FormattingSettings &, const formatting::MessageInfo &) const override {
     return repeat_length_;
   }
@@ -1432,21 +1479,18 @@ struct RepeatChar : public BaseSegment {
   void CopyTo(SegmentStorage &storage) const override { storage.Create<RepeatChar>(*this); }
 
  private:
+  void addToBuffer(const FormattingSettings &,
+                   const formatting::MessageInfo &,
+                   memory::BasicMemoryBuffer<char> &buffer,
+                   [[maybe_unused]] const std::string_view &fmt = {}) const override {
+    buffer.AppendN(c_, repeat_length_);
+  }
+
   unsigned repeat_length_{};
   char c_{};
 };
 
 struct NewLineIndent_t : public BaseSegment {
-  void AddToBuffer(const FormattingSettings &,
-                   const formatting::MessageInfo &msg_info,
-                   memory::BasicMemoryBuffer<char> &buffer,
-                   [[maybe_unused]] const std::string_view &fmt = {}) const override {
-    buffer.PushBack('\n');
-    if (msg_info.message_indentation) {
-      buffer.AppendN(' ', *msg_info.message_indentation);
-    }
-  }
-
   NO_DISCARD unsigned SizeRequired(const FormattingSettings &,
                                    const formatting::MessageInfo &msg_info) const override {
     if (msg_info.message_indentation) {
@@ -1458,6 +1502,17 @@ struct NewLineIndent_t : public BaseSegment {
   NO_DISCARD bool NeedsMessageIndentation() const override { return true; }
 
   void CopyTo(SegmentStorage &storage) const override { storage.Create<NewLineIndent_t>(); }
+
+ private:
+  void addToBuffer(const FormattingSettings &,
+                   const formatting::MessageInfo &msg_info,
+                   memory::BasicMemoryBuffer<char> &buffer,
+                   [[maybe_unused]] const std::string_view &fmt = {}) const override {
+    buffer.PushBack('\n');
+    if (msg_info.message_indentation) {
+      buffer.AppendN(' ', *msg_info.message_indentation);
+    }
+  }
 };
 
 //! \brief Prototypical NewLineIndent_t object.
@@ -1482,13 +1537,6 @@ struct Segment<std::string> : public BaseSegment {
   explicit Segment(std::string s)
       : str_(std::move(s)) {}
 
-  void AddToBuffer(const FormattingSettings &,
-                   const formatting::MessageInfo &,
-                   memory::BasicMemoryBuffer<char> &buffer,
-                   [[maybe_unused]] const std::string_view &fmt = {}) const override {
-    AppendBuffer(buffer, str_);
-  }
-
   NO_DISCARD unsigned SizeRequired(const FormattingSettings &, const formatting::MessageInfo &) const override {
     return static_cast<unsigned>(str_.size());
   }
@@ -1496,6 +1544,13 @@ struct Segment<std::string> : public BaseSegment {
   void CopyTo(SegmentStorage &storage) const override { storage.Create<Segment>(*this); }
 
  private:
+  void addToBuffer(const FormattingSettings &,
+                   const formatting::MessageInfo &,
+                   memory::BasicMemoryBuffer<char> &buffer,
+                   [[maybe_unused]] const std::string_view &fmt = {}) const override {
+    AppendBuffer(buffer, str_);
+  }
+
   const std::string str_;
 };
 
@@ -1505,13 +1560,6 @@ struct Segment<char *> : public BaseSegment {
   explicit Segment(const char *s)
       : cstr_(s), size_required_(static_cast<unsigned>(std::strlen(s))) {}
 
-  void AddToBuffer([[maybe_unused]] const FormattingSettings &settings,
-                   const formatting::MessageInfo &,
-                   memory::BasicMemoryBuffer<char> &buffer,
-                   [[maybe_unused]] const std::string_view &fmt = {}) const override {
-    buffer.Append(cstr_, cstr_ + size_required_);
-  }
-
   NO_DISCARD unsigned SizeRequired([[maybe_unused]] const FormattingSettings &settings,
                                    const formatting::MessageInfo &) const override {
     return size_required_;
@@ -1520,6 +1568,13 @@ struct Segment<char *> : public BaseSegment {
   void CopyTo(SegmentStorage &storage) const override { storage.Create<Segment>(*this); }
 
  private:
+  void addToBuffer([[maybe_unused]] const FormattingSettings &settings,
+                   const formatting::MessageInfo &,
+                   memory::BasicMemoryBuffer<char> &buffer,
+                   [[maybe_unused]] const std::string_view &fmt = {}) const override {
+    buffer.Append(cstr_, cstr_ + size_required_);
+  }
+
   const char *cstr_;
   unsigned size_required_{};
 };
@@ -1537,7 +1592,15 @@ struct Segment<bool> : public BaseSegment {
   explicit Segment(bool b)
       : value_(b) {}
 
-  void AddToBuffer([[maybe_unused]] const FormattingSettings &settings,
+  NO_DISCARD unsigned SizeRequired([[maybe_unused]] const FormattingSettings &settings,
+                                   const formatting::MessageInfo &) const override {
+    return value_ ? 4u : 5u;
+  }
+
+  void CopyTo(SegmentStorage &storage) const override { storage.Create<Segment>(*this); }
+
+ private:
+  void addToBuffer([[maybe_unused]] const FormattingSettings &settings,
                    const formatting::MessageInfo &,
                    memory::BasicMemoryBuffer<char> &buffer,
                    [[maybe_unused]] const std::string_view &fmt = {}) const override {
@@ -1549,14 +1612,6 @@ struct Segment<bool> : public BaseSegment {
     }
   }
 
-  NO_DISCARD unsigned SizeRequired([[maybe_unused]] const FormattingSettings &settings,
-                                   const formatting::MessageInfo &) const override {
-    return value_ ? 4u : 5u;
-  }
-
-  void CopyTo(SegmentStorage &storage) const override { storage.Create<Segment>(*this); }
-
- private:
   bool value_;
 };
 
@@ -1570,14 +1625,6 @@ struct Segment<Floating_t, std::enable_if_t<std::is_floating_point_v<Floating_t>
     size_required_ = static_cast<unsigned>(serialized_number_.size());
   }
 
-  void AddToBuffer([[maybe_unused]] const FormattingSettings &settings,
-                   const formatting::MessageInfo &,
-                   memory::BasicMemoryBuffer<char> &buffer,
-                   [[maybe_unused]] const std::string_view &fmt = {}) const override {
-    // std::to_chars(start, end, number_, std::chars_format::fixed);
-    AppendBuffer(buffer, serialized_number_);
-  }
-
   NO_DISCARD unsigned SizeRequired([[maybe_unused]] const FormattingSettings &settings,
                                    const formatting::MessageInfo &) const override {
     return size_required_;
@@ -1586,6 +1633,14 @@ struct Segment<Floating_t, std::enable_if_t<std::is_floating_point_v<Floating_t>
   void CopyTo(SegmentStorage &storage) const override { storage.Create < Segment < Floating_t >> (*this); }
 
  private:
+  void addToBuffer([[maybe_unused]] const FormattingSettings &settings,
+                   const formatting::MessageInfo &,
+                   memory::BasicMemoryBuffer<char> &buffer,
+                   [[maybe_unused]] const std::string_view &fmt = {}) const override {
+    // std::to_chars(start, end, number_, std::chars_format::fixed);
+    AppendBuffer(buffer, serialized_number_);
+  }
+
   Floating_t number_;
   unsigned size_required_{};
 
@@ -1601,13 +1656,6 @@ struct Segment<char>
   explicit Segment(char c)
       : c_(c) {}
 
-  void AddToBuffer([[maybe_unused]] const FormattingSettings &settings,
-                   const formatting::MessageInfo &,
-                   memory::BasicMemoryBuffer<char> &buffer,
-                   [[maybe_unused]] const std::string_view &fmt = {}) const override {
-    buffer.PushBack(c_);
-  }
-
   NO_DISCARD unsigned SizeRequired(const FormattingSettings &, const formatting::MessageInfo &) const override {
     return 1;
   }
@@ -1615,6 +1663,13 @@ struct Segment<char>
   void CopyTo(SegmentStorage &storage) const override { storage.Create<Segment>(*this); }
 
  private:
+  void addToBuffer([[maybe_unused]] const FormattingSettings &settings,
+                   const formatting::MessageInfo &,
+                   memory::BasicMemoryBuffer<char> &buffer,
+                   [[maybe_unused]] const std::string_view &fmt = {}) const override {
+    buffer.PushBack(c_);
+  }
+
   char c_;
 };
 
@@ -1626,7 +1681,16 @@ struct Segment<Integral_t,
   explicit Segment(Integral_t number)
       : number_(number), size_required_(formatting::NumberOfDigits(number_) + (number < 0 ? 1 : 0)) {}
 
-  void AddToBuffer([[maybe_unused]] const FormattingSettings &settings,
+  NO_DISCARD unsigned SizeRequired(const FormattingSettings &, const formatting::MessageInfo &) const override {
+    // NOTE: This will not be accurate if the number is to be formatted, e.g. with commas, but this function is no
+    // longer used, so consider this an estimate.
+    return size_required_;
+  }
+
+  void CopyTo(SegmentStorage &storage) const override { storage.Create<Segment>(*this); }
+
+ private:
+  void addToBuffer([[maybe_unused]] const FormattingSettings &settings,
                    const formatting::MessageInfo &,
                    memory::BasicMemoryBuffer<char> &buffer,
                    [[maybe_unused]] const std::string_view &fmt = {}) const override {
@@ -1639,15 +1703,6 @@ struct Segment<Integral_t,
     }
   }
 
-  NO_DISCARD unsigned SizeRequired(const FormattingSettings &, const formatting::MessageInfo &) const override {
-    // NOTE: This will not be accurate if the number is to be formatted, e.g. with commas, but this function is no
-    // longer used, so consider this an estimate.
-    return size_required_;
-  }
-
-  void CopyTo(SegmentStorage &storage) const override { storage.Create<Segment>(*this); }
-
- private:
   Integral_t number_;
   unsigned size_required_{};
 };
@@ -1657,15 +1712,6 @@ template <>
 struct Segment<time::DateTime> : public BaseSegment {
   explicit Segment(time::DateTime dt)
       : value_(dt) {}
-
-  void AddToBuffer([[maybe_unused]] const FormattingSettings &settings,
-                   const formatting::MessageInfo &,
-                   memory::BasicMemoryBuffer<char> &buffer,
-                   [[maybe_unused]] const std::string_view &fmt = {}) const override {
-    // FormatDateTo needs 26 characters.
-    auto [start, end] = buffer.Allocate(26);
-    formatting::FormatDateTo(start, end, value_);
-  }
 
   NO_DISCARD unsigned SizeRequired([[maybe_unused]] const FormattingSettings &settings,
                                    const formatting::MessageInfo &) const override {
@@ -1677,6 +1723,15 @@ struct Segment<time::DateTime> : public BaseSegment {
   }
 
  private:
+  void addToBuffer([[maybe_unused]] const FormattingSettings &settings,
+                   const formatting::MessageInfo &,
+                   memory::BasicMemoryBuffer<char> &buffer,
+                   [[maybe_unused]] const std::string_view &fmt = {}) const override {
+    // FormatDateTo needs 26 characters.
+    auto [start, end] = buffer.Allocate(26);
+    formatting::FormatDateTo(start, end, value_);
+  }
+
   time::DateTime value_;
 };
 
@@ -1687,17 +1742,6 @@ struct AnsiColor8Bit : public BaseSegment {
                          std::optional<formatting::AnsiForegroundColor> foreground,
                          std::optional<formatting::AnsiBackgroundColor> background = {})
       : set_formatting_string_(SetAnsiColorFmt(foreground, background)), segment_(data) {}
-
-  void AddToBuffer(const FormattingSettings &settings,
-                   const formatting::MessageInfo &msg_info,
-                   memory::BasicMemoryBuffer<char> &buffer,
-                   [[maybe_unused]] const std::string_view &fmt = {}) const override {
-    if (settings.has_virtual_terminal_processing) {
-      AppendBuffer(buffer, set_formatting_string_);
-    }
-    segment_.AddToBuffer(settings, msg_info, buffer);
-    AnsiResetSegment.AddToBuffer(settings, msg_info, buffer, fmt);
-  }
 
   NO_DISCARD unsigned SizeRequired(const FormattingSettings &settings,
                                    const formatting::MessageInfo &msg_info) const override {
@@ -1711,6 +1755,17 @@ struct AnsiColor8Bit : public BaseSegment {
   void CopyTo(SegmentStorage &storage) const override { storage.Create<AnsiColor8Bit>(*this); }
 
  private:
+  void addToBuffer(const FormattingSettings &settings,
+                   const formatting::MessageInfo &msg_info,
+                   memory::BasicMemoryBuffer<char> &buffer,
+                   [[maybe_unused]] const std::string_view &fmt = {}) const override {
+    if (settings.has_virtual_terminal_processing) {
+      AppendBuffer(buffer, set_formatting_string_);
+    }
+    segment_.AddToBuffer(settings, msg_info, buffer);
+    AnsiResetSegment.AddToBuffer(settings, msg_info, buffer, fmt);
+  }
+
   //! \brief Cache the formatting string.
   std::string set_formatting_string_;
   //! \brief The object that should be colored.
@@ -2234,7 +2289,6 @@ class RecordDispatcher {
 
  private:
   Record record_{};
-
   int uncaught_exceptions_{};
 };
 
@@ -3661,7 +3715,7 @@ void formatTo(memory::BasicMemoryBuffer<char> &buffer,
 
   [[maybe_unused]] const char *fmt_begin[N], *fmt_end[N];
 
-  unsigned count_placed = 0, str_length = 0;
+  unsigned count_placed = 0;
   starts[0] = fmt_string;
   auto c = fmt_string;
   for (; *c != 0; ++c) {
@@ -3674,9 +3728,6 @@ void formatTo(memory::BasicMemoryBuffer<char> &buffer,
       }
       fmt_end[count_placed - 1] = c;
       starts[count_placed] = c + 1;
-    }
-    else {
-      ++str_length;
     }
   }
   ends[count_placed] = c; // Will be null the terminator.

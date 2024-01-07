@@ -46,7 +46,7 @@ void format_logstream(const exception& ex, lightning::RefBundle& handler) {
   const char* begin = ex.what(), * end = ex.what();
   while (*end) {
     for (; *end && *end != '\n'; ++end); // Find next newline.
-    handler << NewLineIndent << string_view(begin, end - begin);
+    handler << NewLineIndent << string_view(begin, static_cast<std::string::size_type>(end - begin));
     for (; *end && *end == '\n'; ++end); // Pass any number of newlines.
     begin = end;
   }
