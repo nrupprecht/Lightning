@@ -3486,9 +3486,9 @@ class Logger {
   template <typename SinkBackend_t, typename Func_t>
   void MapOnSinks(Func_t &&func) const {
     auto &&sinks = GetSinks<SinkBackend_t>();
-    for (auto &sink : sinks) {
-      if (auto back_ptr = dynamic_cast<SinkBackend_t *>(&sink->GetBackend())) {
-        func(*sink, *back_ptr);
+    for (auto &[frontend, backend] : sinks) {
+      if (auto backend_ptr = dynamic_cast<SinkBackend_t *>(backend)) {
+        func(*frontend, *backend_ptr);
       }
     }
   }

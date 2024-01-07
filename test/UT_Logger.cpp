@@ -81,7 +81,20 @@ TEST(Logger, SeverityLogger) {
   stream.str("");
 }
 
-TEST(GeneralFormatting, MoreThanInitialBuffer) {
+TEST(Logger, MapOnSinks) {
+  Logger logger;
+  logger.GetCore()->AddSink(UnlockedSink::From<OstreamSink>(std::cout));
+  logger.GetCore()->AddSink(UnlockedSink::From<TrivialDispatchSink>());
+
+  // Map only on ostream sinks.
+  int count = 0;
+  logger.MapOnSinks<OstreamSink>([&count]([[maybe_unused]] auto& frontend, [[maybe_unused]] auto& backend) {
+    ++count;
+  });
+  EXPECT_EQ(count, 1);
+}
+
+TEST(Logger, MoreThanInitialBuffer) {
   std::ostringstream stream;
   auto sink = UnlockedSink::From<OstreamSink>(stream);
   sink->SetFormatter(formatting::MakeMsgFormatter("{}", formatting::MSG));
