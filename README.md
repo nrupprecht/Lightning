@@ -1,8 +1,8 @@
 # Lightning logging
 
-A small but powerful header-only logging library that depends only on standard C++17 features and the standard library.
-Attempts to be a very fast streaming logging library without sacrificing too much performance. Current, it is just a bit
-slower than spdlog, a very fast formatting logging library.
+A very fast, header only logging library that depends only on standard C++17 features and the standard library.
+Attempts to be a very fast streaming logging library (as opposed to formatting based logging, e.g. spdlog) without
+sacrificing performance. Current, it is just a bit slower than spdlog, a very fast formatting logging library.
 
 Very fast, easy to use, easy to customize, and makes pretty logs.
 
@@ -11,8 +11,9 @@ Very fast, easy to use, easy to customize, and makes pretty logs.
 ## Quick start
 
 Lightning is a header only library that only depends on standard C++17 features. The entirety of the library is in a
-single header, so after setup (see [BUILDING.md](BUILDING.md)), simply ```#include <Lightning/Lightning.h>``` and you
-are ready to go.
+single header, so after setup (see [BUILDING.md](BUILDING.md)), simply ```#include <Lightning/Lightning.h>``` and your
+project
+is ready to go.
 
 The simplest possible way to create a logger that writes to std::cout:
 
@@ -54,8 +55,8 @@ messages a second (on my platform - see benchmarking at the bottom).
 
 ### Severity level filtering
 
-The most common filtering for logging messages is filtering by severity. A typical project may have many "debug" or "
-trace" level logging messages, but may want to only capture important messages, or may want to route only very important
+The most common filtering for logging messages is filtering by severity. A typical project may have many "debug" or 
+"trace" level logging messages, but may want to only capture important messages, or may want to route only very important
 messages to specific sinks. There are core level filters, that filter any message coming into a logging core, and
 sink-level filters which (surprise, surprise) filter any messages coming into a sink.
 
@@ -65,8 +66,14 @@ To set the acceptance levels of a sink,
 // Shared pointer to the sink is named 'fs'
 fs->GetFilter().Accept({ Severity::Error });
 
+// Another, more idiomatic way to set the filter is via boolean operations.
+// This sets the filter to accept messages of severity at least Info.
+fs->SetFilter(Severity::Info <= LoggingSeverity);
+// All boolean operations are supported, as are booleans between filters.
+fs->SetFilter(LoggingSeverity < Severity::Info || Severity::Warning < LoggingSeverity);
+
 // Sinks can also set whether they accept messages without a severity.
-// This is false by default, and can be controlled by passing a flag in 
+// This is true by default, and can be controlled by passing a flag in 
 // the AcceptNoSeverity function.
 fs->GetFilter().AcceptNoSeverity(true);
 ```
@@ -80,10 +87,12 @@ logger.GetCore()->GetFilter().Accept({ Severity::Warning, Severity::Error });
 
 ### Formatting messages
 
-Each sink uses an object of type ```BaseMessageFormatter``` which it uses to format logging records. The best way to
-create a formatter is the ```MakeMsgFormatter``` function, which takes a format string and a number
+Each sink uses an object of type ```BaseMessageFormatter``` which it uses to format logging records. An efficient child 
+class of this is provided, MsgFormatter, though users are of course able to subclass BaseMessageFormatter themselves.
+The best way to create a formatter is the ```MakeMsgFormatter``` function, which takes a format string and a number
 of ```AttributeFormatter``` instances as arguments, and returns a unique pointer to a new formatter. The format string
 will replace the N-th ```{}``` in the format string with the formatted attribute from the N-th attribute formatter.
+There are a number of built in AttributeFormatters for formatting all the basic record attributes.
 
 For example,
 
@@ -99,7 +108,7 @@ LOG_SEV_TO(logger, Info) << "Hello world!";
 // [2023-07-24 15:07:01.152403] [main-logger] [Info   ] Hello world!
 ```
 
-Another built in formatter is a formatter that defines different formatters for each severity level.
+Another built in formatter is a FormatterBySeverity, which defines different formatters for each severity level.
     
 ```C++
 auto formatter = std::make_unique<formatting::FormatterBySeverity>();
@@ -125,8 +134,12 @@ auto formatter = std::make_unique<formatting::FormatterBySeverity>();
 Global::GetCore()->SetAllFormatters(*formatter);
 ```
 
+This allows you, for example, to make a logger that logs more information for trace and debug messages:
 
-### Logger name
+![Alt text](./images/example-log-1.png)
+
+
+### Logger name attribute
 
 The logger name can be set via the ```Logger::SetName``` function, e.g.
 
@@ -136,7 +149,7 @@ logger.SetName("main-logger");
 
 There is a built-in attribute formatter ```LoggerNameAttributeFormatter``` that can write the logger name as a string.
 
-### Logging time stamp
+### Logging time stamp attribute
 
 The logging time is by default attached to every logging message, though this can be disabled by
 
@@ -147,7 +160,7 @@ logger.SetDoTimeStamp(false);
 The built-in date-time formatter is ```DateTimeAttributeFormatter```, which formats the date in "%Y-%m-%d %h:%m:%s.%u"
 format.
 
-### Severity
+### Severity attribute
 
 The ```SeverityAttributeFormatter``` is the built-in attribute formatter for severity. If the sink settings allow for
 it, the severity level will be rendered in color. The severity levels are serialized to strings of the same width,
@@ -163,6 +176,15 @@ formatting::SeverityAttributeFormatter{}
 ```
 
 would create a formatter that prints "INFO" in red letters on a yellow background (if the sink supports colors).
+
+
+### Source location attributes
+
+The source location (file name, line number, and function name) are always attached to each record. They can be 
+formatted with the ```FileNameAttributeFormatter```, ```FileLineAttributeFormatter```, and 
+```FunctionNameAttributeFormatter```. The file name attribute formatter has an option to only print the file name, 
+instead of the full path, which is generally what is produced by the ```__FILE__``` macro, which is what is used to 
+generate the file name.
 
 ## User defined formatting
 
