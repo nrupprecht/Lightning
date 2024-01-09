@@ -58,7 +58,7 @@ void bench_mt(int howmany, std::size_t thread_count);
 
 auto main() -> int {
   // Set up global logger.
-  auto sink = NewSink<UnlockedSink, OstreamSink>();
+  auto sink = NewSink<UnlockedSink, StdoutSink>();
   Global::GetCore()->AddSink(sink).SetAllFormatters(formatting::MakeMsgFormatter(
       "[{}] [{}] {}",
       formatting::SeverityAttributeFormatter{}.SeverityName(Severity::Info, "Info"),

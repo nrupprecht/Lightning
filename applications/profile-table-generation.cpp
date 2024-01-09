@@ -78,7 +78,7 @@ void AddRow(const std::string& name, double delta_d, int howmany) {
 
 int main() {
   // Set up global logger.
-  auto sink = NewSink<UnlockedSink, OstreamSink>();
+  auto sink = NewSink<UnlockedSink, StdoutSink>();
   Global::GetCore()->AddSink(sink)
       .SetAllFormatters(formatting::MakeMsgFormatter("{}", formatting::MSG));
 

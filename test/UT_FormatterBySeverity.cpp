@@ -17,29 +17,29 @@ TEST(FormatterBySeverity, Basic) {
   auto formatter = std::make_unique<FormatterBySeverity>();
   auto ptr = formatter.get();
 
-  std::ostringstream stream;
+  auto stream = std::make_shared<std::ostringstream>();
   auto sink = UnlockedSink::From<OstreamSink>(stream);
   sink->SetFormatter(std::move(formatter));
   Logger logger(sink);
 
   // No formatters, so nothing should be printed.
   EXPECT_NO_THROW(LOG_SEV_TO(logger, Info) << "A");
-  EXPECT_EQ(stream.str(), "");
-  stream.str("");
+  EXPECT_EQ(stream->str(), "");
+  stream->str("");
 
   ptr->SetFormatterForSeverity(Severity::Info, MakeMsgFormatter("{}", formatting::MSG));
   EXPECT_NO_THROW(LOG_SEV_TO(logger, Info) << "A");
-  EXPECT_EQ(stream.str(), "A\n");
-  stream.str("");
+  EXPECT_EQ(stream->str(), "A\n");
+  stream->str("");
 
 
   ptr->SetFormatterForSeverity(Severity::Major, MakeMsgFormatter("MAJOR: {}", formatting::MSG));
   EXPECT_NO_THROW(LOG_SEV_TO(logger, Info) << "A");
-  EXPECT_EQ(stream.str(), "A\n");
-  stream.str("");
+  EXPECT_EQ(stream->str(), "A\n");
+  stream->str("");
   EXPECT_NO_THROW(LOG_SEV_TO(logger, Major) << "B");
-  EXPECT_EQ(stream.str(), "MAJOR: B\n");
-  stream.str("");
+  EXPECT_EQ(stream->str(), "MAJOR: B\n");
+  stream->str("");
 }
 
 TEST(FormatterBySeverity, DefaultFormatter) {
@@ -47,24 +47,24 @@ TEST(FormatterBySeverity, DefaultFormatter) {
   formatter->SetDefaultFormatter(MakeMsgFormatter("DEFAULT: {}", formatting::MSG));
   auto ptr = formatter.get();
 
-  std::ostringstream stream;
+  auto stream = std::make_shared<std::ostringstream>();
   auto sink = UnlockedSink::From<OstreamSink>(stream);
   sink->SetFormatter(std::move(formatter));
   Logger logger(sink);
 
   // No formatters, so nothing should be printed.
   EXPECT_NO_THROW(LOG_SEV_TO(logger, Info) << "A");
-  EXPECT_EQ(stream.str(), "DEFAULT: A\n");
-  stream.str("");
+  EXPECT_EQ(stream->str(), "DEFAULT: A\n");
+  stream->str("");
 
   ptr->SetFormatterForSeverity(Severity::Info, MakeMsgFormatter("INFO: {}", formatting::MSG));
 
   EXPECT_NO_THROW(LOG_SEV_TO(logger, Info) << "A");
-  EXPECT_EQ(stream.str(), "INFO: A\n");
-  stream.str("");
+  EXPECT_EQ(stream->str(), "INFO: A\n");
+  stream->str("");
   EXPECT_NO_THROW(LOG_SEV_TO(logger, Major) << "B");
-  EXPECT_EQ(stream.str(), "DEFAULT: B\n");
-  stream.str("");
+  EXPECT_EQ(stream->str(), "DEFAULT: B\n");
+  stream->str("");
 }
 
 TEST(FormatterBySeverity, NoSeverity) {
@@ -72,7 +72,7 @@ TEST(FormatterBySeverity, NoSeverity) {
   formatter->SetDefaultFormatter(MakeMsgFormatter("DEFAULT: {}", formatting::MSG));
   auto ptr = formatter.get();
 
-  std::ostringstream stream;
+  auto stream = std::make_shared<std::ostringstream>();
   auto sink = UnlockedSink::From<OstreamSink>(stream);
   sink->SetFormatter(std::move(formatter)).GetFilter().AcceptNoSeverity(true);
   Logger logger(sink);
@@ -80,10 +80,10 @@ TEST(FormatterBySeverity, NoSeverity) {
 
   // No formatters, so nothing should be printed.
   EXPECT_NO_THROW(LOG_TO(logger) << "A");
-  EXPECT_EQ(stream.str(), "DEFAULT: A\n");
-  stream.str("");
+  EXPECT_EQ(stream->str(), "DEFAULT: A\n");
+  stream->str("");
   EXPECT_NO_THROW(LOG_SEV_TO(logger, Info) << "B");
-  EXPECT_EQ(stream.str(), "DEFAULT: B\n");
+  EXPECT_EQ(stream->str(), "DEFAULT: B\n");
 
   // Make sure Copy works (doesn't crash or throw).
   EXPECT_NO_THROW([[maybe_unused]] auto x = ptr->Copy());
@@ -103,18 +103,18 @@ TEST(FormatterBySeverity, ComplexExample) {
         .SetDefaultFormatter(std::move(default_fmt));
   }
 
-  std::ostringstream stream;
+  auto stream = std::make_shared<std::ostringstream>();
   auto sink = UnlockedSink::From<OstreamSink>(stream);
   sink->SetFormatter(std::move(formatter)).GetFilter().Accept(LoggingSeverity); // Accept all severities.
   Logger logger(sink);
 
   LOG_SEV_TO(logger, Debug) << "Debug";
-  EXPECT_EQ(stream.str(), "[Debug  ] [file:line] [time] Debug\n");
-  stream.str("");
+  EXPECT_EQ(stream->str(), "[Debug  ] [file:line] [time] Debug\n");
+  stream->str("");
 
   LOG_SEV_TO(logger, Info) << "Info";
-  EXPECT_EQ(stream.str(), "[Info   ] [time] Info\n");
-  stream.str("");
+  EXPECT_EQ(stream->str(), "[Info   ] [time] Info\n");
+  stream->str("");
 }
 
-}
+}  // namespace Testing

@@ -14,10 +14,10 @@ using namespace lightning;
 namespace Testing {
 
 TEST(Core, AddSink) {
-  std::ostringstream stream1;
+  auto stream1 = std::make_shared<std::ostringstream>();
   auto sink1 = UnlockedSink::From<OstreamSink>(stream1);
 
-  std::ostringstream stream2;
+  auto stream2 = std::make_shared<std::ostringstream>();
   auto sink2 = UnlockedSink::From<OstreamSink>(stream2);
 
   auto core = std::make_shared<Core>();

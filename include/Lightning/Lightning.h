@@ -2218,6 +2218,7 @@ class Record {
   //! \brief Get the message bundle from the record.
   RefBundle &Bundle() { return bundle_; }
 
+  //! \brief Get a const ref to the RefBundle of the record.
   NO_DISCARD const RefBundle &Bundle() const { return bundle_; }
 
   //! \brief Get the record attributes.
@@ -2245,8 +2246,7 @@ class Record {
   std::shared_ptr<Core> core_{};
 };
 
-//! \brief An RAII structure that dispatches the contained record upon the destruction of the
-//! RecordDispatcher.
+//! \brief An RAII structure that dispatches the contained record upon the destruction of the RecordDispatcher.
 class RecordDispatcher {
  public:
   //! \brief Create a closed, empty record.
@@ -3548,8 +3548,8 @@ class TrivialDispatchSink : public SinkBackend {
 //! \brief A simple sink that writes to a file via an ofstream.
 class FileSink : public SinkBackend {
  public:
-  explicit FileSink(const std::string &file)
-      : fout_(file), filename_(file) {}
+  explicit FileSink(const std::string &file_path)
+      : fout_(file_path), filename_(file_path) {}
 
   ~FileSink() override { fout_.flush(); }
 
@@ -3568,35 +3568,50 @@ class FileSink : public SinkBackend {
   std::string filename_;
 };
 
-//! \brief A sink that writes to any ostream.
-class OstreamSink : public SinkBackend {
+class StdoutSink : public SinkBackend {
  public:
-  ~OstreamSink() override { out_.flush(); }
-
-  explicit OstreamSink(std::ostringstream &stream)
-      : out_(stream) {
-    // By default, string streams do not support vterm.
-    settings_.has_virtual_terminal_processing = false;
+  StdoutSink() {
+    settings_.has_virtual_terminal_processing = true;
   }
+  ~StdoutSink() { std::cout.flush(); }
 
-  explicit OstreamSink(std::ostream &stream = std::cout)
-      : out_(stream) {
-    settings_.has_virtual_terminal_processing = true; // Default this to true
-  }
-
-  std::unique_ptr<SinkBackend> Clone() const override { return std::make_unique<OstreamSink>(); }
+  NO_DISCARD std::unique_ptr<SinkBackend> Clone() const override { return std::make_unique<StdoutSink>(); }
  private:
   void dispatch([[maybe_unused]] memory::BasicMemoryBuffer<char> &buffer,
                 [[maybe_unused]] const Record &record) override {
     if (!buffer.Empty()) {
-      out_.write(buffer.Data(), static_cast<std::streamsize>(buffer.Size()));
+      std::cout.write(buffer.Data(), static_cast<std::streamsize>(buffer.Size()));
     }
   }
 
-  void flush() override { out_.flush(); }
+  void flush() override { std::cout.flush(); }
+};
+
+//! \brief A sink that writes to an ostream. We require this ostream be a shared pointer so that we don't leave dangling
+//! references to locally created streams.
+class OstreamSink : public SinkBackend {
+ public:
+  ~OstreamSink() override { out_->flush(); }
+
+  explicit OstreamSink(std::shared_ptr<std::ostream> stream)
+      : out_(std::move(stream)) {
+    // By default, arbitrary streams are not assumed to support virtual terminal processing.
+    settings_.has_virtual_terminal_processing = false;
+  }
+
+  NO_DISCARD std::unique_ptr<SinkBackend> Clone() const override { return std::make_unique<OstreamSink>(out_); }
+ private:
+  void dispatch([[maybe_unused]] memory::BasicMemoryBuffer<char> &buffer,
+                [[maybe_unused]] const Record &record) override {
+    if (!buffer.Empty()) {
+      out_->write(buffer.Data(), static_cast<std::streamsize>(buffer.Size()));
+    }
+  }
+
+  void flush() override { out_->flush(); }
 
   //! \brief A reference to the stream to write to.
-  std::ostream &out_;
+  std::shared_ptr<std::ostream> out_;
 };
 
 // ==============================================================================
