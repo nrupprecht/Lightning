@@ -104,6 +104,21 @@ TEST(Logger, MoreThanInitialBuffer) {
   EXPECT_EQ(stream->str(), "123456789101112131415\n");
 }
 
+TEST(Logger, LogHandler) {
+  auto stream = std::make_shared<std::ostringstream>();
+  auto sink = UnlockedSink::From<OstreamSink>(stream);
+  sink->SetFormatter(formatting::MakeMsgFormatter("{}", formatting::MSG));
+  Logger logger(sink);
+
+  {
+    auto handle = LOG_HANDLER_FOR(logger, Info);
+    ASSERT_TRUE(handle);
+    handle.GetRecord().Bundle() << "ABC";
+    EXPECT_EQ(stream->str(), "");
+  }
+  EXPECT_EQ(stream->str(), "ABC\n");
+}
+
 TEST(Logger, BlockAttributes) {
   auto stream = std::make_shared<std::ostringstream>();
   auto sink = UnlockedSink::From<OstreamSink>(stream);

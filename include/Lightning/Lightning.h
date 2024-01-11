@@ -3438,26 +3438,32 @@ class Logger {
     return Log(BasicAttributes(severity, file_name, function_name, line_number), attrs...);
   }
 
+  //! \brief Check whether the logger will accept a record with the specified severity (or lack of severity).
   NO_DISCARD bool WillAccept(std::optional<Severity> severity) const {
     if (!core_)
       return false;
     return core_->WillAccept(severity);
   }
 
+  //! \brief Get the logger's core.
   NO_DISCARD const std::shared_ptr<Core> &GetCore() const { return core_; }
 
+  //! \brief Check if the logger has a core.
   NO_DISCARD bool HasCore() const { return static_cast<bool>(core_); }
 
+  //! \brief Replace the logger's current core with a new core.
   Logger &SetCore(std::shared_ptr<Core> core) {
     core_ = std::move(core);
     return *this;
   }
 
+  //! \brief Set whether the logger should generate a time stamp for the logs.
   Logger &SetDoTimeStamp(bool do_timestamp) {
     do_time_stamp_ = do_timestamp;
     return *this;
   }
 
+  //! \brief Set the name of the logger. This attribute is attached to every record.
   Logger &SetName(const std::string &logger_name) {
     logger_name_ = logger_name;
     return *this;
@@ -3507,6 +3513,11 @@ class Logger {
     if (auto core = GetCore()) {
       core->SetAllFormatters(formatter);
     }
+  }
+
+  //! \brief Create a clone of the logger. This not only copies the logger, but clones the core and all sinks.
+  Logger Clone() {
+    return Logger(*this).SetCore(core_->Clone());
   }
 
  private:
