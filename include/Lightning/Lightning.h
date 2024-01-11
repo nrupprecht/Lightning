@@ -3661,18 +3661,23 @@ class Global {
 #define LOG_SEV_TO(logger, severity) \
   if ((logger).WillAccept(::lightning::Severity::severity)) \
     if (auto handler = (logger).LogWithLocation(::lightning::Severity::severity, __FILE__, LL_CURRENT_FUNCTION, __LINE__)) \
-  handler.GetRecord().Bundle()
+      handler.GetRecord().Bundle()
 
 //! \brief Log with a severity attribute to the global logger.
 #define LOG_SEV(severity) LOG_SEV_TO(::lightning::Global::GetLogger(), severity)
 
+//! \brief Log to a specific logger, without severity.
 #define LOG_TO(logger) \
   if ((logger).WillAccept(::std::nullopt)) \
     if (auto handler = (logger).LogWithLocation(::std::nullopt, __FILE__, LL_CURRENT_FUNCTION, __LINE__)) \
-  handler.GetRecord().Bundle()
+      handler.GetRecord().Bundle()
 
+//! \brief Log, without severity, to the global logger.
 #define LOG() LOG_TO(::lightning::Global::GetLogger())
 
+//! \brief Get a logging handler for a specific logger.
+#define LOG_HANDLER_FOR(logger, severity) \
+  (logger).LogWithLocation(::lightning::Severity::severity, __FILE__, LL_CURRENT_FUNCTION, __LINE__)
 
 // ==============================================================================
 //  Formatting functions.
