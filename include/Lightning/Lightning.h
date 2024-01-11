@@ -3390,7 +3390,9 @@ class Logger {
       : core_(std::make_shared<Core>()) {}
 
   //! \brief Create a logger without a logging core.
-  explicit Logger(NoCore_t)
+  //! Note that the constructor is *not* explicit on purpose, so parameters can be defaulted like
+  //!     const Logger &logger = {NoCore};
+  Logger(NoCore_t)
       : core_(nullptr) {}
 
   //! \brief Create a logger with a new core and a single sink.
