@@ -567,7 +567,7 @@ class HybridVector {
 
 //! \brief Create a string view from a range of characters.
 inline std::string_view MakeStringView(const char *begin, const char *end) {
-  LL_REQUIRE(begin <= end, "begin must not be after end")
+  LL_REQUIRE(begin <= end, "begin must not be after end");
   return {begin, static_cast<std::size_t>(std::distance(begin, end))};
 }
 
@@ -790,7 +790,7 @@ class DateTime {
 
   static void validateYMD(int year, int month, int day) {
     LL_REQUIRE(0 < year, "year must be > 0");
-    LL_REQUIRE(0 < month && month <= 12, "month must be in the range [1, 12]")
+    LL_REQUIRE(0 < month && month <= 12, "month must be in the range [1, 12]");
     LL_REQUIRE(0 < day && day <= DaysInMonth(month, year),
                "there are only " << DaysInMonth(month, year) << " days in " << year << "-" << month);
   }
