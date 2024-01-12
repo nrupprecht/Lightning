@@ -82,29 +82,29 @@ namespace lightning {
 // ==============================================================================
 
 #define LL_REQUIRE(condition, message) \
-  { \
+  do { \
     if (!(condition)) { \
       std::ostringstream _strm_; \
       _strm_ << message; \
       throw std::runtime_error(_strm_.str()); \
     } \
-  }
+  } while (false)
 
 #define LL_ASSERT(condition, message) \
-  { \
+  do { \
     if (!(condition)) { \
       std::ostringstream _strm_; \
       _strm_ << message; \
       throw std::runtime_error(_strm_.str()); \
     } \
-  }
+  } while (false)
 
 #define LL_FAIL(message) \
-  { \
+  do { \
     std::ostringstream _strm_; \
     _strm_ << message; \
     throw std::runtime_error(_strm_.str()); \
-  }
+  } while (false)
 
 // ==============================================================================
 //  Type traits.
