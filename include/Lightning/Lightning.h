@@ -197,7 +197,7 @@ constexpr inline bool IsCstrRelated_v =
 
 namespace detail {
 
-inline void current_function_helper() {
+[[maybe_unused]] inline void current_function_helper() {
 #if defined( LL_DISABLE_CURRENT_FUNCTION )
 # define LL_CURRENT_FUNCTION "(unknown)"
 #elif defined(__GNUC__) || (defined(__MWERKS__) && (__MWERKS__ >= 0x3000)) || (defined(__ICC) && (__ICC >= 600)) || defined(__ghs__) || defined(__clang__)
@@ -274,8 +274,8 @@ class BasicMemoryBuffer {
   NO_DISCARD const T *Data() const { return data_; }
 
   //! \brief Returns a pointer to the end (one past the last element) of the buffer.
-  NO_DISCARD const T *End() const { return data_ + size_; }
-  NO_DISCARD T *End() { return data_ + size_; }
+  [[maybe_unused]] NO_DISCARD const T *End() const { return data_ + size_; }
+  [[maybe_unused]] NO_DISCARD T *End() { return data_ + size_; }
 
   //! \brief begin() function, for compatibility with range-based for loops.
   NO_DISCARD const T *begin() const { return data_; }
@@ -318,13 +318,13 @@ class BasicMemoryBuffer {
   NO_DISCARD std::size_t Size() const { return size_; }
 
   //! \brief Get the capacity of the buffer.
-  NO_DISCARD std::size_t Capacity() const { return capacity_; }
+  [[maybe_unused]] NO_DISCARD std::size_t Capacity() const { return capacity_; }
 
   //! \brief Checks whether the buffer is empty.
   NO_DISCARD bool Empty() const { return size_ == 0; }
 
   //! \brief Make sure the capacity is enough for the given size plus some additional amount of space.
-  void ReserveAdditional(std::size_t additional) {
+  [[maybe_unused]] void ReserveAdditional(std::size_t additional) {
     reserve(size_ + additional);
   }
 
@@ -345,7 +345,7 @@ class BasicMemoryBuffer {
 
   //! \brief If the storage type is char, return a string_view of the data.
   template <LL_ENABLE_IF(std::is_same_v<T, char>)>
-  NO_DISCARD std::string_view ToView() const {
+  [[maybe_unused]] NO_DISCARD std::string_view ToView() const {
     return std::string_view(Data(), Size());
   }
 
@@ -1449,7 +1449,7 @@ struct FillUntil : public BaseSegment {
   void addToBuffer(const FormattingSettings &settings,
                    const formatting::MessageInfo &msg_info,
                    memory::BasicMemoryBuffer<char> &buffer,
-                   [[maybe_unused]] const std::string_view &fmt = {}) const override {
+                   [[maybe_unused]] const std::string_view &fmt) const override {
     const auto num_chars = SizeRequired(settings, msg_info);
     buffer.AppendN(fill_char_, num_chars);
   }
@@ -1482,7 +1482,7 @@ struct RepeatChar : public BaseSegment {
   void addToBuffer(const FormattingSettings &,
                    const formatting::MessageInfo &,
                    memory::BasicMemoryBuffer<char> &buffer,
-                   [[maybe_unused]] const std::string_view &fmt = {}) const override {
+                   [[maybe_unused]] const std::string_view &fmt) const override {
     buffer.AppendN(c_, repeat_length_);
   }
 
@@ -1507,7 +1507,7 @@ struct NewLineIndent_t : public BaseSegment {
   void addToBuffer(const FormattingSettings &,
                    const formatting::MessageInfo &msg_info,
                    memory::BasicMemoryBuffer<char> &buffer,
-                   [[maybe_unused]] const std::string_view &fmt = {}) const override {
+                   [[maybe_unused]] const std::string_view &fmt) const override {
     buffer.PushBack('\n');
     if (msg_info.message_indentation) {
       buffer.AppendN(' ', *msg_info.message_indentation);
@@ -1547,7 +1547,7 @@ struct Segment<std::string> : public BaseSegment {
   void addToBuffer(const FormattingSettings &,
                    const formatting::MessageInfo &,
                    memory::BasicMemoryBuffer<char> &buffer,
-                   [[maybe_unused]] const std::string_view &fmt = {}) const override {
+                   [[maybe_unused]] const std::string_view &fmt) const override {
     AppendBuffer(buffer, str_);
   }
 
@@ -1571,7 +1571,7 @@ struct Segment<char *> : public BaseSegment {
   void addToBuffer([[maybe_unused]] const FormattingSettings &settings,
                    const formatting::MessageInfo &,
                    memory::BasicMemoryBuffer<char> &buffer,
-                   [[maybe_unused]] const std::string_view &fmt = {}) const override {
+                   [[maybe_unused]] const std::string_view &fmt) const override {
     buffer.Append(cstr_, cstr_ + size_required_);
   }
 
@@ -3102,16 +3102,16 @@ class SinkBackend {
 //! and controlling access to the sink backend, i.e. synchronization.
 class Sink {
  public:
-  //! \brief
+  //! \brief Construct a sink around a specific backend.
   explicit Sink(std::unique_ptr<SinkBackend> &&backend)
       : sink_backend_(std::move(backend)), formatter_(formatting::MakeStandardFormatter()) {}
 
   virtual ~Sink() = default;
 
-  NO_DISCARD bool WillAccept(const RecordAttributes &attributes) const {
-    return filter_.WillAccept(attributes);
-  }
+  //! \brief Check if a sink, given the record's attributes, will accept the record.
+  NO_DISCARD bool WillAccept(const RecordAttributes &attributes) const { return filter_.WillAccept(attributes); }
 
+  //! \brief Check if a sink, given the record's severity, will accept the record.
   NO_DISCARD bool WillAccept(std::optional<Severity> severity) const { return filter_.WillAccept(severity); }
 
   //! \brief Get the AttributeFilter for the sink.
@@ -3153,6 +3153,7 @@ class Sink {
 
   //! \brief Get the sink backend.
   SinkBackend &GetBackend() { return *sink_backend_; }
+  NO_DISCARD const SinkBackend &GetBackend() const { return *sink_backend_; }
 
   //! \brief Get the sink backend, cast to a specific type.
   //!
@@ -3162,7 +3163,7 @@ class Sink {
     return dynamic_cast<SinkBackend_t *>(sink_backend_.get());
   }
 
-  std::shared_ptr<Sink> Clone() const {
+  NO_DISCARD std::shared_ptr<Sink> Clone() const {
     auto sink = clone();
     sink->filter_ = filter_;
     sink->formatter_ = formatter_->Copy();
@@ -3170,9 +3171,11 @@ class Sink {
   }
 
  protected:
+  //! \brief Private virtual record dispatch method.
   virtual void dispatch(const Record &record) = 0;
 
-  virtual std::shared_ptr<Sink> clone() const = 0;
+  //! \brief Private virtual clone method.
+  NO_DISCARD virtual std::shared_ptr<Sink> clone() const = 0;
 
   //! \brief The sink backend, to which the frontend feeds record.
   std::unique_ptr<SinkBackend> sink_backend_{};
@@ -3203,7 +3206,7 @@ class UnlockedSink : public Sink {
     sink_backend_->Dispatch(buffer, record);
   }
 
-  std::shared_ptr<Sink> clone() const override { return std::make_shared<UnlockedSink>(sink_backend_->Clone()); }
+  NO_DISCARD std::shared_ptr<Sink> clone() const override { return std::make_shared<UnlockedSink>(sink_backend_->Clone()); }
 };
 
 //! \brief  Sink frontend that uses a mutex to control access.
@@ -3552,7 +3555,7 @@ class EmptySink : public SinkBackend {
 //! Primarily for timing and testing.
 class TrivialDispatchSink : public SinkBackend {
  public:
-  std::unique_ptr<SinkBackend> Clone() const override { return std::make_unique<TrivialDispatchSink>(); }
+  NO_DISCARD std::unique_ptr<SinkBackend> Clone() const override { return std::make_unique<TrivialDispatchSink>(); }
  private:
   void dispatch([[maybe_unused]] memory::BasicMemoryBuffer<char> &buffer,
                 [[maybe_unused]] const Record &record) override {}
@@ -3566,7 +3569,7 @@ class FileSink : public SinkBackend {
 
   ~FileSink() override { fout_.flush(); }
 
-  std::unique_ptr<SinkBackend> Clone() const override { return std::make_unique<FileSink>(filename_); }
+  NO_DISCARD std::unique_ptr<SinkBackend> Clone() const override { return std::make_unique<FileSink>(filename_); }
  private:
   void dispatch([[maybe_unused]] memory::BasicMemoryBuffer<char> &buffer,
                 [[maybe_unused]] const Record &record) override {
@@ -3581,12 +3584,13 @@ class FileSink : public SinkBackend {
   std::string filename_;
 };
 
+//! \brief A sink that writes to std::cout.
 class StdoutSink : public SinkBackend {
  public:
   StdoutSink() {
     settings_.has_virtual_terminal_processing = true;
   }
-  ~StdoutSink() { std::cout.flush(); }
+  ~StdoutSink() override { std::cout.flush(); }
 
   NO_DISCARD std::unique_ptr<SinkBackend> Clone() const override { return std::make_unique<StdoutSink>(); }
  private:
@@ -3600,8 +3604,9 @@ class StdoutSink : public SinkBackend {
   void flush() override { std::cout.flush(); }
 };
 
-//! \brief A sink that writes to an ostream. We require this ostream be a shared pointer so that we don't leave dangling
-//! references to locally created streams.
+//! \brief A sink that writes to an ostream.
+//!
+//! We require this ostream be a shared pointer so that we don't leave dangling references to locally created streams.
 class OstreamSink : public SinkBackend {
  public:
   ~OstreamSink() override { out_->flush(); }
