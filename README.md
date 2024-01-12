@@ -19,7 +19,8 @@ The simplest possible way to create a logger that writes to std::cout:
 
 ```C++
 // Create a simple logger with no attributes and default formatting.
-Logger logger(std::make_shared<OstreamSink>());
+// It is created with a single (synchronous) sink that writes to std::cout.
+Logger logger(NewSink<StdoutSink>());
 
 LOG_SEV_TO(logger, Info) << "Hello world";
 ```
@@ -28,7 +29,7 @@ Global logging can be set up by accessing the global logger and core,
 
 ```C++
 // Add sink to the global logger, set formatting.
-auto sink = std::make_shared<OstreamSink>();
+auto sink = NewSink<StdoutSink>();
 Global::GetCore()->AddSink(sink)
     .SetAllFormatters(formatting::MakeMsgFormatter("[{}] [{}] {}",
         formatting::SeverityAttributeFormatter{},
@@ -63,7 +64,7 @@ sink-level filters which (surprise, surprise) filter any messages coming into a 
 To set the acceptance levels of a sink,
 
 ```C++
-// Shared pointer to the sink is named 'fs'
+// Shared pointer to the sink is named 'fs'. The sink now only accepts Error messages.
 fs->GetFilter().Accept({ Severity::Error });
 
 // Another, more idiomatic way to set the filter is via boolean operations.
@@ -88,7 +89,7 @@ logger.GetCore()->GetFilter().Accept({ Severity::Warning, Severity::Error });
 ### Formatting messages
 
 Each sink uses an object of type ```BaseMessageFormatter``` which it uses to format logging records. An efficient child 
-class of this is provided, MsgFormatter, though users are of course able to subclass BaseMessageFormatter themselves.
+class of this is provided, ```MsgFormatter```, though users are of course able to subclass BaseMessageFormatter themselves.
 The best way to create a formatter is the ```MakeMsgFormatter``` function, which takes a format string and a number
 of ```AttributeFormatter``` instances as arguments, and returns a unique pointer to a new formatter. The format string
 will replace the N-th ```{}``` in the format string with the formatted attribute from the N-th attribute formatter.
@@ -108,10 +109,10 @@ LOG_SEV_TO(logger, Info) << "Hello world!";
 // [2023-07-24 15:07:01.152403] [main-logger] [Info   ] Hello world!
 ```
 
-Another built in formatter is a FormatterBySeverity, which defines different formatters for each severity level.
+Another built in formatter is a ```FormatterBySeverity```, which defines different formatters for each severity level.
     
 ```C++
-auto formatter = std::make_unique<formatting::FormatterBySeverity>();
+formatting::FormatterBySeverity formatter;
 {
     auto default_fmt = MakeMsgFormatter("[{}] [{}] {}",
                                         formatting::DateTimeAttributeFormatter{},
@@ -125,13 +126,13 @@ auto formatter = std::make_unique<formatting::FormatterBySeverity>();
                                           formatting::SeverityAttributeFormatter{},
                                           formatting::MSG);
    
-    formatter->
+    formatter
         // Set formatter for Trace and Debug severities.
-        SetFormatterForSeverity(LoggingSeverity <= Severity::Debug, *low_level_fmt)
+        .SetFormatterForSeverity(LoggingSeverity <= Severity::Debug, *low_level_fmt)
         // Set formatter for all other severities (including records without severities).
         .SetDefaultFormatter(std::move(default_fmt));
 }
-Global::GetCore()->SetAllFormatters(*formatter);
+Global::GetCore()->SetAllFormatters(formatter);
 ```
 
 This allows you, for example, to make a logger that logs more information for trace and debug messages:
