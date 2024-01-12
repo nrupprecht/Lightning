@@ -3234,7 +3234,7 @@ class SynchronousSink : public Sink {
 };
 
 //! \brief  Create a new sink frontend / backend pair.
-template <typename Frontend_t, typename Backend_t, typename... Args_t>
+template <typename Backend_t, typename Frontend_t = SynchronousSink, typename... Args_t>
 std::shared_ptr<Sink> NewSink(Args_t &&... args) {
   return std::make_shared<Frontend_t>(std::make_unique<Backend_t>(std::forward<Args_t>(args)...));
 }

@@ -58,7 +58,7 @@ void bench_mt(int howmany, std::size_t thread_count);
 
 auto main() -> int {
   // Set up global logger.
-  auto sink = NewSink<UnlockedSink, StdoutSink>();
+  auto sink = NewSink<StdoutSink, UnlockedSink>();
   Global::GetCore()->AddSink(sink).SetAllFormatters(formatting::MakeMsgFormatter(
       "[{}] [{}] {}",
       formatting::SeverityAttributeFormatter{}.SeverityName(Severity::Info, "Info"),
@@ -137,7 +137,7 @@ void bench_st(int howmany) {
 
   auto make_sink = [&count]() {
     std::string file_name = "logs/lightning_basic_st-" + std::to_string(count) + ".log";
-    return std::pair{NewSink<UnlockedSink, FileSink>(file_name), file_name};
+    return std::pair{NewSink<FileSink, UnlockedSink>(file_name), file_name};
   };
 
   {  // Benchmark using RecordFormatter
@@ -406,7 +406,7 @@ void bench_st(int howmany) {
   }
 
   {  // Benchmark using EmptySink
-    auto fs = NewSink<UnlockedSink, EmptySink>();
+    auto fs = NewSink<EmptySink, UnlockedSink>();
     Logger logger(fs);
     logger.SetName("basic_st/backtrace-off");
     fs->SetFormatter(MakeMsgFormatter("[{}] [{}] [{}] {}",
@@ -425,7 +425,7 @@ void bench_st(int howmany) {
   }
 
   {  // Benchmark using TrivialDispatchSink
-    auto fs = NewSink<UnlockedSink, TrivialDispatchSink>();
+    auto fs = NewSink<TrivialDispatchSink, UnlockedSink>();
     Logger logger(fs);
     logger.SetName("basic_st/backtrace-off");
     fs->SetFormatter(MakeMsgFormatter("[{}] [{}] [{}] {}",
@@ -445,7 +445,7 @@ void bench_st(int howmany) {
 
   {  // Benchmark using MsgFormatter, not really formatting.
     std::string file_name = "logs/lightning_basic_st-nonformatting.log";
-    auto fs = NewSink<UnlockedSink, FileSink>(file_name);
+    auto fs = NewSink<FileSink, UnlockedSink>(file_name);
     Logger logger(fs);
     fs->SetFormatter(MakeMsgFormatter(
         "[2023-06-26 20:33:50.539002] [basic_st/backtrace-off] [Info   ] Hello logger: msg number {}",
@@ -462,7 +462,7 @@ void bench_st(int howmany) {
 
   {  // Benchmark using MsgFormatter, not really formatting.
     std::string file_name = "logs/lightning_basic_st-format-date.log";
-    auto fs = NewSink<UnlockedSink, FileSink>(file_name);
+    auto fs = NewSink<FileSink, UnlockedSink>(file_name);
     Logger logger(fs);
     fs->SetFormatter(MakeMsgFormatter("[{}] [basic_st/backtrace-off] [Info   ] {}",
                                       formatting::DateTimeAttributeFormatter{},
@@ -480,7 +480,7 @@ void bench_st(int howmany) {
 
 void bench_st_types(int howmany) {
   auto make_logger = []() {
-    auto fs = NewSink<UnlockedSink, FileSink>("logs/lightning_basic_st-types.log");
+    auto fs = NewSink<FileSink, UnlockedSink>("logs/lightning_basic_st-types.log");
     Logger logger(fs);
     logger.SetName("basic_st/backtrace-off");
     fs->SetFormatter(MakeMsgFormatter("[{}] [{}] [{}] {}",
@@ -662,7 +662,7 @@ void bench_st_types(int howmany) {
 
 void bench_nonaccepting(int howmany) {
   {
-    auto fs = NewSink<UnlockedSink, FileSink>("logs/lightning_basic_st_nonaccepting.log");
+    auto fs = NewSink<FileSink, UnlockedSink>("logs/lightning_basic_st_nonaccepting.log");
     fs->GetFilter().Accept({Severity::Error});
     Logger logger(fs);
     logger.SetName("basic_st/backtrace-off");
@@ -682,7 +682,7 @@ void bench_nonaccepting(int howmany) {
                   << formatting::Format("{:L}/sec", static_cast<int>(howmany / delta_d));
   }
   {
-    auto fs = NewSink<UnlockedSink, FileSink>("logs/lightning_basic_st_nonaccepting.log");
+    auto fs = NewSink<FileSink, UnlockedSink>("logs/lightning_basic_st_nonaccepting.log");
     Logger logger(fs);
     logger.GetCore()->GetFilter().Accept({Severity::Error});
     logger.SetName("basic_st/backtrace-off");
@@ -702,7 +702,7 @@ void bench_nonaccepting(int howmany) {
                   << formatting::Format("{:L}/sec", static_cast<int>(howmany / delta_d));
   }
   {
-    auto fs = NewSink<UnlockedSink, FileSink>("logs/lightning_basic_st_nocore.log");
+    auto fs = NewSink<FileSink, UnlockedSink>("logs/lightning_basic_st_nocore.log");
     Logger logger(NoCore);
     logger.SetName("basic_st/backtrace-off");
     fs->SetFormatter(MakeMsgFormatter("[{}] [{}] [{}] {}",
