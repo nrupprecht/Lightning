@@ -58,8 +58,8 @@ void bench_mt(int howmany, std::size_t thread_count);
 
 auto main() -> int {
   // Set up global logger.
-  auto sink = NewSink<StdoutSink, UnlockedSink>();
-  Global::GetCore()->AddSink(sink).SetAllFormatters(formatting::MakeMsgFormatter(
+  Global::GetCore()->AddSink(NewSink<StdoutSink>())
+      .SetAllFormatters(formatting::MakeMsgFormatter(
       "[{}] [{}] {}",
       formatting::SeverityAttributeFormatter{}.SeverityName(Severity::Info, "Info"),
       formatting::DateTimeAttributeFormatter{},
@@ -511,7 +511,7 @@ void bench_st_types(int howmany) {
     for (auto i = 0; i < howmany; ++i) {
       LOG_SEV_TO(logger, Info) << "Richard of york may have fought battle in vain, but do you know how many "
                                   "other famous characters have fought battle in "
-                                  "vain? The answer may suprise you. The answer is 20.";
+                                  "vain? The answer may surprise you. The answer is 20.";
     }
     auto delta_d = duration_cast<duration<double>>(high_resolution_clock::now() - start).count();
     LOG_SEV(Info) << "Long C-string:" << PadUntil(pad_width) << "Elapsed: " << delta_d << " secs "

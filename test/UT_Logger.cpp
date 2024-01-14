@@ -100,7 +100,9 @@ TEST(Logger, MoreThanInitialBuffer) {
   sink->SetFormatter(formatting::MakeMsgFormatter("{}", formatting::MSG));
   Logger logger(sink);
 
-  LOG_SEV_TO(logger, Info) << "1" << "2" << "3" << "4" << "5" << "6" << "7" << "8" << "9" << "10" << "11" << "12" << "13" << "14" << "15";
+  LOG_SEV_TO(logger, Info) << "1" << "2" << "3" << "4" << "5"
+                           << "6" << "7" << "8" << "9" << "10"
+                           << "11" << "12" << "13" << "14" << "15";
   EXPECT_EQ(stream->str(), "123456789101112131415\n");
 }
 

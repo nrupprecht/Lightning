@@ -256,6 +256,7 @@ class ImplBase {
 };
 
 namespace memory {
+
 //! \brief Basic contiguous memory buffer. Not thread safe.
 //!
 template <typename T>
@@ -657,6 +658,7 @@ inline Month MonthIntToMonth(int month) {
 //!
 class DateTime {
  public:
+
   DateTime() = default;
 
   DateTime(int year, int month, int day, int hour = 0, int minute = 0, int second = 0, int microsecond = 0) {
@@ -959,12 +961,11 @@ constexpr int log10_max_ull_power_of_ten = 19;
 //! \brief Returns how many digits the decimal representation of a ull will have.
 //! The optional bound "upper" means that the number has at most "upper" digits.
 inline unsigned NumberOfDigitsULL(unsigned long long x, int upper = detail::log10_max_ull_power_of_ten) {
-  using namespace detail;
   upper = std::max(0, std::min(upper, 19));
   if (x == 0) return 1u;
-  if (x >= max_ull_power_of_ten) return 20;
-  auto it = std::upper_bound(&powers_of_ten[0], &powers_of_ten[upper], x);
-  return static_cast<unsigned>(std::distance(&powers_of_ten[0], it));
+  if (x >= detail::max_ull_power_of_ten) return 20;
+  auto it = std::upper_bound(&detail::powers_of_ten[0], &detail::powers_of_ten[upper], x);
+  return static_cast<unsigned>(std::distance(&detail::powers_of_ten[0], it));
 }
 
 //! \brief Get the number of digits that the base 10 representation of an integer will have. Note that this does not
@@ -3098,6 +3099,45 @@ class SinkBackend {
   bool auto_flush_ = false;
 };
 
+//! \brief Base class for sink wrappers. These, in general, potentially lock the sink while the object exists, keeping
+//! other threads from accessing the sink while the LockedSink wrapper is alive.
+//! Sink frontends are responsible for thread synchronization, and only frontend sinks that use a mutex will return a
+//! truly "locked" sink, others will just return a SinkWrapper.
+template <typename SinkBackend_t, LL_ENABLE_IF(std::is_base_of_v<SinkBackend, SinkBackend_t>)>
+class SinkWrapper : public ImplBase {
+  friend class ImplBase;
+ protected:
+  struct Impl : public ImplBase::Impl {
+    explicit Impl(SinkBackend_t *backend) : backend(backend) {}
+    SinkBackend_t *backend{};
+  };
+
+  explicit SinkWrapper(const std::shared_ptr<Impl> &impl) : ImplBase(impl) {}
+ public:
+  explicit SinkWrapper(SinkBackend_t *backend) : ImplBase(std::make_shared<Impl>(backend)) {}
+  SinkBackend_t *operator->() { return impl<SinkWrapper>()->backend; }
+  explicit operator bool() { return static_cast<bool>(impl<SinkWrapper>()->backend); }
+
+  //! \brief Try casting the backend to a specific type.
+  template <typename OtherBackend_t>
+  OtherBackend_t *As() { return dynamic_cast<OtherBackend_t *>(impl<SinkWrapper>()->backend); }
+};
+
+//! \brief A locked sink that uses a mutex to lock the sink, controlling access.
+template <typename SinkBackend_t>
+class LockedSink : public SinkWrapper<SinkBackend_t> {
+ protected:
+  struct Impl : public SinkWrapper<SinkBackend_t>::Impl {
+    explicit Impl(SinkBackend_t *backend, std::mutex &mutex)
+        : SinkWrapper<SinkBackend_t>::Impl(backend), lock(mutex) {}
+    std::lock_guard<std::mutex> lock;
+  };
+
+ public:
+  explicit LockedSink(SinkBackend_t *backend, std::mutex &mutex)
+      : SinkWrapper<SinkBackend_t>(std::make_shared<Impl>(backend, mutex)) {}
+};
+
 //! \brief Base class for sink frontends. These are responsible for common tasks, like filtering
 //! and controlling access to the sink backend, i.e. synchronization.
 class Sink {
@@ -3155,6 +3195,8 @@ class Sink {
   SinkBackend &GetBackend() { return *sink_backend_; }
   NO_DISCARD const SinkBackend &GetBackend() const { return *sink_backend_; }
 
+  NO_DISCARD SinkWrapper<SinkBackend> GetLockedBackend() { return getLockedBackend(); }
+
   //! \brief Get the sink backend, cast to a specific type.
   //!
   //! returns nullptr if the type was not correct.
@@ -3176,6 +3218,12 @@ class Sink {
 
   //! \brief Private virtual clone method.
   NO_DISCARD virtual std::shared_ptr<Sink> clone() const = 0;
+
+  //! \brief Get the sink backend, wrapped in a SinkWrapper. The default implementation does not lock the sink, since
+  //! the Sink base class has no mutex.
+  virtual SinkWrapper<SinkBackend> getLockedBackend() {
+    return SinkWrapper<SinkBackend>(sink_backend_.get());
+  }
 
   //! \brief The sink backend, to which the frontend feeds record.
   std::unique_ptr<SinkBackend> sink_backend_{};
@@ -3223,6 +3271,13 @@ class SynchronousSink : public Sink {
     return std::make_shared<SynchronousSink>(std::make_unique<SinkBackend_t>(std::forward<Args_t>(args)...));
   }
 
+  bool IsLocked() const {
+    if (lock_.try_lock()) {
+      lock_.unlock();
+      return false;
+    }
+    return true;
+  }
  private:
   void dispatch(const Record &record) override {
     memory::MemoryBuffer<char> buffer;
@@ -3235,14 +3290,18 @@ class SynchronousSink : public Sink {
     }
   }
 
+  NO_DISCARD SinkWrapper<SinkBackend> getLockedBackend() override {
+    return LockedSink<SinkBackend>(sink_backend_.get(), lock_);
+  }
+
   NO_DISCARD std::shared_ptr<Sink> clone() const override { return std::make_shared<SynchronousSink>(sink_backend_->Clone()); }
 
-  std::mutex lock_;
+  mutable std::mutex lock_;
 };
 
 //! \brief  Create a new sink frontend / backend pair.
 template <typename Backend_t, typename Frontend_t = SynchronousSink, typename... Args_t>
-std::shared_ptr<Sink> NewSink(Args_t &&... args) {
+std::shared_ptr<Frontend_t> NewSink(Args_t &&... args) {
   return std::make_shared<Frontend_t>(std::make_unique<Backend_t>(std::forward<Args_t>(args)...));
 }
 
@@ -3478,8 +3537,7 @@ class Logger {
 
   //! \brief Notify the core to flush all of its sinks.
   void Flush() const {
-    if (core_)
-      core_->Flush();
+    if (core_) core_->Flush();
   }
 
   //! \brief Get all sinks that have the specified type of backend.
@@ -3548,8 +3606,7 @@ class Logger {
 class EmptySink : public SinkBackend {
  public:
   EmptySink() { settings_.needs_formatting = false; }
-
-  std::unique_ptr<SinkBackend> Clone() const override { return std::make_unique<EmptySink>(); }
+  NO_DISCARD std::unique_ptr<SinkBackend> Clone() const override { return std::make_unique<EmptySink>(); }
  private:
   void dispatch(memory::BasicMemoryBuffer<char> &, const Record &) override {}
 };
@@ -3622,6 +3679,7 @@ class OstreamSink : public SinkBackend {
   }
 
   NO_DISCARD std::unique_ptr<SinkBackend> Clone() const override { return std::make_unique<OstreamSink>(out_); }
+  std::ostream& GetStream() { return *out_; }
  private:
   void dispatch([[maybe_unused]] memory::BasicMemoryBuffer<char> &buffer,
                 [[maybe_unused]] const Record &record) override {

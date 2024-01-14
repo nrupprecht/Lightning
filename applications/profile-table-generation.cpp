@@ -14,25 +14,6 @@ using std::chrono::duration;
 using std::chrono::duration_cast;
 using std::chrono::high_resolution_clock;
 
-std::string Format(long long x) {
-  auto digits = static_cast<int>(std::log10(x));
-  auto periods = digits / 3;
-
-  std::ostringstream stream;
-
-  auto p = static_cast<int>(std::pow(10, 3 * periods));
-  stream << x / p;
-  x %= p;
-
-  for (auto i = 1; i <= periods; ++i) {
-    stream << ",";
-    p = static_cast<int>(std::pow(10, 3 * (periods - i)));
-    stream << std::setfill('0') << std::setw(3) << x / p;
-    x %= p;
-  }
-
-  return stream.str();
-}
 
 namespace std {
 
@@ -73,7 +54,8 @@ void AddHeader() {
 void AddRow(const std::string& name, double delta_d, int howmany) {
   LOG_SEV(Info) << "|" << name << PadUntil(pad_width)
                 << "|" << delta_d << PadUntil(pad_width + 25)
-                << "|" << Format(static_cast<int>(howmany / delta_d)) << "/sec" << PadUntil(pad_width + 45) << "|";
+          << "|" << formatting::Format("{:L}/sec", static_cast<int>(howmany / delta_d)) << PadUntil(pad_width + 45)
+          << "|";
 }
 
 int main() {
@@ -91,7 +73,7 @@ int main() {
 
   LOG_SEV(Info) << RepeatChar(header_length, '*');
   LOG_SEV(Info);
-  LOG_SEV(Info) << "Single threaded: " << Format(iters) << " messages";
+  LOG_SEV(Info) << "Single threaded: " << formatting::Format("{:L}", iters) << " messages";
   LOG_SEV(Info);
   AddHeader();
   bench_st(iters);
@@ -99,7 +81,7 @@ int main() {
 
   LOG_SEV(Info) << RepeatChar(header_length, '*');
   LOG_SEV(Info);
-  LOG_SEV(Info) << "Single threaded, Types: " << Format(iters) << " messages";
+  LOG_SEV(Info) << "Single threaded, Types: " << formatting::Format("{:L}", iters) << " messages";
   LOG_SEV(Info);
   AddHeader();
   bench_st_types(iters);
@@ -107,7 +89,7 @@ int main() {
 
   LOG_SEV(Info) << RepeatChar(header_length, '*');
   LOG_SEV(Info);
-  LOG_SEV(Info) << "Single threaded: " << Format(iters) << " messages, non-acceptance";
+  LOG_SEV(Info) << "Single threaded: " << formatting::Format("{:L}", iters) << " messages, non-acceptance";
   LOG_SEV(Info);
   AddHeader();
   bench_nonaccepting(iters);
@@ -115,7 +97,8 @@ int main() {
 
   LOG_SEV(Info) << RepeatChar(header_length, '*');
   LOG_SEV(Info);
-  LOG_SEV(Info) << "Multi threaded (" << num_threads << " threads): " << Format(iters) << " messages";
+  LOG_SEV(Info) << "Multi threaded (" << num_threads << " threads): " << formatting::Format("{:L}", iters)
+                << " messages";
   LOG_SEV(Info);
   AddHeader();
   bench_mt(iters, num_threads);
@@ -223,7 +206,7 @@ void bench_st_types(int howmany) {
     auto start = high_resolution_clock::now();
     for (auto i = 0; i < howmany; ++i) {
       LOG_SEV_TO(logger, Info) << "Richard of york may have fought battle in vain, but do you know how many other famous characters have fought battle in "
-                                  "vain? The answer may suprise you. The answer is 20.";
+                                  "vain? The answer may surprise you. The answer is 20.";
     }
     auto delta_d = duration_cast<duration<double>>(high_resolution_clock::now() - start).count();
     AddRow("Long C-string", delta_d, howmany);
