@@ -3202,7 +3202,9 @@ class UnlockedSink : public Sink {
  private:
   void dispatch(const Record &record) override {
     memory::MemoryBuffer<char> buffer;
-    formatter_->Format(record, sink_backend_->GetFormattingSettings(), buffer);
+    if (sink_backend_->GetFormattingSettings().needs_formatting) {
+      formatter_->Format(record, sink_backend_->GetFormattingSettings(), buffer);
+    }
     sink_backend_->Dispatch(buffer, record);
   }
 
@@ -3224,7 +3226,9 @@ class SynchronousSink : public Sink {
  private:
   void dispatch(const Record &record) override {
     memory::MemoryBuffer<char> buffer;
-    formatter_->Format(record, sink_backend_->GetFormattingSettings(), buffer);
+    if (sink_backend_->GetFormattingSettings().needs_formatting) {
+      formatter_->Format(record, sink_backend_->GetFormattingSettings(), buffer);
+    }
     {
       std::lock_guard guard(lock_);
       sink_backend_->Dispatch(buffer, record);
