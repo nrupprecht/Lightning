@@ -3786,7 +3786,7 @@ void formatHelper(memory::BasicMemoryBuffer<char> &buffer,
   if constexpr (I < sizeof...(Args_t)) {
     auto &segment = std::get<I>(segments);
     segment.AddToBuffer(settings, msg_info, buffer, memory::MakeStringView(fmt_starts[I], fmt_ends[I]));
-    msg_info.message_length += buffer.Size();
+    msg_info.message_length += static_cast<unsigned>(buffer.Size());
   }
   if constexpr (I < N) {
     formatHelper < I + 1 > (buffer,
@@ -3881,5 +3881,7 @@ std::string Format(const char *fmt_string, const Args_t &... args) {
   FormattingSettings settings{};
   return Format(settings, fmt_string, args...);
 }
+
 } // namespace formatting
+
 } // namespace lightning
