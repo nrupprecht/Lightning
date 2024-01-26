@@ -175,7 +175,23 @@ using Unconst_t = typename detail_unconst::Unconst<T>::type;
 template <typename T>
 constexpr inline bool IsCstrRelated_v =
     std::is_same_v<Unconst_t<std::decay_t<T>>, char *> || std::is_same_v<remove_cvref_t<T>, std::string>;
-} // namespace typetraits.
+
+//! \brief Struct that has a variable if some compile-time condition is true, and is empty otherwise.
+template <typename T, bool use_storage_v>
+struct PossibleStorage {};
+
+template <typename T>
+struct PossibleStorage<T, true> {
+  PossibleStorage() = default; // Really this should only be ok if T is default constructable.
+  explicit PossibleStorage(const T v) : value(v) {}
+
+  PossibleStorage& operator=(const T &other) { value = other; return *this;}
+  operator T&() { return value; }
+
+  T value;
+};
+
+}  // namespace typetraits.
 
 // ==============================================================================
 //  Current function.
@@ -1621,9 +1637,14 @@ template <typename Floating_t>
 struct Segment<Floating_t, std::enable_if_t<std::is_floating_point_v<Floating_t>>> : public BaseSegment {
   explicit Segment(Floating_t number)
       : number_(number), size_required_(10) {
-    // TEMPORARY...? Wish that std::to_chars works for floating points.
-    serialized_number_ = std::to_string(number);
-    size_required_ = static_cast<unsigned>(serialized_number_.size());
+    if constexpr (typetraits::has_to_chars<Floating_t>) {
+      // Make an estimate. Does not really matter, since we aren't using SizeRequired anymore.
+      size_required_ = 32;
+    }
+    else {
+      serialized_number_ = std::to_string(number);
+      size_required_ = static_cast<unsigned>(serialized_number_.size());
+    }
   }
 
   NO_DISCARD unsigned SizeRequired([[maybe_unused]] const FormattingSettings &settings,
@@ -1637,17 +1658,25 @@ struct Segment<Floating_t, std::enable_if_t<std::is_floating_point_v<Floating_t>
   void addToBuffer([[maybe_unused]] const FormattingSettings &settings,
                    const formatting::MessageInfo &,
                    memory::BasicMemoryBuffer<char> &buffer,
-                   [[maybe_unused]] const std::string_view &fmt = {}) const override {
+                   [[maybe_unused]] const std::string_view &fmt) const override {
     // std::to_chars(start, end, number_, std::chars_format::fixed);
-    AppendBuffer(buffer, serialized_number_);
+    if constexpr (typetraits::has_to_chars<Floating_t>) {
+      char temp_buffer[32];
+      std::fill_n(temp_buffer, 32, '\0');
+      std::to_chars(temp_buffer, temp_buffer + 32, number_, std::chars_format::fixed);
+      auto size_required = std::strlen(temp_buffer);
+      buffer.Append(temp_buffer, temp_buffer + size_required);
+    }
+    else {
+      AppendBuffer(buffer, serialized_number_);
+    }
   }
 
   Floating_t number_;
   unsigned size_required_{};
 
-  // TEMPORARY, hopefully. clang does not support std::to_chars for floating point types even though it is a
-  // C++17 feature.
-  std::string serialized_number_;
+  // Not all versions of clang support std::to_chars for floating point types even though it is a C++17 feature.
+  typetraits::PossibleStorage<std::string, !typetraits::has_to_chars<Floating_t>> serialized_number_;
 };
 
 //! \brief Template specialization for integral value segments.
