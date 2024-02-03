@@ -1865,6 +1865,7 @@ RefBundle &RefBundle::operator<<(T &&obj) {
     CreateSegment < Segment < decay_t >> (obj);
   }
   else if constexpr (typetraits::has_to_string_v<decay_t>) {
+    using std::to_string;  // Enable ADL.
     operator<<(to_string(std::forward<T>(obj)));
   }
   else if constexpr (typetraits::is_ostreamable_v<decay_t>) {
@@ -3339,7 +3340,9 @@ class Core {
   //! \brief Dispatch a ref bundle to the sinks.
   void Dispatch(const Record &record) const {
     for (auto &sink : sinks_) {
-      sink->Dispatch(record);
+      if (sink->WillAccept(record.Attributes())) {
+        sink->Dispatch(record);
+      }
     }
   }
 
