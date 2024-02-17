@@ -1986,10 +1986,6 @@ class SeveritySet {
 //  SeveritySet operators.
 // ==============================================================================================
 
-inline SeveritySet operator||(SeveritySet lhs, SeveritySet rhs) { return SeveritySet{lhs.GetMask() | rhs.GetMask()}; }
-inline SeveritySet operator&&(SeveritySet lhs, SeveritySet rhs) { return SeveritySet{lhs.GetMask() & rhs.GetMask()}; }
-inline SeveritySet operator!(SeveritySet set) { return SeveritySet{~set.GetMask()}; }
-
 //! \brief A type that can be used to specify the severity level of a logging message, for creating SeveritySets using boolean operators.
 struct LoggingSeverity_t {};
 //! \brief Prototypical LoggingSeverity_t object.
