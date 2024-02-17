@@ -1218,15 +1218,20 @@ inline unsigned CountNonAnsiSequenceCharacters(const char *begin, const char *en
   }
   return count;
 }
+
 } // namespace formatting
 
-//! \brief Streaming operator for DateTime.
-inline std::ostream &operator<<(std::ostream &stream, const time::DateTime &dt) {
+namespace time {
+
+//! \brief Streaming operator for DateTime. Put in the time namespace so it can be found by ADL.
+inline std::ostream &operator<<(std::ostream &stream, const DateTime &dt) {
   char buffer[26];
   formatting::FormatDateTo(buffer, buffer + 26, dt);
   stream << buffer;
   return stream;
 }
+
+}  // namespace time
 
 //! \brief  Structure that specifies how a message can be formatted, and what are the capabilities of the sink
 //! that the formatted message will be dispatched to.
