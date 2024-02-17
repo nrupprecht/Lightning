@@ -887,13 +887,6 @@ inline DateTime AddMicroseconds(const DateTime &time, unsigned long long microse
   return {new_years, new_months, new_days, new_hours, new_minutes, new_seconds, new_us};
 }
 
-//! \brief Streaming operator for DateTime.
-inline std::ostream &operator<<(std::ostream &stream, const DateTime &dt) {
-  stream << dt.GetYear() << "-" << dt.GetMonthInt() << "-" << dt.GetDay() << " " << dt.GetHour() << ":"
-         << dt.GetMinute() << ":" << dt.GetSecond() << "." << dt.GetMillisecond();
-  return stream;
-}
-
 //! \brief The conversion from a clock point to a local time is relatively slow, much slower than just
 //! getting a time point, or subtracting time points. We can use this to quickly generate date times
 //! by calculate the DateTime once, then just calculating microsecond offsets from that and adding
@@ -1226,6 +1219,14 @@ inline unsigned CountNonAnsiSequenceCharacters(const char *begin, const char *en
   return count;
 }
 } // namespace formatting
+
+//! \brief Streaming operator for DateTime.
+inline std::ostream &operator<<(std::ostream &stream, const time::DateTime &dt) {
+  char buffer[26];
+  formatting::FormatDateTo(buffer, buffer + 26, dt);
+  stream << buffer;
+  return stream;
+}
 
 //! \brief  Structure that specifies how a message can be formatted, and what are the capabilities of the sink
 //! that the formatted message will be dispatched to.
@@ -1604,7 +1605,7 @@ struct Segment<bool> : public BaseSegment {
   void addToBuffer([[maybe_unused]] const FormattingSettings &settings,
                    const formatting::MessageInfo &,
                    memory::BasicMemoryBuffer<char> &buffer,
-                   [[maybe_unused]] const std::string_view &fmt = {}) const override {
+                   [[maybe_unused]] const std::string_view &fmt) const override {
     if (value_) {
       AppendBuffer(buffer, "true");
     }
@@ -1637,7 +1638,7 @@ struct Segment<Floating_t, std::enable_if_t<std::is_floating_point_v<Floating_t>
   void addToBuffer([[maybe_unused]] const FormattingSettings &settings,
                    const formatting::MessageInfo &,
                    memory::BasicMemoryBuffer<char> &buffer,
-                   [[maybe_unused]] const std::string_view &fmt = {}) const override {
+                   [[maybe_unused]] const std::string_view &fmt) const override {
     // std::to_chars(start, end, number_, std::chars_format::fixed);
     AppendBuffer(buffer, serialized_number_);
   }
@@ -1667,7 +1668,7 @@ struct Segment<char>
   void addToBuffer([[maybe_unused]] const FormattingSettings &settings,
                    const formatting::MessageInfo &,
                    memory::BasicMemoryBuffer<char> &buffer,
-                   [[maybe_unused]] const std::string_view &fmt = {}) const override {
+                   [[maybe_unused]] const std::string_view &fmt) const override {
     buffer.PushBack(c_);
   }
 
@@ -1694,7 +1695,7 @@ struct Segment<Integral_t,
   void addToBuffer([[maybe_unused]] const FormattingSettings &settings,
                    const formatting::MessageInfo &,
                    memory::BasicMemoryBuffer<char> &buffer,
-                   [[maybe_unused]] const std::string_view &fmt = {}) const override {
+                   [[maybe_unused]] const std::string_view &fmt) const override {
     if (fmt.size() == 2 && fmt[0] == ':' && fmt[1] == 'L') {
       formatting::FormatIntegerWithCommas(buffer, number_);
     }
@@ -1727,7 +1728,7 @@ struct Segment<time::DateTime> : public BaseSegment {
   void addToBuffer([[maybe_unused]] const FormattingSettings &settings,
                    const formatting::MessageInfo &,
                    memory::BasicMemoryBuffer<char> &buffer,
-                   [[maybe_unused]] const std::string_view &fmt = {}) const override {
+                   [[maybe_unused]] const std::string_view &fmt) const override {
     // FormatDateTo needs 26 characters.
     auto [start, end] = buffer.Allocate(26);
     formatting::FormatDateTo(start, end, value_);
@@ -1759,7 +1760,7 @@ struct AnsiColor8Bit : public BaseSegment {
   void addToBuffer(const FormattingSettings &settings,
                    const formatting::MessageInfo &msg_info,
                    memory::BasicMemoryBuffer<char> &buffer,
-                   [[maybe_unused]] const std::string_view &fmt = {}) const override {
+                   [[maybe_unused]] const std::string_view &fmt) const override {
     if (settings.has_virtual_terminal_processing) {
       AppendBuffer(buffer, set_formatting_string_);
     }
@@ -2315,7 +2316,7 @@ class AttributeFormatter {
 //! \brief Format the severity attribute.
 class SeverityAttributeFormatter : public AttributeFormatter {
  public:
-  SeverityAttributeFormatter(bool aligned_names = true) {
+  explicit SeverityAttributeFormatter(bool aligned_names = true) {
     if (aligned_names) setAlignedNames();
     else setUnalignedNames();
   }
@@ -2923,11 +2924,11 @@ class FlushHandler : public ImplBase {
   class Impl : public ImplBase::Impl {
    public:
     virtual bool DoFlush(const Record &record) = 0;
-    virtual std::shared_ptr<Impl> Clone() const = 0;
+    NO_DISCARD virtual std::shared_ptr<Impl> Clone() const = 0;
   };
 
   bool DoFlush(const Record &record) { return impl<FlushHandler>()->DoFlush(record); }
-  FlushHandler Clone() const { return FlushHandler(impl<FlushHandler>()->Clone()); }
+  NO_DISCARD FlushHandler Clone() const { return FlushHandler(impl<FlushHandler>()->Clone()); }
 
   explicit FlushHandler(const std::shared_ptr<Impl> &impl)
       : ImplBase(impl) {}
@@ -2939,7 +2940,7 @@ class AutoFlush : public FlushHandler {
   class Impl : public FlushHandler::Impl {
    public:
     bool DoFlush(const Record &) override { return true; }
-    std::shared_ptr<FlushHandler::Impl> Clone() const override { return std::make_shared<Impl>(); }
+    NO_DISCARD std::shared_ptr<FlushHandler::Impl> Clone() const override { return std::make_shared<Impl>(); }
   };
 
   AutoFlush()
@@ -2962,7 +2963,7 @@ class FlushEveryN : public FlushHandler {
       return count_ == 0;
     }
 
-    std::shared_ptr<FlushHandler::Impl> Clone() const override { return std::make_shared<Impl>(N_); }
+    NO_DISCARD std::shared_ptr<FlushHandler::Impl> Clone() const override { return std::make_shared<Impl>(N_); }
 
    private:
     std::size_t count_{}, N_;
@@ -2981,7 +2982,7 @@ class DisjunctionFlushHandler : public FlushHandler {
 
     bool DoFlush(const Record &record) override { return lhs_.DoFlush(record) || rhs_.DoFlush(record); }
 
-    std::shared_ptr<FlushHandler::Impl> Clone() const override {
+    NO_DISCARD std::shared_ptr<FlushHandler::Impl> Clone() const override {
       return std::make_shared<Impl>(lhs_.Clone(), rhs_.Clone());
     }
    private:
@@ -3001,7 +3002,7 @@ class ConjunctionFlushHandler : public FlushHandler {
 
     bool DoFlush(const Record &record) override { return lhs_.DoFlush(record) && rhs_.DoFlush(record); }
 
-    std::shared_ptr<FlushHandler::Impl> Clone() const override {
+    NO_DISCARD std::shared_ptr<FlushHandler::Impl> Clone() const override {
       return std::make_shared<Impl>(lhs_.Clone(), rhs_.Clone());
     }
    private:
@@ -3083,7 +3084,7 @@ class SinkBackend {
   //! \brief Protected implementation of flushing the sink.
   virtual void flush() {}
 
-  std::optional<flush::FlushHandler> copyFlushHandler() const {
+  NO_DISCARD std::optional<flush::FlushHandler> copyFlushHandler() const {
     return flush_handler_ ? std::optional(flush_handler_->Clone()) : std::nullopt;
   }
 
@@ -3394,13 +3395,14 @@ class Core {
   }
 
   //! \brief Flush all sinks.
+  //! Note: This function MAY discard.
   const Core &Flush() const {
     std::for_each(sinks_.begin(), sinks_.end(), [](auto &sink) { sink->Flush(); });
     return *this;
   }
 
   //! \brief Make a deep copy of the core, including deep copies of all sinks.
-  std::shared_ptr<Core> Clone() const {
+  NO_DISCARD std::shared_ptr<Core> Clone() const {
     auto core = std::make_shared<Core>();
     core->core_filter_ = core_filter_;
     for (const auto &sink : sinks_) {
