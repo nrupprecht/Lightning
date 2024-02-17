@@ -1227,7 +1227,7 @@ namespace time {
 inline std::ostream &operator<<(std::ostream &stream, const DateTime &dt) {
   char buffer[26];
   formatting::FormatDateTo(buffer, buffer + 26, dt);
-  stream << buffer;
+  stream.write(buffer, 26);
   return stream;
 }
 
