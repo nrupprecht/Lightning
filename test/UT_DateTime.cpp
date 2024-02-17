@@ -13,11 +13,12 @@ using namespace lightning::time;
 
 namespace Testing {
 
-TEST(DateTime, Basic) {
+TEST(DateTime, BasicDate) {
   {
     DateTime d1(2011'12'01);
     EXPECT_EQ(d1.GetYear(), 2011);
     EXPECT_EQ(d1.GetMonthInt(), 12);
+    EXPECT_EQ(d1.GetMonth(), Month::December);
     EXPECT_EQ(d1.GetDay(), 1);
     EXPECT_EQ(d1.AsYYYYMMDD(), 2011'12'01);
   }
@@ -25,19 +26,27 @@ TEST(DateTime, Basic) {
     DateTime d1(2023'08'03);
     EXPECT_EQ(d1.GetYear(), 2023);
     EXPECT_EQ(d1.GetMonthInt(), 8);
+    EXPECT_EQ(d1.GetMonth(), Month::August);
     EXPECT_EQ(d1.GetDay(), 3);
     EXPECT_EQ(d1.AsYYYYMMDD(), 2023'08'03);
   }
 }
 
 TEST(DateTime, AddMicroseconds) {
-
   auto dt = DateTime::YMD_Time(2023'01'01, 0, 0, 0, 0);
 
   EXPECT_EQ(AddMicroseconds(dt, 1000ull), DateTime::YMD_Time(2023'01'01, 0, 0, 0, 1000));
   EXPECT_EQ(AddMicroseconds(dt, 1'000'000ull), DateTime::YMD_Time(2023'01'01, 0, 0, 1, 0));
   EXPECT_EQ(AddMicroseconds(dt, 1'000'012ull), DateTime::YMD_Time(2023'01'01, 0, 0, 1, 12));
   EXPECT_EQ(AddMicroseconds(dt, 60'000'012ull), DateTime::YMD_Time(2023'01'01, 0, 1, 0, 12));
+}
+
+TEST(DateTime, Streaming) {
+  auto dt = DateTime::YMD_Time(2023'01'01, 12, 30, 30, 1000);
+  
+  std::ostringstream stream;
+  stream << dt;
+  EXPECT_EQ(stream.str(), "2023-01-01 12:30:30.001000");
 }
 
 //TEST(DateTime, Formatting) {
