@@ -1973,9 +1973,9 @@ class SeveritySet {
     return *this;
   }
 
-  friend SeveritySet operator||(SeveritySet lhs, SeveritySet rhs);
-  friend SeveritySet operator&&(SeveritySet lhs, SeveritySet rhs);
-  friend SeveritySet operator!(SeveritySet set);
+  friend SeveritySet operator||(SeveritySet lhs, SeveritySet rhs) { return SeveritySet{lhs.GetMask() | rhs.GetMask()}; }
+  friend SeveritySet operator&&(SeveritySet lhs, SeveritySet rhs) { return SeveritySet{lhs.GetMask() & rhs.GetMask()}; }
+  friend SeveritySet operator!(SeveritySet set) { return SeveritySet{~set.GetMask()}; }
  private:
   explicit SeveritySet(int mask) : severity_mask_(mask) {}
   //! \brief The acceptance mask.
@@ -2128,7 +2128,7 @@ class BasicSeverityFilter {
 struct RecordAttributes {
   template <typename... Attrs_t>
   explicit RecordAttributes(BasicAttributes basic_attributes = {}, Attrs_t &&... attrs)
-      : basic_attributes(std::move(basic_attributes)) {
+      : basic_attributes(basic_attributes) {
     attributes.reserve(sizeof...(attrs));
     (attributes.emplace_back(std::move(attrs)), ...);
   }
