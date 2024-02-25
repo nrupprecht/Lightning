@@ -1,5 +1,7 @@
 # Lightning logging
 
+[![CMake on multiple platforms](https://github.com/nrupprecht/Lightning/actions/workflows/cmake-build-and-test-platform.yml/badge.svg)](https://github.com/nrupprecht/Lightning/actions/workflows/cmake-build-and-test-platform.yml)
+
 A very fast, header only logging library that depends only on standard C++17 features and the standard library.
 Attempts to be a very fast streaming logging library (as opposed to formatting based logging, e.g. spdlog) without
 sacrificing performance. Current, it is just a bit slower than spdlog, a very fast formatting logging library.
