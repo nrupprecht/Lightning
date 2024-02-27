@@ -3102,44 +3102,56 @@ class SinkBackend {
   bool auto_flush_ = false;
 };
 
-//! \brief Base class for sink wrappers. These, in general, potentially lock the sink while the object exists, keeping
-//! other threads from accessing the sink while the LockedSink wrapper is alive.
+// ==============================================================================================
+//  Synchronization wrappers
+// ==============================================================================================
+
+//! \brief Base class for object wrappers. These, in general, potentially lock the object while it exists, keeping
+//! other threads from accessing it while the wrapper is alive.
 //! Sink frontends are responsible for thread synchronization, and only frontend sinks that use a mutex will return a
 //! truly "locked" sink, others will just return a SinkWrapper.
-template <typename SinkBackend_t, LL_ENABLE_IF(std::is_base_of_v<SinkBackend, SinkBackend_t>)>
-class SinkWrapper : public ImplBase {
+template <typename Object_t>
+class ObjectWrapper : public ImplBase {
   friend class ImplBase;
+
  protected:
   struct Impl : public ImplBase::Impl {
-    explicit Impl(SinkBackend_t *backend) : backend(backend) {}
-    SinkBackend_t *backend{};
+    explicit Impl(Object_t *backend) : backend(backend) {}
+    Object_t *backend{};
   };
 
-  explicit SinkWrapper(const std::shared_ptr<Impl> &impl) : ImplBase(impl) {}
+  explicit ObjectWrapper(const std::shared_ptr<Impl> &impl) : ImplBase(impl) {}
  public:
-  explicit SinkWrapper(SinkBackend_t *backend) : ImplBase(std::make_shared<Impl>(backend)) {}
-  SinkBackend_t *operator->() { return impl<SinkWrapper>()->backend; }
-  explicit operator bool() { return static_cast<bool>(impl<SinkWrapper>()->backend); }
+  explicit ObjectWrapper(Object_t *backend) : ImplBase(std::make_shared<Impl>(backend)) {}
+  Object_t *operator->() { return impl<ObjectWrapper>()->backend; }
+  explicit operator bool() { return static_cast<bool>(impl<ObjectWrapper>()->backend); }
 
   //! \brief Try casting the backend to a specific type.
-  template <typename OtherBackend_t>
-  OtherBackend_t *As() { return dynamic_cast<OtherBackend_t *>(impl<SinkWrapper>()->backend); }
+  template <typename OtherObject_t>
+  OtherObject_t *As() { return dynamic_cast<OtherObject_t *>(impl<ObjectWrapper>()->backend); }
 };
 
-//! \brief A locked sink that uses a mutex to lock the sink, controlling access.
-template <typename SinkBackend_t>
-class LockedSink : public SinkWrapper<SinkBackend_t> {
+//! \brief A locked object wrapper that controlls access via a mutex.
+template <typename Object_t>
+class LockedObject : public ObjectWrapper<Object_t> {
  protected:
-  struct Impl : public SinkWrapper<SinkBackend_t>::Impl {
-    explicit Impl(SinkBackend_t *backend, std::mutex &mutex)
-        : SinkWrapper<SinkBackend_t>::Impl(backend), lock(mutex) {}
+  struct Impl : public ObjectWrapper<Object_t>::Impl {
+    explicit Impl(Object_t *backend, std::mutex &mutex)
+        : ObjectWrapper<Object_t>::Impl(backend), lock(mutex) {}
     std::lock_guard<std::mutex> lock;
   };
 
  public:
-  explicit LockedSink(SinkBackend_t *backend, std::mutex &mutex)
-      : SinkWrapper<SinkBackend_t>(std::make_shared<Impl>(backend, mutex)) {}
+  explicit LockedObject(Object_t *backend, std::mutex &mutex)
+      : ObjectWrapper<Object_t>(std::make_shared<Impl>(backend, mutex)) {}
 };
+
+//! \brief A locked sink that uses a mutex to lock the sink, controlling access.
+using LockedSink = LockedObject<SinkBackend>;
+
+// ==============================================================================================
+//  Sinks
+// ==============================================================================================
 
 //! \brief Base class for sink frontends. These are responsible for common tasks, like filtering
 //! and controlling access to the sink backend, i.e. synchronization.
@@ -3198,7 +3210,7 @@ class Sink {
   SinkBackend &GetBackend() { return *sink_backend_; }
   NO_DISCARD const SinkBackend &GetBackend() const { return *sink_backend_; }
 
-  NO_DISCARD SinkWrapper<SinkBackend> GetLockedBackend() { return getLockedBackend(); }
+  NO_DISCARD ObjectWrapper<SinkBackend> GetLockedBackend() { return getLockedBackend(); }
 
   //! \brief Get the sink backend, cast to a specific type.
   //!
@@ -3224,8 +3236,8 @@ class Sink {
 
   //! \brief Get the sink backend, wrapped in a SinkWrapper. The default implementation does not lock the sink, since
   //! the Sink base class has no mutex.
-  virtual SinkWrapper<SinkBackend> getLockedBackend() {
-    return SinkWrapper<SinkBackend>(sink_backend_.get());
+  virtual ObjectWrapper<SinkBackend> getLockedBackend() {
+    return ObjectWrapper<SinkBackend>(sink_backend_.get());
   }
 
   //! \brief The sink backend, to which the frontend feeds record.
@@ -3284,6 +3296,8 @@ class SynchronousSink : public Sink {
  private:
   void dispatch(const Record &record) override {
     memory::MemoryBuffer<char> buffer;
+    // Technically, there could be some small asynchrony issue here with needs formatting being changed by another thread,
+    // but not only is it unlikely, it cannot cause any deadlocks.
     if (sink_backend_->GetFormattingSettings().needs_formatting) {
       formatter_->Format(record, sink_backend_->GetFormattingSettings(), buffer);
     }
@@ -3293,12 +3307,13 @@ class SynchronousSink : public Sink {
     }
   }
 
-  NO_DISCARD SinkWrapper<SinkBackend> getLockedBackend() override {
-    return LockedSink<SinkBackend>(sink_backend_.get(), lock_);
+  NO_DISCARD ObjectWrapper<SinkBackend> getLockedBackend() override { return LockedSink(sink_backend_.get(), lock_); }
+
+  NO_DISCARD std::shared_ptr<Sink> clone() const override {
+    return std::make_shared<SynchronousSink>(sink_backend_->Clone());
   }
 
-  NO_DISCARD std::shared_ptr<Sink> clone() const override { return std::make_shared<SynchronousSink>(sink_backend_->Clone()); }
-
+  //! \brief The mutex that controls access to the sink.
   mutable std::mutex lock_;
 };
 
@@ -3412,12 +3427,25 @@ class Core {
     return core;
   }
 
+  //! \brief Get a locked handle to the core.
+  NO_DISCARD LockedObject<Core> Lock() { return LockedObject<Core>(this, lock_); }
+
+  bool IsLocked() const {
+    if (lock_.try_lock()) {
+      lock_.unlock();
+      return false;
+    }
+    return true;
+  }
  private:
   //! \brief All sinks the core will dispatch messages to.
   std::vector<std::shared_ptr<Sink>> sinks_;
 
   //! \brief Core-level attribute filters.
   filter::AttributeFilter core_filter_;
+
+  //! \brief Mutex to control access to the core.
+  mutable std::mutex lock_;
 };
 
 // ==============================================================================
