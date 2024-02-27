@@ -2763,7 +2763,7 @@ class MsgFormatter : public BaseMessageFormatter {
 //! \brief Helper function to create a unique pointer to a MsgFormatter
 template <typename... Types>
 auto MakeMsgFormatter(const std::string &fmt_string, const Types &... types) {
-  return std::unique_ptr<BaseMessageFormatter>(new MsgFormatter(fmt_string, types...));
+  return std::unique_ptr<BaseMessageFormatter>(new MsgFormatter<Types...>(fmt_string, types...));
 }
 
 //! \brief Helper function that makes the "standard" MsgFormatter. What is standard may change, and only be
