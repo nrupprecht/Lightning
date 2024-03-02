@@ -1059,6 +1059,39 @@ inline void formatIntegerWithCommas(unsigned long long x, memory::BasicMemoryBuf
   }
 }
 
+//! \brief Format a string into a buffer, quoting it and escaping special characters.
+inline void formatDebugString(std::string_view str, memory::BasicMemoryBuffer<char> &buffer) {
+  // Debug formatting.
+  buffer.PushBack('"');
+  for (auto c : str) {
+    switch (c) {
+      case '"':
+        buffer.PushBack('\\');
+        buffer.PushBack('"');
+        break;
+      case '\\':
+        buffer.PushBack('\\');
+        buffer.PushBack('\\');
+        break;
+      case '\n':
+        buffer.PushBack('\\');
+        buffer.PushBack('n');
+        break;
+      case '\r':
+        buffer.PushBack('\\');
+        buffer.PushBack('r');
+        break;
+      case '\t':
+        buffer.PushBack('\\');
+        buffer.PushBack('t');
+        break;
+      default:
+        buffer.PushBack(c);
+    }
+  }
+  buffer.PushBack('"');
+}
+
 //! \brief Helper function to get arrays of upper- or lower-case hex digits.
 inline const char *getHexDigits(bool upper_case) {
   static const char *upper_hex_digits = "0123456789ABCDEF";
@@ -1275,6 +1308,73 @@ void FormatInteger(std::string_view fmt, Integral_t number, memory::BasicMemoryB
     auto [start, end] = buffer.Allocate(total_width - alignment_offset);
     std::to_chars(start, end, number);
     std::fill_n(start + num_digits, right_width, fmt_data.fill_char);
+  }
+}
+
+//! \brief Format a string to a buffer, applying formatting options.
+inline void FormatString(std::string_view fmt, std::string_view str, memory::BasicMemoryBuffer<char> &buffer) {
+  if (fmt.empty()) {
+    memory::AppendBuffer(buffer, str);
+    return;
+  }
+  FmtData fmt_data;
+  // Default string formatting is 's'
+  fmt_data.type = 's';
+  detail::extractFormatting(fmt, fmt_data);
+
+  // TODO: Checks that invalid formatting options were not used.
+  LL_REQUIRE(fmt_data.type == 's' || fmt_data.type == '?',
+             "invalid format string for string segment '" << fmt << "', illegal formatting type '" << fmt_data.type
+                                                          << "'");
+  LL_REQUIRE(!fmt_data.use_separators, "cannot specify use separators ('L') for formatting a string");
+
+  // ==============================================================================
+  //  All formatting discovered, do the formatting.
+  // ==============================================================================
+
+  auto num_chars = static_cast<unsigned>(str.size());
+  unsigned extra_debug_chars = 0;
+  if (fmt_data.type == '?') {
+    extra_debug_chars += 2; // For the quotes.
+    // Count characters that need to be escaped.
+    for (auto c : str) {
+      if (c == '"' || c == '\\' || c == '\n' || c == '\r' || c == '\t') {
+        ++extra_debug_chars;
+      }
+    }
+  }
+  num_chars += extra_debug_chars;
+  auto total_width = std::max(num_chars, fmt_data.width);
+
+  std::size_t alignment_offset = 0, right_width = 0;
+  if (fmt_data.alignment == Alignment::Right) {
+    alignment_offset = total_width - num_chars;
+  }
+  else if (fmt_data.alignment == Alignment::Center) {
+    alignment_offset = (total_width - num_chars) / 2;
+    right_width = total_width - alignment_offset - num_chars;
+  }
+  else {  // Alignment::Left
+    right_width = total_width - num_chars;
+  }
+
+  if (alignment_offset != 0) {
+    auto [start, end] = buffer.Allocate(alignment_offset);
+    std::fill_n(start, alignment_offset, fmt_data.fill_char);
+  }
+
+  if (extra_debug_chars == 0) {
+    // Standard formatting.
+    memory::AppendBuffer(buffer, str);
+  }
+  else {
+    // Debug formatting.
+    detail::formatDebugString(str, buffer);
+  }
+
+  if (right_width != 0) {
+    auto [start, end] = buffer.Allocate(right_width);
+    std::fill_n(start, right_width, fmt_data.fill_char);
   }
 }
 
@@ -1784,7 +1884,12 @@ struct Segment<std::string> : public BaseSegment {
                    const formatting::MessageInfo &,
                    memory::BasicMemoryBuffer<char> &buffer,
                    [[maybe_unused]] const std::string_view &fmt) const override {
-    AppendBuffer(buffer, str_);
+    if (!fmt.empty()) {
+      formatting::FormatString(fmt, str_, buffer);
+    }
+    else {
+      memory::AppendBuffer(buffer, str_);
+    }
   }
 
   const std::string str_;
@@ -1808,7 +1913,12 @@ struct Segment<char *> : public BaseSegment {
                    const formatting::MessageInfo &,
                    memory::BasicMemoryBuffer<char> &buffer,
                    [[maybe_unused]] const std::string_view &fmt) const override {
-    buffer.Append(cstr_, cstr_ + size_required_);
+    if (!fmt.empty()) {
+      formatting::FormatString(fmt, std::string_view{cstr_, size_required_}, buffer);
+    }
+    else {
+      buffer.Append(cstr_, cstr_ + size_required_);
+    }
   }
 
   const char *cstr_;

@@ -24,6 +24,9 @@ TEST(Formatting, String) {
   EXPECT_EQ(formatting::Format("{} there.", std::string("Hello")), "Hello there.");
   EXPECT_EQ(formatting::Format("Richard {} York {} battle {} {}", "of", "gave", "in", "vain"),
             "Richard of York gave battle in vain");
+  EXPECT_EQ(formatting::Format("{} there", "Hello"), "Hello there");
+  EXPECT_EQ(formatting::Format("{:?} there", "Hello"), "\"Hello\" there");
+  EXPECT_EQ(formatting::Format("{:_^7} there", "Hello"), "_Hello_ there");
 }
 
 TEST(Formatting, Integers) {
@@ -259,6 +262,57 @@ TEST(Formatting, FormatInteger_Separators) {
     EXPECT_NO_THROW(FormatInteger(":x<9L:_", -14'573, buffer));
     // When implemented, this should be "-14_573xx"
     EXPECT_EQ(buffer.ToString(), "-14,573xx");
+  }
+}
+
+TEST(Formatting, FormatString) {
+  {
+    memory::MemoryBuffer<char> buffer;
+    EXPECT_NO_THROW(FormatString("", "Hello", buffer));
+    EXPECT_EQ(buffer.ToString(), "Hello");
+  }
+  {
+    memory::MemoryBuffer<char> buffer;
+    EXPECT_NO_THROW(FormatString(":", std::string("Hello"), buffer));
+    EXPECT_EQ(buffer.ToString(), "Hello");
+  }
+  {
+    memory::MemoryBuffer<char> buffer;
+    EXPECT_NO_THROW(FormatString(":10", "Hello", buffer));
+    EXPECT_EQ(buffer.ToString(), "Hello     ");
+  }
+  {
+    memory::MemoryBuffer<char> buffer;
+    EXPECT_NO_THROW(FormatString(":>10", "Hello", buffer));
+    EXPECT_EQ(buffer.ToString(), "     Hello");
+  }
+  {
+    memory::MemoryBuffer<char> buffer;
+    EXPECT_NO_THROW(FormatString(":^10", "Hello", buffer));
+    EXPECT_EQ(buffer.ToString(), "  Hello   ");
+  }
+  {
+    memory::MemoryBuffer<char> buffer;
+    EXPECT_NO_THROW(FormatString(":*>10", "Hello", buffer));
+    EXPECT_EQ(buffer.ToString(), "*****Hello");
+  }
+}
+
+TEST(Formatting, FormatString_Debug) {
+  {
+    memory::MemoryBuffer<char> buffer;
+    EXPECT_NO_THROW(FormatString(":?", "Hello", buffer));
+    EXPECT_EQ(buffer.ToString(), "\"Hello\"");
+  }
+  {
+    memory::MemoryBuffer<char> buffer;
+    EXPECT_NO_THROW(FormatString(":?", "Hello\n\tWorld", buffer));
+    EXPECT_EQ(buffer.ToString(), "\"Hello\\n\\tWorld\"");
+  }
+  {
+    memory::MemoryBuffer<char> buffer;
+    EXPECT_NO_THROW(FormatString(":x^20?", "Hello\n\tWorld", buffer));
+    EXPECT_EQ(buffer.ToString(), "xx\"Hello\\n\\tWorld\"xx");
   }
 }
 
