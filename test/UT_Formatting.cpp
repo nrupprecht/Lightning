@@ -101,12 +101,32 @@ TEST(Formatting, FormatHex) {
     FormatHex(static_cast<uint64_t>(0xAAAA), buffer);
     EXPECT_EQ(buffer.ToString(), "0xAAAA");
   }
+  {
+    memory::MemoryBuffer<char> buffer;
+    FormatHex(static_cast<uint64_t>(0xABAB), buffer, false);
+    EXPECT_EQ(buffer.ToString(), "0xabab");
+  }
+  {
+    memory::MemoryBuffer<char> buffer;
+    FormatHex(static_cast<uint64_t>(0xABAB), buffer, false, PrefixFmtType::Upper);
+    EXPECT_EQ(buffer.ToString(), "0Xabab");
+  }
+  {
+    memory::MemoryBuffer<char> buffer;
+    FormatHex(static_cast<uint64_t>(0xABAB), buffer, false, PrefixFmtType::None);
+    EXPECT_EQ(buffer.ToString(), "abab");
+  }
+  {
+    memory::MemoryBuffer<char> buffer;
+    FormatHex(static_cast<uint64_t>(0xABAB), buffer, true, PrefixFmtType::None);
+    EXPECT_EQ(buffer.ToString(), "ABAB");
+  }
 }
 
 TEST(Formatting, FormatInteger_Errors) {
   {
     memory::MemoryBuffer<char> buffer;
-    EXPECT_ANY_THROW(FormatInteger(":", 120, buffer));
+    EXPECT_ANY_THROW(FormatInteger("<", 120, buffer));
   }
   {
     // Left alignment by default
@@ -126,6 +146,12 @@ TEST(Formatting, FormatInteger_Alignment) {
     memory::MemoryBuffer<char> buffer;
     EXPECT_NO_THROW(FormatInteger("", -120, buffer));
     EXPECT_EQ(buffer.ToString(), "-120");
+  }
+  {
+    // No options.
+    memory::MemoryBuffer<char> buffer;
+    EXPECT_NO_THROW(FormatInteger(":", 120, buffer));
+    EXPECT_EQ(buffer.ToString(), "120");
   }
   {
     // Left alignment by default
@@ -219,6 +245,19 @@ TEST(Formatting, FormatInteger_Separators) {
   {
     memory::MemoryBuffer<char> buffer;
     EXPECT_NO_THROW(FormatInteger(":x<9L", -14'573, buffer));
+    EXPECT_EQ(buffer.ToString(), "-14,573xx");
+  }
+  {
+    // NOTE: I don't yet support using custom separators in the formatting, but you can specify it
+    memory::MemoryBuffer<char> buffer;
+    EXPECT_NO_THROW(FormatInteger(":x<9L:,", -14'573, buffer));
+    EXPECT_EQ(buffer.ToString(), "-14,573xx");
+  }
+  {
+    // NOTE: I don't yet support using custom separators in the formatting, but you can specify it
+    memory::MemoryBuffer<char> buffer;
+    EXPECT_NO_THROW(FormatInteger(":x<9L:_", -14'573, buffer));
+    // When implemented, this should be "-14_573xx"
     EXPECT_EQ(buffer.ToString(), "-14,573xx");
   }
 }

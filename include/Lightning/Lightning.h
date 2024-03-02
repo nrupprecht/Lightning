@@ -991,6 +991,31 @@ inline char *CopyPaddedInt(
   return std::to_chars(start + remainder, end, x).ptr;
 }
 
+//! \brief Formatting enum that represents alignment.
+enum class Alignment : uint8_t { Left, Right, Center };
+
+//! \brief Structure that encodes all formatting options for a segment.
+struct FmtData {
+  //! \brief The requested width of the segment.
+  unsigned width = 0;
+
+  //! \brief The alignment of data within the segment. Default is left aligned.
+  Alignment alignment = Alignment::Left;
+
+  //! \brief Whether to use number separators (e.g. commas in large numbers).
+  bool use_separators = false;
+
+  //! \brief The fill character, if padding is requested.
+  char fill_char = ' ';
+
+  //! \brief The type of formatting to do. For example, an integer may be formatted as a decimal, hex, etc.
+  char type = '\0';
+
+  //! \brief A specific separator character can be specified, if use_separators is true. If separator_char is '\0',
+  //! the default separator character will be used.
+  char separator_char = '\0';
+};
+
 namespace detail {
 
 //! \brief Format an integer into a buffer, with commas every three digits.
@@ -1041,7 +1066,101 @@ inline const char *getHexDigits(bool upper_case) {
   return upper_case ? upper_hex_digits : lower_hex_digits;
 }
 
+//! \brief Extract formatting options from the interior of a formatting segment, i.e. the section between the '{'
+//! and '}' in a formatting string.
+//!
+//! The formatting options are modeled as closely as possible after https://fmt.dev/latest/syntax.html, which is in turn
+//! the source for C++20 std::format's specification (https://en.cppreference.com/w/cpp/utility/format/spec).
+//! The formatting options are:
+//!
+//! format_spec ::=  [[fill]align][sign]["#"]["0"][width]["." precision]["L"][type]
+//! fill        ::=  <a character other than '{' or '}'>
+//! align       ::=  "<" | ">" | "^"
+//! sign        ::=  "+" | "-" | " "
+//! width       ::=  integer | "{" [arg_id] "}"
+//! precision   ::=  integer | "{" [arg_id] "}"
+//! type        ::=  "a" | "A" | "b" | "B" | "c" | "d" | "e" | "E" | "f" | "F" | "g" | "G" |
+//!                  "o" | "p" | "s" | "x" | "X" | "?"
+//!
+//!  I am not supporting all of these options, at least right now. And I am allowing for at least one more option,
+//!  the use of a explicit separator characters, that fmt does not support.
+//!
+//! \param fmt The formatting segment, what would go inside the "{}" in a usual format string.
+//! \param fmt_data Formatting data to fill. Some defaults may have been filled in by a calling function, e.g. what the
+//!     default formatting type is, so we fill this, instead of returning this.
+inline void extractFormatting(std::string_view fmt, FmtData &fmt_data) {
+  if (fmt.empty()) {
+    return;
+  }
+  LL_REQUIRE(fmt[0] == ':', "invalid format string for integer segment '" << fmt << "'");
+  // It is legal for the format string to just be "{:}" - useless, but legal.
+  if (fmt.size() == 1) {
+    return;
+  }
+  std::size_t index = 1;
+
+  // If the next char is an alignment, this means the preceding char was a fill character.
+  if (2 < fmt.size() && (fmt[2] == '<' || fmt[2] == '^' || fmt[2] == '>')) {
+    fmt_data.fill_char = fmt[1];
+    ++index;
+  }
+
+  // Determine if any padding and alignment is needed.
+  if (fmt[index] == '<') {
+    fmt_data.alignment = Alignment::Left;
+    ++index;
+  }
+  else if (fmt[index] == '>') {
+    fmt_data.alignment = Alignment::Right;
+    ++index;
+  }
+  else if (fmt[index] == '^') {
+    fmt_data.alignment = Alignment::Center;
+    ++index;
+  }
+
+  // Get the buffer width
+  if (index < fmt.size() && std::isdigit(fmt[index])) {
+    // Small buffer for the digits, do not allow more than 9999 characters in a padded output.
+    char digits[4];
+    // Get digits.
+    unsigned num_digits = 0;
+    while (index < fmt.size() && std::isdigit(fmt[index])) {
+      LL_ASSERT(num_digits < 4, "cannot format to a width greater than 9999");
+      digits[num_digits] = fmt[index++];
+      ++num_digits;
+    }
+    std::from_chars(digits, digits + num_digits, fmt_data.width);
+  }
+
+  // Check if number separators should be used.
+  if (index < fmt.size() && fmt[index] == 'L') {
+    ++index;
+    fmt_data.use_separators = true;
+  }
+  // User specified a separator character.
+  if (index < fmt.size() && fmt[index] == ':') {
+    ++index;
+    LL_REQUIRE(index < fmt.size(), "invalid format string for integer segment '" << fmt << "', index " << index);
+    fmt_data.separator_char = fmt[index++];
+  }
+
+  // TODO: Implement different integer formatting.
+  [[maybe_unused]] char type = 'd'; // Format as a decimal.
+  if (index < fmt.size()) {
+    fmt_data.type = fmt[index++];
+  }
+
+  // Make sure we are at the end.
+  LL_REQUIRE(index == fmt.size(), "invalid format string for integer segment '" << fmt << "'");
+}
+
 } // namespace detail
+
+//! \brief Enum to define how to format an integer's prefix, when not in decimal format.
+//! For example, when formatting an integer in hex, the prefix is "0x" when Lower, "0X" when upper, and not present when
+//! None.
+enum class PrefixFmtType { Upper, Lower, None };
 
 template <typename T, LL_ENABLE_IF(std::is_integral_v<T> && !std::is_same_v<T, bool>)>
 void FormatIntegerWithCommas(T x, memory::BasicMemoryBuffer<char> &buffer) {
@@ -1060,11 +1179,19 @@ template <typename Integral_t, LL_ENABLE_IF(std::is_integral_v<Integral_t> && !s
 void FormatHex(Integral_t x,
                memory::BasicMemoryBuffer<char> &buffer,
                bool use_uppercase = true,
-               bool use_prefix = true) {
+               PrefixFmtType prefix_fmt_type = PrefixFmtType::Lower) {
   // x will take up 8 characters, then two for "0x".
-  if (use_prefix) {
-    buffer.PushBack('0');
-    buffer.PushBack('x');
+  switch (prefix_fmt_type) {
+    case PrefixFmtType::Upper:
+      buffer.PushBack('0');
+      buffer.PushBack('X');
+      break;
+    case PrefixFmtType::Lower:
+      buffer.PushBack('0');
+      buffer.PushBack('x');
+      break;
+    default: {
+    } // Pass
   }
   const char *hex_digits = detail::getHexDigits(use_uppercase);
 
@@ -1103,73 +1230,17 @@ void FormatInteger(std::string_view fmt, Integral_t number, memory::BasicMemoryB
     std::to_chars(start, end, number);
     return;
   }
-  // The format string must be at least X chars long.
-  LL_REQUIRE(1 < fmt.size(), "invalid format string for integer segment '" << fmt << "'");
-  LL_REQUIRE(fmt[0] == ':', "invalid format string for integer segment '" << fmt << "'");
-  std::size_t index = 1;
-
-  unsigned total_width = 0;
-
-  // If the next char is an alignment, this means the preceding char was a fill character.
-  char fill_char = ' ';
-  if (2 < fmt.size() && (fmt[2] == '<' || fmt[2] == '^' || fmt[2] == '>')) {
-    fill_char = fmt[1];
-    ++index;
-  }
-
-  // Determine if any padding and alignment is needed.
-  enum class Alignment { Left, Right, Center };
-  auto alignment = Alignment::Left;
-
-  if (fmt[index] == '<') {
-    alignment = Alignment::Left;
-    ++index;
-  }
-  else if (fmt[index] == '>') {
-    alignment = Alignment::Right;
-    ++index;
-  }
-  else if (fmt[index] == '^') {
-    alignment = Alignment::Center;
-    ++index;
-  }
-
-  // Get the buffer width
-  if (index < fmt.size() && std::isdigit(fmt[index])) {
-    char digits[4];
-    // Get digits.
-    unsigned num_digits = 0;
-    while (index < fmt.size() && std::isdigit(fmt[index])) {
-      LL_ASSERT(num_digits < 4, "cannot format to a width greater than 9999");
-      digits[num_digits] = fmt[index];
-      ++index;
-      ++num_digits;
-    }
-    std::from_chars(digits, digits + num_digits, total_width);
-  }
-
-  // Check if number separators should be used.
-  bool use_separators = false;
-  if (index < fmt.size() && fmt[index] == 'L') {
-    ++index;
-    use_separators = true;
-  }
-
-  // TODO: Implement different integer formatting.
-  [[maybe_unused]] char type = '\0'; // No special formatting.
-  if (index < fmt.size()) {
-    type = fmt[index];
-  }
-
-  // Make sure we are at the end.
-  LL_REQUIRE(index == fmt.size(), "invalid format string for integer segment '" << fmt << "'");
+  FmtData fmt_data;
+  // Default type for integers is 'd' (decimal).
+  fmt_data.type = 'd';
+  detail::extractFormatting(fmt, fmt_data);
 
   // ==============================================================================
   //  All formatting discovered, do the formatting.
   // ==============================================================================
 
   auto num_digits = formatting::NumberOfDigits(number);
-  if (use_separators) {
+  if (fmt_data.use_separators) {
     num_digits += (num_digits - 1) / 3;
   }
   if constexpr (std::is_signed_v<Integral_t>) {
@@ -1177,13 +1248,13 @@ void FormatInteger(std::string_view fmt, Integral_t number, memory::BasicMemoryB
       ++num_digits;
     }
   }
-  total_width = std::max(num_digits, total_width);
+  auto total_width = std::max(num_digits, fmt_data.width);
 
   std::size_t alignment_offset = 0, right_width = 0;
-  if (alignment == Alignment::Right) {
+  if (fmt_data.alignment == Alignment::Right) {
     alignment_offset = total_width - num_digits;
   }
-  else if (alignment == Alignment::Center) {
+  else if (fmt_data.alignment == Alignment::Center) {
     alignment_offset = (total_width - num_digits) / 2;
     right_width = total_width - alignment_offset - num_digits;
   }
@@ -1193,17 +1264,17 @@ void FormatInteger(std::string_view fmt, Integral_t number, memory::BasicMemoryB
 
   if (alignment_offset != 0) {
     auto [start, end] = buffer.Allocate(alignment_offset);
-    std::fill_n(start, alignment_offset, fill_char);
+    std::fill_n(start, alignment_offset, fmt_data.fill_char);
   }
-  if (use_separators) {
+  if (fmt_data.use_separators) {
     formatting::FormatIntegerWithCommas(number, buffer);
     auto [start, end] = buffer.Allocate(right_width);
-    std::fill_n(start, right_width, fill_char);
+    std::fill_n(start, right_width, fmt_data.fill_char);
   }
   else {
     auto [start, end] = buffer.Allocate(total_width - alignment_offset);
     std::to_chars(start, end, number);
-    std::fill_n(start + num_digits, right_width, fill_char);
+    std::fill_n(start + num_digits, right_width, fmt_data.fill_char);
   }
 }
 
@@ -3963,8 +4034,7 @@ template <std::size_t I, typename... Args_t, std::size_t... Indices>
 void formatHelper(memory::BasicMemoryBuffer<char> &buffer,
                   const char *const *starts,
                   const char *const *ends,
-                  const char *const *fmt_starts,
-                  const char *const *fmt_ends,
+                  const std::string_view *const fmts,
                   std::size_t actual_substitutions,
                   const std::tuple<Segment<Args_t>...> &segments,
                   const FormattingSettings &settings,
@@ -3980,15 +4050,14 @@ void formatHelper(memory::BasicMemoryBuffer<char> &buffer,
   }
   if constexpr (I < sizeof...(Args_t)) {
     auto &segment = std::get<I>(segments);
-    segment.AddToBuffer(settings, msg_info, buffer, memory::MakeStringView(fmt_starts[I], fmt_ends[I]));
+    segment.AddToBuffer(settings, msg_info, buffer, fmts[I]);
     msg_info.message_length += static_cast<unsigned>(buffer.Size());
   }
   if constexpr (I < N) {
     formatHelper < I + 1 > (buffer,
         starts,
         ends,
-        fmt_starts,
-        fmt_ends,
+        fmts,
         actual_substitutions,
         segments,
         settings,
@@ -4007,8 +4076,7 @@ void formatTo(memory::BasicMemoryBuffer<char> &buffer,
   static_assert(N != 0, "N cannot be 0 in formatTo");
 
   const char *starts[N + 1], *ends[N + 1];
-
-  [[maybe_unused]] const char *fmt_begin[N], *fmt_end[N];
+  std::string_view fmts[N];
 
   unsigned count_placed = 0;
   starts[0] = &fmt[0];
@@ -4017,11 +4085,11 @@ void formatTo(memory::BasicMemoryBuffer<char> &buffer,
     if (*c == '{' && count_placed < N) {
       ends[count_placed++] = c;
       // Find the end of the format string.
-      fmt_begin[count_placed - 1] = c + 1;
+      auto fmt_begin = c + 1;
       for (; *c != '}'; ++c) {
         LL_ASSERT(*c != 0, "unterminated format string");
       }
-      fmt_end[count_placed - 1] = c;
+      fmts[count_placed - 1] = std::string_view(fmt_begin, static_cast<std::string_view::size_type>(c - fmt_begin));
       starts[count_placed] = c + 1;
     }
   }
@@ -4035,8 +4103,7 @@ void formatTo(memory::BasicMemoryBuffer<char> &buffer,
   detail::formatHelper<0>(buffer,
                           starts,
                           ends,
-                          fmt_begin,
-                          fmt_end,
+                          fmts,
                           count_placed,
                           segments,
                           settings,
