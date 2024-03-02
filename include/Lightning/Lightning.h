@@ -1597,10 +1597,6 @@ struct BaseSegment {
     AddToBuffer(settings, msg_info, buffer, {});
   }
 
-  //! \brief Calculate the size required to serialize to a buffer.
-  NO_DISCARD virtual unsigned SizeRequired(const FormattingSettings &settings,
-                                           const formatting::MessageInfo &msg_info) const = 0;
-
   //! \brief Copy the segment to the supplied storage.
   virtual void CopyTo(class SegmentStorage &) const = 0;
 
@@ -1721,11 +1717,6 @@ struct AnsiColorSegment : public BaseSegment {
                             std::optional<formatting::AnsiBackgroundColor> background = {})
       : fmt_string_(SetAnsiColorFmt(foreground, background)) {}
 
-  NO_DISCARD unsigned SizeRequired(const FormattingSettings &settings,
-                                   const formatting::MessageInfo &) const override {
-    return settings.has_virtual_terminal_processing ? static_cast<unsigned>(fmt_string_.size()) : 0u;
-  }
-
   void CopyTo(class SegmentStorage &storage) const override { storage.Create<AnsiColorSegment>(*this); }
 
   void SetColors(std::optional<formatting::AnsiForegroundColor> foreground,
@@ -1770,15 +1761,6 @@ struct FillUntil : public BaseSegment {
                      FmtDistanceType pad_type = FmtDistanceType::MESSAGE_LENGTH)
       : pad_length_(pad_length), fill_char_(fill_char), pad_type_(pad_type) {}
 
-  NO_DISCARD unsigned SizeRequired(const FormattingSettings &,
-                                   const formatting::MessageInfo &msg_info) const override {
-    if (pad_type_ == FmtDistanceType::MESSAGE_LENGTH) {
-      return pad_length_ - std::min(msg_info.message_length, pad_length_);
-    }
-    // Otherwise, TOTAL_LENGTH
-    return pad_length_ - std::min(msg_info.total_length, pad_length_);
-  }
-
   void CopyTo(SegmentStorage &storage) const override { storage.Create<FillUntil>(*this); }
 
  private:
@@ -1786,8 +1768,17 @@ struct FillUntil : public BaseSegment {
                    const formatting::MessageInfo &msg_info,
                    memory::BasicMemoryBuffer<char> &buffer,
                    [[maybe_unused]] const std::string_view &fmt) const override {
-    const auto num_chars = SizeRequired(settings, msg_info);
+    const auto num_chars = numToFill(settings, msg_info);
     buffer.AppendN(fill_char_, num_chars);
+  }
+
+  NO_DISCARD unsigned numToFill(const FormattingSettings &,
+                                const formatting::MessageInfo &msg_info) const {
+    if (pad_type_ == FmtDistanceType::MESSAGE_LENGTH) {
+      return pad_length_ - std::min(msg_info.message_length, pad_length_);
+    }
+    // Otherwise, TOTAL_LENGTH
+    return pad_length_ - std::min(msg_info.total_length, pad_length_);
   }
 
   unsigned pad_length_{};
@@ -1808,10 +1799,6 @@ struct RepeatChar : public BaseSegment {
   RepeatChar(unsigned repeat_length, char c)
       : repeat_length_(repeat_length), c_(c) {}
 
-  NO_DISCARD unsigned SizeRequired(const FormattingSettings &, const formatting::MessageInfo &) const override {
-    return repeat_length_;
-  }
-
   void CopyTo(SegmentStorage &storage) const override { storage.Create<RepeatChar>(*this); }
 
  private:
@@ -1827,14 +1814,6 @@ struct RepeatChar : public BaseSegment {
 };
 
 struct NewLineIndent_t : public BaseSegment {
-  NO_DISCARD unsigned SizeRequired(const FormattingSettings &,
-                                   const formatting::MessageInfo &msg_info) const override {
-    if (msg_info.message_indentation) {
-      return *msg_info.message_indentation + 1;
-    }
-    return 1;
-  }
-
   NO_DISCARD bool NeedsMessageIndentation() const override { return true; }
 
   void CopyTo(SegmentStorage &storage) const override { storage.Create<NewLineIndent_t>(); }
@@ -1873,10 +1852,6 @@ struct Segment<std::string> : public BaseSegment {
   explicit Segment(std::string s)
       : str_(std::move(s)) {}
 
-  NO_DISCARD unsigned SizeRequired(const FormattingSettings &, const formatting::MessageInfo &) const override {
-    return static_cast<unsigned>(str_.size());
-  }
-
   void CopyTo(SegmentStorage &storage) const override { storage.Create<Segment>(*this); }
 
  private:
@@ -1900,11 +1875,6 @@ template <>
 struct Segment<char *> : public BaseSegment {
   explicit Segment(const char *s)
       : cstr_(s), size_required_(static_cast<unsigned>(std::strlen(s))) {}
-
-  NO_DISCARD unsigned SizeRequired([[maybe_unused]] const FormattingSettings &settings,
-                                   const formatting::MessageInfo &) const override {
-    return size_required_;
-  }
 
   void CopyTo(SegmentStorage &storage) const override { storage.Create<Segment>(*this); }
 
@@ -1938,11 +1908,6 @@ struct Segment<bool> : public BaseSegment {
   explicit Segment(bool b)
       : value_(b) {}
 
-  NO_DISCARD unsigned SizeRequired([[maybe_unused]] const FormattingSettings &settings,
-                                   const formatting::MessageInfo &) const override {
-    return value_ ? 4u : 5u;
-  }
-
   void CopyTo(SegmentStorage &storage) const override { storage.Create<Segment>(*this); }
 
  private:
@@ -1971,11 +1936,6 @@ struct Segment<Floating_t, std::enable_if_t<std::is_floating_point_v<Floating_t>
     size_required_ = static_cast<unsigned>(serialized_number_.size());
   }
 
-  NO_DISCARD unsigned SizeRequired([[maybe_unused]] const FormattingSettings &settings,
-                                   const formatting::MessageInfo &) const override {
-    return size_required_;
-  }
-
   void CopyTo(SegmentStorage &storage) const override { storage.Create < Segment < Floating_t >> (*this); }
 
  private:
@@ -2002,10 +1962,6 @@ struct Segment<char>
   explicit Segment(char c)
       : c_(c) {}
 
-  NO_DISCARD unsigned SizeRequired(const FormattingSettings &, const formatting::MessageInfo &) const override {
-    return 1;
-  }
-
   void CopyTo(SegmentStorage &storage) const override { storage.Create<Segment>(*this); }
 
  private:
@@ -2026,12 +1982,6 @@ struct Segment<Integral_t,
     : public BaseSegment {
   explicit Segment(Integral_t number)
       : number_(number), size_required_(formatting::NumberOfDigits(number_) + (number < 0 ? 1 : 0)) {}
-
-  NO_DISCARD unsigned SizeRequired(const FormattingSettings &, const formatting::MessageInfo &) const override {
-    // NOTE: This will not be accurate if the number is to be formatted, e.g. with commas, but this function is no
-    // longer used, so consider this an estimate.
-    return size_required_;
-  }
 
   void CopyTo(SegmentStorage &storage) const override { storage.Create<Segment>(*this); }
 
@@ -2059,11 +2009,6 @@ struct Segment<time::DateTime> : public BaseSegment {
   explicit Segment(time::DateTime dt)
       : value_(dt) {}
 
-  NO_DISCARD unsigned SizeRequired([[maybe_unused]] const FormattingSettings &settings,
-                                   const formatting::MessageInfo &) const override {
-    return 26;
-  }
-
   void CopyTo(class SegmentStorage &storage) const override {
     storage.Create<Segment>(*this);
   }
@@ -2088,15 +2033,6 @@ struct AnsiColor8Bit : public BaseSegment {
                          std::optional<formatting::AnsiForegroundColor> foreground,
                          std::optional<formatting::AnsiBackgroundColor> background = {})
       : set_formatting_string_(SetAnsiColorFmt(foreground, background)), segment_(data) {}
-
-  NO_DISCARD unsigned SizeRequired(const FormattingSettings &settings,
-                                   const formatting::MessageInfo &msg_info) const override {
-    auto required_size =
-        settings.has_virtual_terminal_processing ? static_cast<unsigned>(set_formatting_string_.size()) : 0u;
-    required_size += segment_.SizeRequired(settings, msg_info);
-    required_size += AnsiResetSegment.SizeRequired(settings, msg_info);
-    return required_size;
-  }
 
   void CopyTo(SegmentStorage &storage) const override { storage.Create<AnsiColor8Bit>(*this); }
 
@@ -2134,24 +2070,6 @@ class RefBundle {
   SegmentStorage &AddSegment() {
     segments_.EmplaceBack();
     return segments_.Back();
-  }
-
-  NO_DISCARD unsigned SizeRequired(const FormattingSettings &settings,
-                                   formatting::MessageInfo &msg_info) const {
-    // Reset message length counter.
-    msg_info.message_length = 0;
-    msg_info.is_in_message_segment = true;
-    // Calculate message length.
-    unsigned size_required = 0;
-    for (auto i = 0u; i < segments_.Size(); ++i) {
-      auto &segment = segments_[i];
-      auto size = segment.Get()->SizeRequired(settings, msg_info); // TODO: Refactor things like this.
-      size_required += size;
-      msg_info.message_length += size;
-      msg_info.total_length += size;
-    }
-    msg_info.is_in_message_segment = false;
-    return size_required;
   }
 
   void FmtString(const FormattingSettings &settings,
