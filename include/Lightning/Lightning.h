@@ -3989,6 +3989,87 @@ class Global {
 
 namespace formatting {
 namespace detail {
+
+inline std::pair<bool, std::string> getSpecialFormatter(std::string_view fmt) {
+  AnsiForegroundColor foreground_color;
+  // clang-format off
+  if (fmt == "DEFAULT") foreground_color = AnsiForegroundColor::Default;
+  else if (fmt == "RED") foreground_color = AnsiForegroundColor::Red;
+  else if (fmt == "BRED") foreground_color = AnsiForegroundColor::BrightRed;
+  else if (fmt == "GREEN") foreground_color = AnsiForegroundColor::Green;
+  else if (fmt == "BGREEN") foreground_color = AnsiForegroundColor::BrightGreen;
+  else if (fmt == "BLUE") foreground_color = AnsiForegroundColor::Blue;
+  else if (fmt == "BBLUE") foreground_color = AnsiForegroundColor::BrightBlue;
+  else if (fmt == "YELLOW") foreground_color = AnsiForegroundColor::Yellow;
+  else if (fmt == "YELLOW") foreground_color = AnsiForegroundColor::BrightYellow;
+  else if (fmt == "CYAN") foreground_color = AnsiForegroundColor::Cyan;
+  else if (fmt == "BCYAN") foreground_color = AnsiForegroundColor::BrightCyan;
+  else if (fmt == "BLACK") foreground_color = AnsiForegroundColor::Black;
+  else if (fmt == "BBLACK") foreground_color = AnsiForegroundColor::BrightBlack;
+  else if (fmt == "WHITE") foreground_color = AnsiForegroundColor::White;
+  else if (fmt == "BWHITE") foreground_color = AnsiForegroundColor::BrightWhite;
+  else if (fmt == "MAGENTA") foreground_color = AnsiForegroundColor::Magenta;
+  else if (fmt == "BMAGENTA") foreground_color = AnsiForegroundColor::BrightMagenta;
+  else if (fmt == "RESET") foreground_color = AnsiForegroundColor::Reset;
+  else {
+    // If it is not a special formatter, just return the literal string.
+    return {false, ""};
+  }
+  // clang-format on
+  return {true, SetAnsiColorFmt(foreground_color)};
+}
+
+inline void formatLiteralSegment(std::string_view segment, memory::BasicMemoryBuffer<char> &buffer) {
+  for (auto c = segment.begin(); c < segment.end(); ++c) {
+    switch (*c) {
+      // Start of an escaped '{' or a special formatter.
+      case '{':
+        ++c;
+        if (c == segment.end()) {
+          buffer.PushBack('{');
+          return;
+        }
+        else if (*c == '@') {
+          // Get characters up to the next '}'
+          auto start = c + 1;
+          for (; *c != '}'; ++c) {
+            // If this is not formatted as a special formatter, that is fine, just treat it as characters.
+            if (c == segment.end()) {
+              buffer.PushBack('{');
+              buffer.PushBack('@');
+              memory::AppendBuffer(buffer, std::string_view{start, static_cast<std::string_view::size_type>(c - start)});
+              return;
+            }
+          }
+          // Determine the special format string.
+          std::string_view view(start, static_cast<std::string_view::size_type>(c - start));
+          auto [was_special, special_formatting] = getSpecialFormatter(view);
+          if (was_special) {
+            memory::AppendBuffer(buffer, special_formatting);
+          }
+          else {
+            // Was not actually formatting!
+            buffer.PushBack('{');
+            buffer.PushBack('@');
+            memory::AppendBuffer(buffer, view);
+            buffer.PushBack('}');
+          }
+        }
+        else if (*c == '{') {
+          buffer.PushBack(*c);
+
+        }
+        else {
+          buffer.PushBack('{');
+          buffer.PushBack(*c);
+        }
+        break;
+      default:
+        buffer.PushBack(*c);
+    }
+  }
+}
+
 //! \brief Helper function to write the I-th segment of a format string to the buffer, along with any string segment.
 template <std::size_t I, typename... Args_t, std::size_t... Indices>
 void formatHelper(memory::BasicMemoryBuffer<char> &buffer,
@@ -4003,7 +4084,8 @@ void formatHelper(memory::BasicMemoryBuffer<char> &buffer,
   constexpr auto N = sizeof...(Indices);
   // Write formatting segment, then arg segment, then call formatHelper again.
   if (starts[I] < ends[I]) {
-    AppendBuffer(buffer, starts[I], ends[I]);
+    formatLiteralSegment(std::string_view(starts[I], static_cast<std::string_view::size_type>(ends[I] - starts[I])),
+                         buffer);
   }
   if (I == actual_substitutions) {
     return;
@@ -4042,15 +4124,22 @@ void formatTo(memory::BasicMemoryBuffer<char> &buffer,
   starts[0] = &fmt[0];
   auto c = &fmt[0];
   for (; *c != 0; ++c) {
+    // Look out for formatting segments...
     if (*c == '{' && count_placed < N) {
-      ends[count_placed++] = c;
-      // Find the end of the format string.
-      auto fmt_begin = c + 1;
-      for (; *c != '}'; ++c) {
-        LL_ASSERT(*c != 0, "unterminated format string");
+      // ... but make sure it's not actually an escaped '{' or special formatter.
+      if (*(c + 1) != 0 && (*(c + 1) == '{' || *(c + 1) == '@')) {
+        ++c;
       }
-      fmts[count_placed - 1] = std::string_view(fmt_begin, static_cast<std::string_view::size_type>(c - fmt_begin));
-      starts[count_placed] = c + 1;
+      else {
+        ends[count_placed++] = c;
+        // Find the end of the format string.
+        auto fmt_begin = c + 1;
+        for (; *c != '}'; ++c) {
+          LL_ASSERT(*c != 0, "unterminated format string");
+        }
+        fmts[count_placed - 1] = std::string_view(fmt_begin, static_cast<std::string_view::size_type>(c - fmt_begin));
+        starts[count_placed] = c + 1;
+      }
     }
   }
   ends[count_placed] = c; // Will be null the terminator.
@@ -4074,7 +4163,7 @@ void formatTo(memory::BasicMemoryBuffer<char> &buffer,
 
 //! \brief Format data to a memory buffer. This is the main formatting function.
 //!
-//! This is all very similar to, but much less powerful than, std::format or fmt lib. The format string
+//! This is all very similar to, but less powerful than, std::format or fmt lib.
 template <typename... Args_t>
 void FormatTo(memory::BasicMemoryBuffer<char> &buffer,
               const FormattingSettings &settings,
@@ -4082,7 +4171,7 @@ void FormatTo(memory::BasicMemoryBuffer<char> &buffer,
               const Args_t &... args) {
   if constexpr (constexpr auto N = sizeof...(args); N == 0) {
     // If there are no arguments, just append the string to the buffer.
-    AppendBuffer(buffer, fmt);
+    detail::formatLiteralSegment(fmt, buffer);
   }
   else {
     detail::formatTo(buffer, settings, fmt, args...);
