@@ -2537,10 +2537,6 @@ class AttributeFormatter {
                            const FormattingSettings &settings,
                            const formatting::MessageInfo &msg_info,
                            memory::BasicMemoryBuffer<char> &buffer) const = 0;
-
-  NO_DISCARD virtual unsigned RequiredSize(const RecordAttributes &attributes,
-                                           const FormattingSettings &settings,
-                                           const formatting::MessageInfo &msg_info) const = 0;
 };
 
 //! \brief Format the severity attribute.
@@ -2561,19 +2557,6 @@ class SeverityAttributeFormatter : public AttributeFormatter {
       AppendBuffer(buffer, str);
       AnsiResetSegment.AddToBuffer(settings, msg_info, buffer);
     }
-  }
-
-  NO_DISCARD unsigned RequiredSize(const RecordAttributes &attributes,
-                                   const FormattingSettings &settings,
-                                   const formatting::MessageInfo &msg_info) const override {
-    if (attributes.basic_attributes.level) {
-      unsigned required_size =
-          colorSegment(attributes.basic_attributes.level.value()).SizeRequired(settings, msg_info);
-      required_size += AnsiResetSegment.SizeRequired(settings, msg_info);
-      return required_size
-          + static_cast<unsigned>(getString(attributes.basic_attributes.level.value()).size());
-    }
-    return 0u;
   }
 
   SeverityAttributeFormatter &SeverityName(Severity severity, const std::string &name) {
@@ -2724,12 +2707,6 @@ class DateTimeAttributeFormatter final : public AttributeFormatter {
       formatting::FormatDateTo(start, end, dt);
     }
   }
-
-  NO_DISCARD unsigned RequiredSize(const RecordAttributes &attributes,
-                                   const FormattingSettings &,
-                                   const MessageInfo &) const override {
-    return attributes.basic_attributes.time_stamp ? 26 : 0u;
-  }
 };
 
 class LoggerNameAttributeFormatter final : public AttributeFormatter {
@@ -2739,12 +2716,6 @@ class LoggerNameAttributeFormatter final : public AttributeFormatter {
                    const MessageInfo &,
                    memory::BasicMemoryBuffer<char> &buffer) const override {
     AppendBuffer(buffer, attributes.basic_attributes.logger_name);
-  }
-
-  NO_DISCARD unsigned RequiredSize(const RecordAttributes &attributes,
-                                   const FormattingSettings &,
-                                   const MessageInfo &) const override {
-    return static_cast<unsigned>(attributes.basic_attributes.logger_name.size());
   }
 };
 
@@ -2768,21 +2739,6 @@ class FileNameAttributeFormatter final : public AttributeFormatter {
         AppendBuffer(buffer, attributes.basic_attributes.file_name);
       }
     }
-  }
-
-  NO_DISCARD unsigned RequiredSize(const RecordAttributes &attributes,
-                                   const FormattingSettings &,
-                                   const MessageInfo &) const override {
-    if (attributes.basic_attributes.file_name) {
-      if (only_file_name_) {
-        auto [first, last] = getRange(attributes.basic_attributes.file_name);
-        return static_cast<unsigned>(last - first);
-      }
-      else {
-        return static_cast<unsigned>(std::strlen(attributes.basic_attributes.file_name));
-      }
-    }
-    return 0;
   }
 
  private:
@@ -2810,15 +2766,6 @@ class FunctionNameAttributeFormatter final : public AttributeFormatter {
       AppendBuffer(buffer, attributes.basic_attributes.function_name);
     }
   }
-
-  NO_DISCARD unsigned RequiredSize(const RecordAttributes &attributes,
-                                   const FormattingSettings &,
-                                   const MessageInfo &) const override {
-    if (attributes.basic_attributes.function_name) {
-      return static_cast<unsigned>(std::strlen(attributes.basic_attributes.function_name));
-    }
-    return 0;
-  }
 };
 
 //! \brief Formatter for the file name attribute.
@@ -2836,15 +2783,6 @@ class FileLineAttributeFormatter final : public AttributeFormatter {
       std::to_chars(start, end, *attributes.basic_attributes.line_number);
     }
   }
-
-  NO_DISCARD unsigned RequiredSize(const RecordAttributes &attributes,
-                                   const FormattingSettings &,
-                                   const MessageInfo &) const override {
-    if (attributes.basic_attributes.line_number) {
-      return NumberOfDigits(*attributes.basic_attributes.line_number);
-    }
-    return 0;
-  }
 };
 
 //! \brief Formatter for the file name attribute.
@@ -2855,12 +2793,6 @@ class ThreadAttributeFormatter final : public AttributeFormatter {
                    [[maybe_unused]] const MessageInfo &info,
                    memory::BasicMemoryBuffer<char> &buffer) const override {
     AppendBuffer(buffer, attributes.basic_attributes.thread_id);
-  }
-
-  NO_DISCARD unsigned RequiredSize(const RecordAttributes &attributes,
-                                   const FormattingSettings &,
-                                   const MessageInfo &) const override {
-    return static_cast<unsigned>(attributes.basic_attributes.thread_id.size());
   }
 };
 
