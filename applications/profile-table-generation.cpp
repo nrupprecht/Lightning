@@ -288,7 +288,7 @@ void bench_st_types(int howmany) {
       LOG_SEV_TO(logger, Info) << "Hello logger: writing data " << x;
     }
     auto delta_d = duration_cast<duration<double>>(high_resolution_clock::now() - start).count();
-    AddRow("Float", delta_d, howmany);
+    AddRow("Double", delta_d, howmany);
   }
 
   // Thread ID

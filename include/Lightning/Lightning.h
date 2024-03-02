@@ -994,7 +994,7 @@ inline char *CopyPaddedInt(
 namespace detail {
 
 //! \brief Format an integer into a buffer, with commas every three digits.
-inline void formatIntegerWithCommas(memory::BasicMemoryBuffer<char> &buffer, unsigned long long x) {
+inline void formatIntegerWithCommas(unsigned long long x, memory::BasicMemoryBuffer<char> &buffer) {
   const auto num_digits = NumberOfDigitsULL(x);
 
   // Compute the number of commas that will be needed.
@@ -1034,18 +1034,176 @@ inline void formatIntegerWithCommas(memory::BasicMemoryBuffer<char> &buffer, uns
   }
 }
 
+//! \brief Helper function to get arrays of upper- or lower-case hex digits.
+inline const char *getHexDigits(bool upper_case) {
+  static const char *upper_hex_digits = "0123456789ABCDEF";
+  static const char *lower_hex_digits = "0123456789abcdef";
+  return upper_case ? upper_hex_digits : lower_hex_digits;
+}
+
 } // namespace detail
 
 template <typename T, LL_ENABLE_IF(std::is_integral_v<T> && !std::is_same_v<T, bool>)>
-void FormatIntegerWithCommas(memory::BasicMemoryBuffer<char> &buffer, T x) {
+void FormatIntegerWithCommas(T x, memory::BasicMemoryBuffer<char> &buffer) {
   if constexpr (std::is_signed_v<T>) {
     if (x < 0) {
       buffer.PushBack('-');
     }
-    detail::formatIntegerWithCommas(buffer, static_cast<unsigned long long>(std::llabs(x)));
+    detail::formatIntegerWithCommas(static_cast<unsigned long long>(std::llabs(x)), buffer);
   }
   else {
-    detail::formatIntegerWithCommas(buffer, static_cast<unsigned long long>(x));
+    detail::formatIntegerWithCommas(static_cast<unsigned long long>(x), buffer);
+  }
+}
+
+template <typename Integral_t, LL_ENABLE_IF(std::is_integral_v<Integral_t> && !std::is_same_v<Integral_t, bool>)>
+void FormatHex(Integral_t x,
+               memory::BasicMemoryBuffer<char> &buffer,
+               bool use_uppercase = true,
+               bool use_prefix = true) {
+  // x will take up 8 characters, then two for "0x".
+  if (use_prefix) {
+    buffer.PushBack('0');
+    buffer.PushBack('x');
+  }
+  const char *hex_digits = detail::getHexDigits(use_uppercase);
+
+  // Maximum number of characters that would be needed.
+  char internal_buffer[2 * sizeof(Integral_t)];
+
+  std::size_t count = 0;
+  while (x) {
+    internal_buffer[count] = hex_digits[x & 0xF];
+    x >>= 4;
+    ++count;
+  }
+  for (std::size_t i = 0; i < count; ++i) {
+    buffer.PushBack(internal_buffer[count - i - 1]);
+  }
+}
+
+//! \brief Format an integral type to a buffer.
+//!
+//! Features taken from here https://fmt.dev/latest/syntax.html. Not all feature are implemented.
+//!
+//! \param fmt Format string. What would go inside the "{}" in a usual format string.
+//! \param number The integer to format.
+//! \param buffer The buffer to format the integer into.
+template <typename Integral_t, LL_ENABLE_IF(std::is_integral_v<Integral_t> && !std::is_same_v<Integral_t, bool>)>
+void FormatInteger(std::string_view fmt, Integral_t number, memory::BasicMemoryBuffer<char> &buffer) {
+  // Check if there are formatting instructions.
+  if (fmt.empty()) {
+    auto num_digits = formatting::NumberOfDigits(number);
+    if constexpr (std::is_signed_v<Integral_t>) {
+      if (number < 0) {
+        ++num_digits;
+      }
+    }
+    auto [start, end] = buffer.Allocate(num_digits);
+    std::to_chars(start, end, number);
+    return;
+  }
+  // The format string must be at least X chars long.
+  LL_REQUIRE(1 < fmt.size(), "invalid format string for integer segment '" << fmt << "'");
+  LL_REQUIRE(fmt[0] == ':', "invalid format string for integer segment '" << fmt << "'");
+  std::size_t index = 1;
+
+  unsigned total_width = 0;
+
+  // If the next char is an alignment, this means the preceding char was a fill character.
+  char fill_char = ' ';
+  if (2 < fmt.size() && (fmt[2] == '<' || fmt[2] == '^' || fmt[2] == '>')) {
+    fill_char = fmt[1];
+    ++index;
+  }
+
+  // Determine if any padding and alignment is needed.
+  enum class Alignment { Left, Right, Center };
+  auto alignment = Alignment::Left;
+
+  if (fmt[index] == '<') {
+    alignment = Alignment::Left;
+    ++index;
+  }
+  else if (fmt[index] == '>') {
+    alignment = Alignment::Right;
+    ++index;
+  }
+  else if (fmt[index] == '^') {
+    alignment = Alignment::Center;
+    ++index;
+  }
+
+  // Get the buffer width
+  if (index < fmt.size() && std::isdigit(fmt[index])) {
+    char digits[4];
+    // Get digits.
+    unsigned num_digits = 0;
+    while (index < fmt.size() && std::isdigit(fmt[index])) {
+      LL_ASSERT(num_digits < 4, "cannot format to a width greater than 9999");
+      digits[num_digits] = fmt[index];
+      ++index;
+      ++num_digits;
+    }
+    std::from_chars(digits, digits + num_digits, total_width);
+  }
+
+  // Check if number separators should be used.
+  bool use_separators = false;
+  if (index < fmt.size() && fmt[index] == 'L') {
+    ++index;
+    use_separators = true;
+  }
+
+  // TODO: Implement different integer formatting.
+  [[maybe_unused]] char type = '\0'; // No special formatting.
+  if (index < fmt.size()) {
+    type = fmt[index];
+  }
+
+  // Make sure we are at the end.
+  LL_REQUIRE(index == fmt.size(), "invalid format string for integer segment '" << fmt << "'");
+
+  // ==============================================================================
+  //  All formatting discovered, do the formatting.
+  // ==============================================================================
+
+  auto num_digits = formatting::NumberOfDigits(number);
+  if (use_separators) {
+    num_digits += (num_digits - 1) / 3;
+  }
+  if constexpr (std::is_signed_v<Integral_t>) {
+    if (number < 0) {
+      ++num_digits;
+    }
+  }
+  total_width = std::max(num_digits, total_width);
+
+  std::size_t alignment_offset = 0, right_width = 0;
+  if (alignment == Alignment::Right) {
+    alignment_offset = total_width - num_digits;
+  }
+  else if (alignment == Alignment::Center) {
+    alignment_offset = (total_width - num_digits) / 2;
+    right_width = total_width - alignment_offset - num_digits;
+  }
+  else {  // Alignment::Left
+    right_width = total_width - num_digits;
+  }
+
+  if (alignment_offset != 0) {
+    auto [start, end] = buffer.Allocate(alignment_offset);
+    std::fill_n(start, alignment_offset, fill_char);
+  }
+  if (use_separators) {
+    formatting::FormatIntegerWithCommas(number, buffer);
+    auto [start, end] = buffer.Allocate(right_width);
+    std::fill_n(start, right_width, fill_char);
+  }
+  else {
+    auto [start, end] = buffer.Allocate(total_width - alignment_offset);
+    std::to_chars(start, end, number);
+    std::fill_n(start + num_digits, right_width, fill_char);
   }
 }
 
@@ -1701,8 +1859,8 @@ struct Segment<Integral_t,
                    const formatting::MessageInfo &,
                    memory::BasicMemoryBuffer<char> &buffer,
                    [[maybe_unused]] const std::string_view &fmt) const override {
-    if (fmt.size() == 2 && fmt[0] == ':' && fmt[1] == 'L') {
-      formatting::FormatIntegerWithCommas(buffer, number_);
+    if (!fmt.empty()) {
+      formatting::FormatInteger(fmt, number_, buffer);
     }
     else {
       auto [start, end] = buffer.Allocate(size_required_);
@@ -2397,7 +2555,8 @@ class SeverityAttributeFormatter : public AttributeFormatter {
         return error_;
       case Severity::Fatal:
         return fatal_;
-      default: LL_FAIL("unrecognized severity attribute");
+      default:
+        LL_FAIL("unrecognized severity attribute");
     }
   }
 
@@ -2417,7 +2576,8 @@ class SeverityAttributeFormatter : public AttributeFormatter {
         return error_;
       case Severity::Fatal:
         return fatal_;
-      default: LL_FAIL("unrecognized severity attribute");
+      default:
+        LL_FAIL("unrecognized severity attribute");
     }
   }
 
@@ -2437,7 +2597,8 @@ class SeverityAttributeFormatter : public AttributeFormatter {
         return error_colors_;
       case Severity::Fatal:
         return fatal_colors_;
-      default: LL_FAIL("unrecognized severity attribute");
+      default:
+        LL_FAIL("unrecognized severity attribute");
     }
   }
 
@@ -2457,7 +2618,8 @@ class SeverityAttributeFormatter : public AttributeFormatter {
         return error_colors_;
       case Severity::Fatal:
         return fatal_colors_;
-      default: LL_FAIL("unrecognized severity attribute");
+      default:
+        LL_FAIL("unrecognized severity attribute");
     }
   }
 
@@ -2565,7 +2727,6 @@ class FileNameAttributeFormatter final : public AttributeFormatter {
   //! \brief If true, only the file name is displayed, not the full path.
   bool only_file_name_;
 };
-
 
 //! \brief Formatter for the function name attribute.
 class FunctionNameAttributeFormatter final : public AttributeFormatter {
@@ -3839,7 +4000,7 @@ void formatHelper(memory::BasicMemoryBuffer<char> &buffer,
 template <typename... Args_t>
 void formatTo(memory::BasicMemoryBuffer<char> &buffer,
               const FormattingSettings &settings,
-              const char *fmt_string,
+              std::string_view fmt,
               const Args_t &... args) {
   // Note that N != 0
   constexpr auto N = sizeof...(args);
@@ -3850,8 +4011,8 @@ void formatTo(memory::BasicMemoryBuffer<char> &buffer,
   [[maybe_unused]] const char *fmt_begin[N], *fmt_end[N];
 
   unsigned count_placed = 0;
-  starts[0] = fmt_string;
-  auto c = fmt_string;
+  starts[0] = &fmt[0];
+  auto c = &fmt[0];
   for (; *c != 0; ++c) {
     if (*c == '{' && count_placed < N) {
       ends[count_placed++] = c;
@@ -3890,30 +4051,30 @@ void formatTo(memory::BasicMemoryBuffer<char> &buffer,
 template <typename... Args_t>
 void FormatTo(memory::BasicMemoryBuffer<char> &buffer,
               const FormattingSettings &settings,
-              const char *fmt_string,
+              std::string_view fmt,
               const Args_t &... args) {
   if constexpr (constexpr auto N = sizeof...(args); N == 0) {
     // If there are no arguments, just append the string to the buffer.
-    AppendBuffer(buffer, fmt_string);
+    AppendBuffer(buffer, fmt);
   }
   else {
-    detail::formatTo(buffer, settings, fmt_string, args...);
+    detail::formatTo(buffer, settings, fmt, args...);
   }
 }
 
 //! \brief Format data to a string.
 template <typename... Args_t>
-std::string Format(const FormattingSettings &settings, const char *fmt_string, const Args_t &... args) {
+std::string Format(const FormattingSettings &settings, std::string_view fmt, const Args_t &... args) {
   memory::StringMemoryBuffer buffer;
-  FormatTo(buffer, settings, fmt_string, args...);
+  FormatTo(buffer, settings, fmt, args...);
   return buffer.ToString();
 }
 
 //! \brief Format data to a string with default formatting settings.
 template <typename... Args_t>
-std::string Format(const char *fmt_string, const Args_t &... args) {
+std::string Format(std::string_view fmt, const Args_t &... args) {
   FormattingSettings settings{};
-  return Format(settings, fmt_string, args...);
+  return Format(settings, fmt, args...);
 }
 
 } // namespace formatting

@@ -38,7 +38,7 @@ if (BUILD_LIGHTNING_APPLICATIONS)
   message("Building applications.")
   add_subdirectory("${PROJECT_SOURCE_DIR}/applications")
 else()
-  message("Not building applications.")
+  message(STATUS "Lightning: Not building applications.")
 endif()
 
 # ---- Install rules ----

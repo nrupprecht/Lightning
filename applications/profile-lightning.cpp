@@ -867,7 +867,7 @@ void bench_segments(int howmany) {
     auto start = high_resolution_clock::now();
     for (auto i = 0; i < howmany; ++i) {
       buffer.Clear();
-      segment.AddToBuffer(settings, msg_info, buffer, "L");
+      segment.AddToBuffer(settings, msg_info, buffer, ":L");
     }
     auto delta_d = duration_cast<duration<double>>(high_resolution_clock::now() - start).count();
     LOG_SEV(Info) << "Segment<int> with commas:" << PadUntil(pad_width) << "Elapsed: " << delta_d << " secs "

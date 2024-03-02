@@ -42,51 +42,184 @@ TEST(Formatting, Integers) {
 TEST(Formatting, FormatIntegerWithCommas) {
   {
     memory::MemoryBuffer<char> buffer;
-    FormatIntegerWithCommas(buffer, 120);
+    FormatIntegerWithCommas(120, buffer);
     EXPECT_EQ(buffer.ToString(), "120");
     EXPECT_EQ(formatting::Format("{:L}", 120), "120");
   }
   {
     memory::MemoryBuffer<char> buffer;
-    FormatIntegerWithCommas(buffer, -120);
+    FormatIntegerWithCommas(-120, buffer);
     EXPECT_EQ(buffer.ToString(), "-120");
     EXPECT_EQ(formatting::Format("{:L}", -120), "-120");
   }
   {
     memory::MemoryBuffer<char> buffer;
-    FormatIntegerWithCommas(buffer, 24'998);
+    FormatIntegerWithCommas(24'998, buffer);
     EXPECT_EQ(buffer.ToString(), "24,998");
     EXPECT_EQ(formatting::Format("{:L}", 24'998), "24,998");
   }
   {
     memory::MemoryBuffer<char> buffer;
-    FormatIntegerWithCommas(buffer, -24'998);
+    FormatIntegerWithCommas(-24'998, buffer);
     EXPECT_EQ(buffer.ToString(), "-24,998");
     EXPECT_EQ(formatting::Format("{:L}", -24'998), "-24,998");
   }
   {
     memory::MemoryBuffer<char> buffer;
-    FormatIntegerWithCommas(buffer, 34'567'890);
+    FormatIntegerWithCommas(34'567'890, buffer);
     EXPECT_EQ(buffer.ToString(), "34,567,890");
     EXPECT_EQ(formatting::Format("{:L}", 34'567'890), "34,567,890");
   }
   {
     memory::MemoryBuffer<char> buffer;
-    FormatIntegerWithCommas(buffer, -34'567'890);
+    FormatIntegerWithCommas(-34'567'890, buffer);
     EXPECT_EQ(buffer.ToString(), "-34,567,890");
     EXPECT_EQ(formatting::Format("{:L}", -34'567'890), "-34,567,890");
   }
   {
     memory::MemoryBuffer<char> buffer;
-    FormatIntegerWithCommas(buffer, 1'234'567'890);
+    FormatIntegerWithCommas(1'234'567'890, buffer);
     EXPECT_EQ(buffer.ToString(), "1,234,567,890");
     EXPECT_EQ(formatting::Format("{:L}", 1'234'567'890), "1,234,567,890");
   }
   {
     memory::MemoryBuffer<char> buffer;
-    FormatIntegerWithCommas(buffer, -1'234'567'890);
+    FormatIntegerWithCommas(-1'234'567'890, buffer);
     EXPECT_EQ(buffer.ToString(), "-1,234,567,890");
     EXPECT_EQ(formatting::Format("{:L}", -1'234'567'890), "-1,234,567,890");
+  }
+}
+
+TEST(Formatting, FormatHex) {
+  {
+    memory::MemoryBuffer<char> buffer;
+    FormatHex(0xF2F, buffer);
+    EXPECT_EQ(buffer.ToString(), "0xF2F");
+  }
+  {
+    memory::MemoryBuffer<char> buffer;
+    FormatHex(static_cast<uint64_t>(0xAAAA), buffer);
+    EXPECT_EQ(buffer.ToString(), "0xAAAA");
+  }
+}
+
+TEST(Formatting, FormatInteger_Errors) {
+  {
+    memory::MemoryBuffer<char> buffer;
+    EXPECT_ANY_THROW(FormatInteger(":", 120, buffer));
+  }
+  {
+    // Left alignment by default
+    memory::MemoryBuffer<char> buffer;
+    EXPECT_ANY_THROW(FormatInteger(":x10", 120, buffer));
+  }
+}
+
+TEST(Formatting, FormatInteger_Alignment) {
+  {
+    // No instructions - left alignment by default
+    memory::MemoryBuffer<char> buffer;
+    EXPECT_NO_THROW(FormatInteger("", 120, buffer));
+    EXPECT_EQ(buffer.ToString(), "120");
+  }
+  {
+    memory::MemoryBuffer<char> buffer;
+    EXPECT_NO_THROW(FormatInteger("", -120, buffer));
+    EXPECT_EQ(buffer.ToString(), "-120");
+  }
+  {
+    // Left alignment by default
+    memory::MemoryBuffer<char> buffer;
+    EXPECT_NO_THROW(FormatInteger(":10", 120, buffer));
+    EXPECT_EQ(buffer.ToString(), "120       ");
+  }
+  {
+    // Left alignment by default
+    memory::MemoryBuffer<char> buffer;
+    EXPECT_NO_THROW(FormatInteger(":10", -120, buffer));
+    EXPECT_EQ(buffer.ToString(), "-120      ");
+  }
+  {
+    // Left alignment, no padding. Useless, but legal.
+    memory::MemoryBuffer<char> buffer;
+    EXPECT_NO_THROW(FormatInteger(":<", 120, buffer));
+    EXPECT_EQ(buffer.ToString(), "120");
+  }
+  {
+    memory::MemoryBuffer<char> buffer;
+    EXPECT_NO_THROW(FormatInteger(":<3", 120, buffer));
+    EXPECT_EQ(buffer.ToString(), "120");
+  }
+  {
+    memory::MemoryBuffer<char> buffer;
+    EXPECT_NO_THROW(FormatInteger(":<3", -120, buffer));
+    EXPECT_EQ(buffer.ToString(), "-120");
+  }
+  {
+    memory::MemoryBuffer<char> buffer;
+    EXPECT_NO_THROW(FormatInteger(":<5", 120, buffer));
+    EXPECT_EQ(buffer.ToString(), "120  ");
+  }
+  {
+    memory::MemoryBuffer<char> buffer;
+    EXPECT_NO_THROW(FormatInteger(":<5", -120, buffer));
+    EXPECT_EQ(buffer.ToString(), "-120 ");
+  }
+  {
+    memory::MemoryBuffer<char> buffer;
+    EXPECT_NO_THROW(FormatInteger(":>6", 145, buffer));
+    EXPECT_EQ(buffer.ToString(), "   145");
+  }
+  {
+    memory::MemoryBuffer<char> buffer;
+    EXPECT_NO_THROW(FormatInteger(":>6", -145, buffer));
+    EXPECT_EQ(buffer.ToString(), "  -145");
+  }
+  {
+    memory::MemoryBuffer<char> buffer;
+    EXPECT_NO_THROW(FormatInteger(":^7", 145, buffer));
+    EXPECT_EQ(buffer.ToString(), "  145  ");
+  }
+  {
+    memory::MemoryBuffer<char> buffer;
+    EXPECT_NO_THROW(FormatInteger(":^7", -145, buffer));
+    EXPECT_EQ(buffer.ToString(), " -145  ");
+  }
+  {
+    memory::MemoryBuffer<char> buffer;
+    EXPECT_NO_THROW(FormatInteger(":^0", 145, buffer));
+    EXPECT_EQ(buffer.ToString(), "145");
+  }
+}
+
+TEST(Formatting, FormatInteger_FillChar) {
+  {
+    memory::MemoryBuffer<char> buffer;
+    EXPECT_NO_THROW(FormatInteger(":*^7", 145, buffer));
+    EXPECT_EQ(buffer.ToString(), "**145**");
+  }
+  {
+    memory::MemoryBuffer<char> buffer;
+    EXPECT_NO_THROW(FormatInteger(":x<7", -145, buffer));
+    EXPECT_EQ(buffer.ToString(), "-145xxx");
+  }
+}
+
+TEST(Formatting, FormatInteger_Separators) {
+  {
+    memory::MemoryBuffer<char> buffer;
+    EXPECT_NO_THROW(FormatInteger(":<9L", 10'000, buffer));
+    EXPECT_EQ(buffer.ToString(), "10,000   ");
+  }
+  {
+    memory::MemoryBuffer<char> buffer;
+    EXPECT_NO_THROW(FormatInteger(":x<9L", 14'573, buffer));
+    EXPECT_EQ(buffer.ToString(), "14,573xxx");
+  }
+  {
+    memory::MemoryBuffer<char> buffer;
+    EXPECT_NO_THROW(FormatInteger(":x<9L", -14'573, buffer));
+    EXPECT_EQ(buffer.ToString(), "-14,573xx");
   }
 }
 
