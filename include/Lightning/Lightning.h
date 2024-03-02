@@ -4001,7 +4001,7 @@ inline std::pair<bool, std::string> getSpecialFormatter(std::string_view fmt) {
   else if (fmt == "BLUE") foreground_color = AnsiForegroundColor::Blue;
   else if (fmt == "BBLUE") foreground_color = AnsiForegroundColor::BrightBlue;
   else if (fmt == "YELLOW") foreground_color = AnsiForegroundColor::Yellow;
-  else if (fmt == "YELLOW") foreground_color = AnsiForegroundColor::BrightYellow;
+  else if (fmt == "BYELLOW") foreground_color = AnsiForegroundColor::BrightYellow;
   else if (fmt == "CYAN") foreground_color = AnsiForegroundColor::Cyan;
   else if (fmt == "BCYAN") foreground_color = AnsiForegroundColor::BrightCyan;
   else if (fmt == "BLACK") foreground_color = AnsiForegroundColor::Black;
