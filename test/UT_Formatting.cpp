@@ -17,6 +17,9 @@ TEST(Formatting, Basic) {
   EXPECT_NO_THROW(EXPECT_EQ(formatting::Format("No spaces!", "Hi"), "No spaces!"));
   // No arguments - just returns format string.
   EXPECT_NO_THROW(EXPECT_EQ(formatting::Format("One space {}"), "One space {}"));
+
+  // Escaped '{' character
+  EXPECT_NO_THROW(EXPECT_EQ(formatting::Format("One {{space} {}", 1), "One {space} 1"));
 }
 
 TEST(Formatting, String) {
@@ -40,6 +43,16 @@ TEST(Formatting, Integers) {
   EXPECT_EQ(formatting::Format("Print: {}", 12ul), "Print: 12");
   EXPECT_EQ(formatting::Format("Print: {}", 12ull), "Print: 12");
   EXPECT_EQ(formatting::Format("Print: {:L}X", 1'345'562), "Print: 1,345,562X");
+}
+
+TEST(Formatting, Colors) {
+  EXPECT_EQ(formatting::Format("When in {@RED}Rome{@RESET}, do as the {@GREEN}Greeks{@RESET} do."),
+            "When in \033[31mRome\033[0m, do as the \033[32mGreeks\033[0m do.");
+
+  // Looks like using a formatter, but is not actually in all places.
+  EXPECT_EQ(formatting::Format("When in {@REDR}Rome{@RRESET}, do as the {@GREEN}Greeks{@RESET} do."),
+            "When in {@REDR}Rome{@RRESET}, do as the \033[32mGreeks\033[0m do.");
+
 }
 
 TEST(Formatting, FormatIntegerWithCommas) {
