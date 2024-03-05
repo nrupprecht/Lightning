@@ -32,6 +32,15 @@ TEST(Formatting, String) {
   EXPECT_EQ(formatting::Format("{:_^7} there", "Hello"), "_Hello_ there");
 }
 
+TEST(Formatting, StringView) {
+  EXPECT_EQ(formatting::Format("{} there.", std::string_view("Hello")), "Hello there.");
+  EXPECT_EQ(formatting::Format("Richard {} York {} battle {} {}", "of", "gave", "in", "vain"),
+            "Richard of York gave battle in vain");
+  EXPECT_EQ(formatting::Format("{} there", std::string_view("Hello")), "Hello there");
+  EXPECT_EQ(formatting::Format("{:?} there", std::string_view("Hello")), "\"Hello\" there");
+  EXPECT_EQ(formatting::Format("{:_^7} there", std::string_view("Hello")), "_Hello_ there");
+}
+
 TEST(Formatting, Integers) {
   EXPECT_EQ(formatting::Format("{} + {} = {}", 1, 2, 3), "1 + 2 = 3");
   EXPECT_EQ(formatting::Format("Print: {}", 'a'), "Print: a");

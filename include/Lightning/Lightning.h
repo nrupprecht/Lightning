@@ -1870,6 +1870,30 @@ struct Segment<std::string> : public BaseSegment {
   const std::string str_;
 };
 
+//! \brief Template specialization for string-view segments.
+template <>
+struct Segment<std::string_view> : public BaseSegment {
+  explicit Segment(std::string_view str_view)
+      : str_view_(str_view) {}
+
+  void CopyTo(SegmentStorage &storage) const override { storage.Create<Segment>(*this); }
+
+ private:
+  void addToBuffer(const FormattingSettings &,
+                   const formatting::MessageInfo &,
+                   memory::BasicMemoryBuffer<char> &buffer,
+                   [[maybe_unused]] const std::string_view &fmt) const override {
+    if (!fmt.empty()) {
+      formatting::FormatString(fmt, str_view_, buffer);
+    }
+    else {
+      memory::AppendBuffer(buffer, str_view_);
+    }
+  }
+
+  const std::string_view str_view_;
+};
+
 //! \brief Template specialization for char* segments.
 template <>
 struct Segment<char *> : public BaseSegment {

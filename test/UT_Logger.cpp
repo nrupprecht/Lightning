@@ -121,6 +121,18 @@ TEST(Logger, LogHandler) {
   EXPECT_EQ(stream->str(), "ABC\n");
 }
 
+TEST(Logger, LogStringView) {
+  auto stream = std::make_shared<std::ostringstream>();
+  auto sink = UnlockedSink::From<OstreamSink>(stream);
+  sink->SetFormatter(formatting::MakeMsgFormatter("{}", formatting::MSG));
+  Logger logger(sink);
+
+  char buffer[] = "Hello, world!";
+
+  LOG_SEV_TO(logger, Info) << std::string_view{buffer, 13};
+  EXPECT_EQ(stream->str(), "Hello, world!\n");
+}
+
 TEST(Logger, BlockAttributes) {
   auto stream = std::make_shared<std::ostringstream>();
   auto sink = UnlockedSink::From<OstreamSink>(stream);
