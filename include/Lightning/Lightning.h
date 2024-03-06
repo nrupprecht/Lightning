@@ -4015,32 +4015,31 @@ namespace formatting {
 namespace detail {
 
 inline std::pair<bool, std::string> getSpecialFormatter(std::string_view fmt) {
-  AnsiForegroundColor foreground_color;
-  // clang-format off
-  if (fmt == "DEFAULT") foreground_color = AnsiForegroundColor::Default;
-  else if (fmt == "RED") foreground_color = AnsiForegroundColor::Red;
-  else if (fmt == "BRED") foreground_color = AnsiForegroundColor::BrightRed;
-  else if (fmt == "GREEN") foreground_color = AnsiForegroundColor::Green;
-  else if (fmt == "BGREEN") foreground_color = AnsiForegroundColor::BrightGreen;
-  else if (fmt == "BLUE") foreground_color = AnsiForegroundColor::Blue;
-  else if (fmt == "BBLUE") foreground_color = AnsiForegroundColor::BrightBlue;
-  else if (fmt == "YELLOW") foreground_color = AnsiForegroundColor::Yellow;
-  else if (fmt == "BYELLOW") foreground_color = AnsiForegroundColor::BrightYellow;
-  else if (fmt == "CYAN") foreground_color = AnsiForegroundColor::Cyan;
-  else if (fmt == "BCYAN") foreground_color = AnsiForegroundColor::BrightCyan;
-  else if (fmt == "BLACK") foreground_color = AnsiForegroundColor::Black;
-  else if (fmt == "BBLACK") foreground_color = AnsiForegroundColor::BrightBlack;
-  else if (fmt == "WHITE") foreground_color = AnsiForegroundColor::White;
-  else if (fmt == "BWHITE") foreground_color = AnsiForegroundColor::BrightWhite;
-  else if (fmt == "MAGENTA") foreground_color = AnsiForegroundColor::Magenta;
-  else if (fmt == "BMAGENTA") foreground_color = AnsiForegroundColor::BrightMagenta;
-  else if (fmt == "RESET") foreground_color = AnsiForegroundColor::Reset;
-  else {
-    // If it is not a special formatter, just return the literal string.
-    return {false, ""};
+  static std::map<std::string_view, AnsiForegroundColor> color_map = {
+      {"DEFAULT", AnsiForegroundColor::Default},
+      {"RED", AnsiForegroundColor::Red},
+      {"BRED", AnsiForegroundColor::BrightRed},
+      {"GREEN", AnsiForegroundColor::Green},
+      {"BGREEN", AnsiForegroundColor::BrightGreen},
+      {"BLUE", AnsiForegroundColor::Blue},
+      {"BBLUE", AnsiForegroundColor::BrightBlue},
+      {"YELLOW", AnsiForegroundColor::Yellow},
+      {"BYELLOW", AnsiForegroundColor::BrightYellow},
+      {"CYAN", AnsiForegroundColor::Cyan},
+      {"BCYAN", AnsiForegroundColor::BrightCyan},
+      {"BLACK", AnsiForegroundColor::Black},
+      {"BBLACK", AnsiForegroundColor::BrightBlack},
+      {"WHITE", AnsiForegroundColor::White},
+      {"BWHITE", AnsiForegroundColor::BrightWhite},
+      {"MAGENTA", AnsiForegroundColor::Magenta},
+      {"BMAGENTA", AnsiForegroundColor::BrightMagenta},
+      {"RESET", AnsiForegroundColor::Reset},
+  };
+
+  if (auto it = color_map.find(fmt); it != color_map.end()) {
+    return {true, SetAnsiColorFmt(it->second)};
   }
-  // clang-format on
-  return {true, SetAnsiColorFmt(foreground_color)};
+  return {false, ""};
 }
 
 inline void formatLiteralSegment(std::string_view segment, memory::BasicMemoryBuffer<char> &buffer) {
@@ -4059,22 +4058,21 @@ inline void formatLiteralSegment(std::string_view segment, memory::BasicMemoryBu
           for (; *c != '}'; ++c) {
             // If this is not formatted as a special formatter, that is fine, just treat it as characters.
             if (c == segment.end()) {
-              buffer.PushBack('{');
-              buffer.PushBack('@');
-              memory::AppendBuffer(buffer, std::string_view{start, static_cast<std::string_view::size_type>(c - start)});
+              memory::AppendBuffer(buffer, "{@");
+              memory::AppendBuffer(buffer,
+                                   std::string_view{&(*start), static_cast<std::string_view::size_type>(c - start)});
               return;
             }
           }
           // Determine the special format string.
-          std::string_view view(start, static_cast<std::string_view::size_type>(c - start));
+          std::string_view view(&(*start), static_cast<std::string_view::size_type>(c - start));
           auto [was_special, special_formatting] = getSpecialFormatter(view);
           if (was_special) {
             memory::AppendBuffer(buffer, special_formatting);
           }
           else {
             // Was not actually formatting!
-            buffer.PushBack('{');
-            buffer.PushBack('@');
+            memory::AppendBuffer(buffer, "{@");
             memory::AppendBuffer(buffer, view);
             buffer.PushBack('}');
           }
