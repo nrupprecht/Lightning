@@ -78,15 +78,101 @@ namespace lightning {
   static constexpr bool trait_name = detail_traits_##trait_name::trait_class_##trait_name<Value_t>::value;
 
 // ==============================================================================
+//  Current function.
+// ==============================================================================
+
+// Current function, from BOOST, taken from https://www.boost.org/doc/libs/1_78_0/boost/current_function.hpp
+namespace detail {
+
+//  boost/current_function.hpp - LL_CURRENT_FUNCTION
+//
+//  Copyright 2002-2018 Peter Dimov
+//
+//  Distributed under the Boost Software License, Version 1.0.
+//  See accompanying file LICENSE_1_0.txt or copy at
+//  http://www.boost.org/LICENSE_1_0.txt
+//
+//  http://www.boost.org/libs/assert
+[[maybe_unused]] inline void current_function_helper() {
+#if defined( LL_DISABLE_CURRENT_FUNCTION )
+# define LL_CURRENT_FUNCTION "(unknown)"
+#elif defined(__GNUC__) || (defined(__MWERKS__) && (__MWERKS__ >= 0x3000)) || (defined(__ICC) && (__ICC >= 600)) || defined(__ghs__) || defined(__clang__)
+# define LL_CURRENT_FUNCTION __PRETTY_FUNCTION__
+#elif defined(__DMC__) && (__DMC__ >= 0x810)
+# define LL_CURRENT_FUNCTION __PRETTY_FUNCTION__
+#elif defined(__FUNCSIG__)
+# define LL_CURRENT_FUNCTION __FUNCSIG__
+#elif (defined(__INTEL_COMPILER) && (__INTEL_COMPILER >= 600)) || (defined(__IBMCPP__) && (__IBMCPP__ >= 500))
+# define LL_CURRENT_FUNCTION __FUNCTION__
+#elif defined(__BORLANDC__) && (__BORLANDC__ >= 0x550)
+# define LL_CURRENT_FUNCTION __FUNC__
+#elif defined(__STDC_VERSION__) && (__STDC_VERSION__ >= 199901)
+# define LL_CURRENT_FUNCTION __func__
+#elif defined(__cplusplus) && (__cplusplus >= 201103)
+# define LL_CURRENT_FUNCTION __func__
+#else
+# define LL_CURRENT_FUNCTION "(unknown)"
+#endif
+}
+
+} // namespace detail
+// NOTE: End of code from boost.
+
+// ==============================================================================
 //  Error checking and handling.
 // ==============================================================================
+
+//! \brief Exception class for Lightning.
+class LightningException : public std::runtime_error {
+ public:
+  explicit LightningException(const std::string &message, const std::string &file, const std::string &function,
+                              std::size_t line)
+      : std::runtime_error(formatMessage(message, file, function, line)),
+        message_(formatMessage(message, file, function, line)),
+        file_(file),
+        function_(function),
+        line_(line) {}
+
+  const char *what() const noexcept override {
+    return message_.c_str();
+  }
+
+  const std::string &GetMessage() const noexcept {
+    return message_;
+  }
+
+  const std::string &GetFile() const noexcept {
+    return file_;
+  }
+
+  std::size_t GetLine() const noexcept {
+    return line_;
+  }
+
+ private:
+  NO_DISCARD static std::string formatMessage(const std::string &message,
+                                              const std::string &file,
+                                              const std::string &function,
+                                              std::size_t line) {
+    std::ostringstream strm;
+    strm << "exception from " << file << ":" << line << "\nin function " << function << "\n" << message;
+    return strm.str();
+  }
+
+  std::string message_;
+  std::string file_;
+  std::string function_;
+  std::size_t line_;
+};
+
+#define THROW(message) throw LightningException(message, __FILE__, LL_CURRENT_FUNCTION, __LINE__)
 
 #define LL_REQUIRE(condition, message) \
   do { \
     if (!(condition)) { \
       std::ostringstream _strm_; \
       _strm_ << message; \
-      throw std::runtime_error(_strm_.str()); \
+      THROW(_strm_.str()); \
     } \
   } while (false)
 
@@ -95,7 +181,7 @@ namespace lightning {
     if (!(condition)) { \
       std::ostringstream _strm_; \
       _strm_ << message; \
-      throw std::runtime_error(_strm_.str()); \
+      THROW(_strm_.str()); \
     } \
   } while (false)
 
@@ -103,7 +189,7 @@ namespace lightning {
   do { \
     std::ostringstream _strm_; \
     _strm_ << message; \
-    throw std::runtime_error(_strm_.str()); \
+    THROW(_strm_.str()); \
   } while (false)
 
 // ==============================================================================
@@ -176,52 +262,6 @@ template <typename T>
 constexpr inline bool IsCstrRelated_v =
     std::is_same_v<Unconst_t<std::decay_t<T>>, char *> || std::is_same_v<remove_cvref_t<T>, std::string>;
 } // namespace typetraits.
-
-// ==============================================================================
-//  Current function.
-// ==============================================================================
-
-
-// Current function, from BOOST, taken from https://www.boost.org/doc/libs/1_78_0/boost/current_function.hpp
-
-//  boost/current_function.hpp - LL_CURRENT_FUNCTION
-//
-//  Copyright 2002-2018 Peter Dimov
-//
-//  Distributed under the Boost Software License, Version 1.0.
-//  See accompanying file LICENSE_1_0.txt or copy at
-//  http://www.boost.org/LICENSE_1_0.txt
-//
-//  http://www.boost.org/libs/assert
-//
-
-namespace detail {
-
-[[maybe_unused]] inline void current_function_helper() {
-#if defined( LL_DISABLE_CURRENT_FUNCTION )
-# define LL_CURRENT_FUNCTION "(unknown)"
-#elif defined(__GNUC__) || (defined(__MWERKS__) && (__MWERKS__ >= 0x3000)) || (defined(__ICC) && (__ICC >= 600)) || defined(__ghs__) || defined(__clang__)
-# define LL_CURRENT_FUNCTION __PRETTY_FUNCTION__
-#elif defined(__DMC__) && (__DMC__ >= 0x810)
-# define LL_CURRENT_FUNCTION __PRETTY_FUNCTION__
-#elif defined(__FUNCSIG__)
-# define LL_CURRENT_FUNCTION __FUNCSIG__
-#elif (defined(__INTEL_COMPILER) && (__INTEL_COMPILER >= 600)) || (defined(__IBMCPP__) && (__IBMCPP__ >= 500))
-# define LL_CURRENT_FUNCTION __FUNCTION__
-#elif defined(__BORLANDC__) && (__BORLANDC__ >= 0x550)
-# define LL_CURRENT_FUNCTION __FUNC__
-#elif defined(__STDC_VERSION__) && (__STDC_VERSION__ >= 199901)
-# define LL_CURRENT_FUNCTION __func__
-#elif defined(__cplusplus) && (__cplusplus >= 201103)
-# define LL_CURRENT_FUNCTION __func__
-#else
-# define LL_CURRENT_FUNCTION "(unknown)"
-#endif
-}
-
-} // namespace detail
-// NOTE: End of code from boost.
-
 
 //! \brief Convenient base class for pImpl type objects. Note that here, we use PImpl to give value semantics to objects
 //! that would otherwise need to be stored as shared pointers to base objects. This is in contrast to why PImpl is
