@@ -165,7 +165,7 @@ class LightningException : public std::runtime_error {
   std::size_t line_;
 };
 
-#define THROW(message) throw LightningException(message, __FILE__, LL_CURRENT_FUNCTION, __LINE__)
+#define THROW(message) throw ::lightning::LightningException(message, __FILE__, LL_CURRENT_FUNCTION, __LINE__)
 
 #define LL_REQUIRE(condition, message) \
   do { \
