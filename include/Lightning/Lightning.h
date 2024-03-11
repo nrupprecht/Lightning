@@ -155,7 +155,7 @@ class LightningException : public std::runtime_error {
                                               const std::string &function,
                                               std::size_t line) {
     std::ostringstream strm;
-    strm << "exception from " << file << ":" << line << "\nin function " << function << "\n" << message;
+    strm << "exception from " << file << ":" << line << "\nin function " << function << "\n\"" << message << "\"";
     return strm.str();
   }
 
@@ -340,6 +340,14 @@ class BasicMemoryBuffer {
     increaseSize(static_cast<std::size_t>(count));
   }
 
+#ifdef __cpp_lib_span
+  //! \brief Append a span of values to the buffer.
+  template <typename S = T>
+  void Append(std::span<S> span) {
+    Append(span.data(), span.data() + span.size());
+  }
+#endif
+
   //! \brief Append n_copies copies of an object to the buffer.
   void AppendN(const T &object, std::size_t n_copies) {
     reserve(size_ + n_copies);
@@ -379,13 +387,13 @@ class BasicMemoryBuffer {
   }
 
   //! \brief If the storage type is char, return a string copy of the data.
-  template <LL_ENABLE_IF(std::is_same_v<T, char>)>
+  template <typename S = T, LL_ENABLE_IF(std::is_same_v<S, char>)>
   NO_DISCARD std::string ToString() const {
     return std::string(Data(), End());
   }
 
   //! \brief If the storage type is char, return a string_view of the data.
-  template <LL_ENABLE_IF(std::is_same_v<T, char>)>
+  template <typename S = T, LL_ENABLE_IF(std::is_same_v<S, char>)>
   [[maybe_unused]] NO_DISCARD std::string_view ToView() const {
     return std::string_view(Data(), Size());
   }
