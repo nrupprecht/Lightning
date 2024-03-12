@@ -45,6 +45,10 @@ SOFTWARE.
 #include <string_view>
 #include <cstring> // For std::strlen, std::memcpy, etc.
 
+#ifdef __cpp_lib_span
+#include <span>
+#endif  // __cpp_lib_span
+
 namespace lightning {
 // ==============================================================================
 //  Macro definitions.
