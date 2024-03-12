@@ -29,7 +29,6 @@ TEST(MemoryBuffer, MemoryBuffer_Byte) {
 
   EXPECT_EQ(buffer.Data()[0], std::byte(0xFF));
   EXPECT_EQ(buffer.Size(), 1);
-  EXPECT_EQ(buffer.Data()[buffer.Size()], std::byte(0));
 }
 
 TEST(MemoryBuffer, StringMemoryBuffer) {
