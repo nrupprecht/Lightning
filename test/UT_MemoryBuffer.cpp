@@ -12,6 +12,7 @@ using namespace lightning;
 using namespace lightning::memory;
 
 namespace Testing {
+
 TEST(MemoryBuffer, MemoryBuffer) {
   MemoryBuffer<char, 10> buffer;
   AppendBuffer(buffer, "Hello world, how are you?");
@@ -19,6 +20,16 @@ TEST(MemoryBuffer, MemoryBuffer) {
   EXPECT_EQ(buffer.Size(), 25);
 
   EXPECT_EQ(buffer.Data()[buffer.Size()], '\0');
+}
+
+TEST(MemoryBuffer, MemoryBuffer_Byte) {
+  MemoryBuffer<std::byte> buffer;
+
+  buffer.PushBack(std::byte(0xFF));
+
+  EXPECT_EQ(buffer.Data()[0], std::byte(0xFF));
+  EXPECT_EQ(buffer.Size(), 1);
+  EXPECT_EQ(buffer.Data()[buffer.Size()], std::byte(0));
 }
 
 TEST(MemoryBuffer, StringMemoryBuffer) {

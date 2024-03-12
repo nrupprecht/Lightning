@@ -118,8 +118,18 @@ TEST(Formatting, FormatIntegerWithCommas) {
 TEST(Formatting, FormatHex) {
   {
     memory::MemoryBuffer<char> buffer;
+    FormatHex(static_cast<uint64_t>(0x0), buffer);
+    EXPECT_EQ(buffer.ToString(), "0x0");
+  }
+  {
+    memory::MemoryBuffer<char> buffer;
     FormatHex(0xF2F, buffer);
     EXPECT_EQ(buffer.ToString(), "0xF2F");
+  }
+  {
+    memory::MemoryBuffer<char> buffer;
+    FormatHex(static_cast<uint32_t>(0xF2F), buffer, true, PrefixFmtType::Lower, true);
+    EXPECT_EQ(buffer.ToString(), "0x00000F2F");
   }
   {
     memory::MemoryBuffer<char> buffer;

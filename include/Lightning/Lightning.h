@@ -1264,7 +1264,8 @@ template <typename Integral_t, LL_ENABLE_IF(std::is_integral_v<Integral_t> && !s
 void FormatHex(Integral_t x,
                memory::BasicMemoryBuffer<char> &buffer,
                bool use_uppercase = true,
-               PrefixFmtType prefix_fmt_type = PrefixFmtType::Lower) {
+               PrefixFmtType prefix_fmt_type = PrefixFmtType::Lower,
+               bool pad_zeros = false) {
   // x will take up 8 characters, then two for "0x".
   switch (prefix_fmt_type) {
     case PrefixFmtType::Upper:
@@ -1289,6 +1290,15 @@ void FormatHex(Integral_t x,
     x >>= 4;
     ++count;
   }
+  if (count == 0) {
+    internal_buffer[count] = '0';
+    ++count;
+  }
+  if (pad_zeros) {
+    std::fill(internal_buffer + count, internal_buffer + 2 * sizeof(Integral_t), '0');
+    count = 2 * sizeof(Integral_t);
+  }
+  // Reverse buffer.
   for (std::size_t i = 0; i < count; ++i) {
     buffer.PushBack(internal_buffer[count - i - 1]);
   }
