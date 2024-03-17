@@ -26,6 +26,7 @@ SOFTWARE.
 
 #pragma once
 
+#include <filesystem>
 #include "Lightning/Lightning.h"
 
 namespace lightning {
