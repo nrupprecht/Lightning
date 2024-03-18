@@ -128,11 +128,13 @@ class MatplotlibSerializingFuture final : public Figure {
   }
 
   void AddOption(std::string_view label, int value) override {
-    stream_ << 'O' << label << '\0' << 'I' << value;
+    stream_ << 'O' << label << '\0' << 'I';
+    stream_.write(reinterpret_cast<const char*>(&value), sizeof(value));
   }
 
   void AddOption(std::string_view label, double value) override {
-    stream_ << 'O' << label << '\0' << 'D' << value;
+    stream_ << 'O' << label << '\0' << 'D';
+    stream_.write(reinterpret_cast<const char*>(&value), sizeof(value));
   }
 
   void ResetOptions() override {
