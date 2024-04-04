@@ -322,6 +322,14 @@ class BasicMemoryBuffer {
   [[maybe_unused]] NO_DISCARD const T *End() const { return data_ + size_; }
   [[maybe_unused]] NO_DISCARD T *End() { return data_ + size_; }
 
+#ifdef __cpp_lib_span
+  //! \brief Get a span of the data.
+  std::span<T> Span() { return noexcept {data_, size_}; }
+
+  //! \brief Get a constant span of the data.
+  std::span<const T> Span() const noexcept { return {data_, size_}; }
+#endif
+
   //! \brief begin() function, for compatibility with range-based for loops.
   NO_DISCARD const T *begin() const { return data_; }
   NO_DISCARD T *begin() { return data_; }
@@ -2016,29 +2024,30 @@ struct Segment<bool> : public BaseSegment {
 template <typename Floating_t>
 struct Segment<Floating_t, std::enable_if_t<std::is_floating_point_v<Floating_t>>> : public BaseSegment {
   explicit Segment(Floating_t number)
-      : number_(number), size_required_(10) {
-    // TEMPORARY...? Wish that std::to_chars works for floating points.
-    serialized_number_ = std::to_string(number);
-    size_required_ = static_cast<unsigned>(serialized_number_.size());
-  }
+      : number_(number) {}
 
-  void CopyTo(SegmentStorage &storage) const override { storage.Create < Segment < Floating_t >> (*this); }
+  void CopyTo(SegmentStorage& storage) const override { storage.Create<Segment<Floating_t>>(*this); }
 
  private:
   void addToBuffer([[maybe_unused]] const FormattingSettings &settings,
                    const formatting::MessageInfo &,
                    memory::BasicMemoryBuffer<char> &buffer,
                    [[maybe_unused]] const std::string_view &fmt) const override {
-    // std::to_chars(start, end, number_, std::chars_format::fixed);
-    AppendBuffer(buffer, serialized_number_);
+    if constexpr (typetraits::has_to_chars<Floating_t>) {
+      constexpr std::size_t buffer_size = 64;
+      char serialization_buffer[buffer_size];
+      auto result = std::to_chars(serialization_buffer, serialization_buffer + buffer_size, number_);
+      auto string_length = result.ptr - serialization_buffer;
+      memory::AppendBuffer(buffer, std::string_view(serialization_buffer, string_length));
+    }
+    else {
+      std::ostringstream stream;
+      stream << number_;
+      memory::AppendBuffer(buffer, stream.str());
+    }
   }
 
   Floating_t number_;
-  unsigned size_required_{};
-
-  // TEMPORARY, hopefully. clang does not support std::to_chars for floating point types even though it is a
-  // C++17 feature.
-  std::string serialized_number_;
 };
 
 //! \brief Template specialization for integral value segments.
