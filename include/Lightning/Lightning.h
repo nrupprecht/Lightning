@@ -352,6 +352,11 @@ class BasicMemoryBuffer {
     increaseSize(static_cast<std::size_t>(count));
   }
 
+  //! \brief Append the contents of another buffer to this buffer.
+  void Append(const BasicMemoryBuffer<T>& other) {
+    Append(other.data_, other.data_ + other.size_);
+  }
+
 #ifdef __cpp_lib_span
   //! \brief Append a span of values to the buffer.
   template <typename S = T>
@@ -390,8 +395,8 @@ class BasicMemoryBuffer {
   }
 
   //! \brief Allocate an additional chunk of storage and return pointers to the beginning and end (element after last
-  //! valid element) of the chunk.
-  std::pair<T *, T *> Allocate(std::size_t additional) {
+  //!        valid element) of the chunk.
+  std::pair<T*, T*> Allocate(std::size_t additional) {
     reserve(size_ + additional);
     auto begin = End();
     increaseSize(additional);
@@ -1274,6 +1279,13 @@ void FormatHex(Integral_t x,
                bool use_uppercase = true,
                PrefixFmtType prefix_fmt_type = PrefixFmtType::Lower,
                bool pad_zeros = false) {
+  if constexpr (std::is_signed_v<Integral_t>) {
+    if (x < 0) {
+      buffer.PushBack('-');
+    }
+    x = static_cast<Integral_t>(std::abs(x));
+  }
+
   // x will take up 8 characters, then two for "0x".
   switch (prefix_fmt_type) {
     case PrefixFmtType::Upper:
@@ -1312,6 +1324,56 @@ void FormatHex(Integral_t x,
   }
 }
 
+template <typename Integral_t, LL_ENABLE_IF(std::is_integral_v<Integral_t> && !std::is_same_v<Integral_t, bool>)>
+void FormatBinary(Integral_t x,
+                  memory::BasicMemoryBuffer<char>& buffer,
+                  PrefixFmtType prefix_fmt_type = PrefixFmtType::Lower,
+                  bool pad_zeros = false) {
+  if constexpr (std::is_signed_v<Integral_t>) {
+    if (x < 0) {
+      buffer.PushBack('-');
+    }
+    x = static_cast<Integral_t>(std::abs(x));
+  }
+
+  // x will take up 8 characters, then two for "0x".
+  switch (prefix_fmt_type) {
+    case PrefixFmtType::Upper:
+      buffer.PushBack('0');
+    buffer.PushBack('B');
+    break;
+    case PrefixFmtType::Lower:
+      buffer.PushBack('0');
+    buffer.PushBack('b');
+    break;
+    default: {
+    } // Pass
+  }
+  char binary_digits[] = "01";
+
+  // Maximum number of characters that would be needed.
+  char internal_buffer[8 * sizeof(Integral_t)];
+
+  std::size_t count = 0;
+  while (x) {
+    internal_buffer[count] = binary_digits[x & 0x1];
+    x >>= 1;
+    ++count;
+  }
+  if (count == 0) {
+    internal_buffer[count] = '0';
+    ++count;
+  }
+  if (pad_zeros) {
+    std::fill(internal_buffer + count, internal_buffer + 8 * sizeof(Integral_t), '0');
+    count = 8 * sizeof(Integral_t);
+  }
+  // Reverse buffer.
+  for (std::size_t i = 0; i < count; ++i) {
+    buffer.PushBack(internal_buffer[count - i - 1]);
+  }
+}
+
 //! \brief Format an integral type to a buffer.
 //!
 //! Features taken from here https://fmt.dev/latest/syntax.html. Not all feature are implemented.
@@ -1342,15 +1404,38 @@ void FormatInteger(std::string_view fmt, Integral_t number, memory::BasicMemoryB
   //  All formatting discovered, do the formatting.
   // ==============================================================================
 
-  auto num_digits = formatting::NumberOfDigits(number);
-  if (fmt_data.use_separators) {
-    num_digits += (num_digits - 1) / 3;
-  }
-  if constexpr (std::is_signed_v<Integral_t>) {
-    if (number < 0) {
-      ++num_digits;
+  // Format the data.
+
+  memory::MemoryBuffer<char> temp_buffer;
+  switch (fmt_data.type) {
+  case 'd':
+    if (fmt_data.use_separators) {
+      formatting::FormatIntegerWithCommas(number, temp_buffer);
     }
+    else {
+      auto num_digits = formatting::NumberOfDigits(number);
+      num_digits += (number < 0) ? 1 : 0;
+      auto [start, end] = temp_buffer.Allocate(num_digits);
+      std::to_chars(start, end, number);
+    }
+    break;
+  case 'b':
+    FormatBinary(number, temp_buffer, PrefixFmtType::Lower, false);
+    break;
+  case 'B':
+    FormatBinary(number, temp_buffer, PrefixFmtType::Upper, false);
+    break;
+  case 'x':
+    FormatHex(number, temp_buffer, true, PrefixFmtType::Lower, false);
+    break;
+  case 'X':
+    FormatHex(number, temp_buffer, true, PrefixFmtType::Upper, false);
+    break;
+  default:
+    LL_FAIL("unrecognized / unhandled formatting option '" << fmt_data.type << "' for integer segment '" << fmt << "'");
   }
+
+  auto num_digits = static_cast<unsigned>(temp_buffer.Size());
   auto total_width = std::max(num_digits, fmt_data.width);
 
   std::size_t alignment_offset = 0, right_width = 0;
@@ -1369,15 +1454,13 @@ void FormatInteger(std::string_view fmt, Integral_t number, memory::BasicMemoryB
     auto [start, end] = buffer.Allocate(alignment_offset);
     std::fill_n(start, alignment_offset, fmt_data.fill_char);
   }
-  if (fmt_data.use_separators) {
-    formatting::FormatIntegerWithCommas(number, buffer);
-    auto [start, end] = buffer.Allocate(right_width);
-    std::fill_n(start, right_width, fmt_data.fill_char);
-  }
-  else {
-    auto [start, end] = buffer.Allocate(total_width - alignment_offset);
-    std::to_chars(start, end, number);
-    std::fill_n(start + num_digits, right_width, fmt_data.fill_char);
+
+  // Add the formatted data.
+  buffer.Append(temp_buffer);
+  // Right padding.
+  if (right_width != 0) {
+      auto [start, end] = buffer.Allocate(right_width);
+      std::fill_n(start, right_width, fmt_data.fill_char);
   }
 }
 
@@ -2037,7 +2120,7 @@ struct Segment<Floating_t, std::enable_if_t<std::is_floating_point_v<Floating_t>
       constexpr std::size_t buffer_size = 64;
       char serialization_buffer[buffer_size];
       auto result = std::to_chars(serialization_buffer, serialization_buffer + buffer_size, number_);
-      auto string_length = result.ptr - serialization_buffer;
+      auto string_length = static_cast<std::string_view::size_type>(result.ptr - serialization_buffer);
       memory::AppendBuffer(buffer, std::string_view(serialization_buffer, string_length));
     }
     else {
@@ -3537,7 +3620,7 @@ class Sink {
   std::unique_ptr<formatting::BaseMessageFormatter> formatter_;
 };
 
-//! \brief  Sink frontend that uses no synchronization methods.
+//! \brief Sink frontend that uses no synchronization methods.
 class UnlockedSink : public Sink {
  public:
   explicit UnlockedSink(std::unique_ptr<SinkBackend> &&backend)
@@ -3561,7 +3644,7 @@ class UnlockedSink : public Sink {
   NO_DISCARD std::shared_ptr<Sink> clone() const override { return std::make_shared<UnlockedSink>(sink_backend_->Clone()); }
 };
 
-//! \brief  Sink frontend that uses a mutex to control access.
+//! \brief Sink frontend that uses a mutex to control access.
 class SynchronousSink : public Sink {
  public:
   explicit SynchronousSink(std::unique_ptr<SinkBackend> &&backend)
@@ -3611,7 +3694,7 @@ std::shared_ptr<Frontend_t> NewSink(Args_t &&... args) {
 }
 
 //! \brief Object that can receive records from multiple loggers, and dispatches them to multiple sinks.
-//! The core has its own filter, which is checked before any of the individual sinks' filters.
+//!        The core has its own filter, which is checked before any of the individual sinks' filters.
 class Core {
  public:
   bool WillAccept(const RecordAttributes &attributes) {
@@ -3698,6 +3781,7 @@ class Core {
   }
 
   //! \brief Flush all sinks.
+  //!
   //! Note: This function MAY discard.
   const Core &Flush() const {
     std::for_each(sinks_.begin(), sinks_.end(), [](auto &sink) { sink->Flush(); });
@@ -3769,7 +3853,7 @@ struct NoCore_t {};
 inline constexpr NoCore_t NoCore;
 
 //! \brief Base logger class. Capable of creating logging records which route messages
-//! to the logger's logging core.
+//!        to the logger's logging core.
 class Logger {
  public:
   //! \brief Create a logger with a new core.
@@ -3777,8 +3861,9 @@ class Logger {
       : core_(std::make_shared<Core>()) {}
 
   //! \brief Create a logger without a logging core.
+  //!
   //! Note that the constructor is *not* explicit on purpose, so parameters can be defaulted like
-  //!     const Logger &logger = {NoCore};
+  //! `const Logger &logger = {NoCore};`.
   Logger(NoCore_t)
       : core_(nullptr) {}
 
@@ -4055,8 +4140,8 @@ class Global {
 // ==============================================================================
 
 //! \brief Log with severity to a specific logger. First does a very fast check whether the
-//! message would be accepted given its severity level, since this is a very common case.
-//! If it will be, creates a handler, constructing the record in-place inside the handler.
+//!        message would be accepted given its severity level, since this is a very common case.
+//!        If it will be, creates a handler, constructing the record in-place inside the handler.
 #define LOG_SEV_TO(logger, severity) \
   if ((logger).WillAccept(::lightning::Severity::severity)) \
     if (auto handler = (logger).LogWithLocation(::lightning::Severity::severity, __FILE__, LL_CURRENT_FUNCTION, __LINE__)) \

@@ -158,6 +158,34 @@ TEST(Formatting, FormatHex) {
   }
 }
 
+TEST(Formatting, FormatBinary) {
+  {
+    memory::MemoryBuffer<char> buffer;
+    FormatBinary(static_cast<uint64_t>(0b101), buffer);
+    EXPECT_EQ(buffer.ToString(), "0b101");
+  }
+  {
+    memory::MemoryBuffer<char> buffer;
+    FormatBinary(static_cast<uint64_t>(0b101), buffer, PrefixFmtType::Lower);
+    EXPECT_EQ(buffer.ToString(), "0b101");
+  }
+  {
+    memory::MemoryBuffer<char> buffer;
+    FormatBinary(static_cast<uint64_t>(0b101), buffer, PrefixFmtType::Upper);
+    EXPECT_EQ(buffer.ToString(), "0B101");
+  }
+  {
+    memory::MemoryBuffer<char> buffer;
+    FormatBinary(static_cast<uint64_t>(0b101), buffer, PrefixFmtType::None);
+    EXPECT_EQ(buffer.ToString(), "101");
+  }
+  {
+    memory::MemoryBuffer<char> buffer;
+    FormatBinary(static_cast<uint8_t>(0b101), buffer, PrefixFmtType::None, true);
+    EXPECT_EQ(buffer.ToString(), "00000101");
+  }
+}
+
 TEST(Formatting, FormatInteger_Errors) {
   {
     memory::MemoryBuffer<char> buffer;
@@ -294,6 +322,49 @@ TEST(Formatting, FormatInteger_Separators) {
     EXPECT_NO_THROW(FormatInteger(":x<9L:_", -14'573, buffer));
     // When implemented, this should be "-14_573xx"
     EXPECT_EQ(buffer.ToString(), "-14,573xx");
+  }
+}
+
+TEST(Formatting, FormatInteger_Bases) {
+  {
+    memory::MemoryBuffer<char> buffer;
+    EXPECT_NO_THROW(FormatInteger(":<9b", 0b100110, buffer));
+    EXPECT_EQ(buffer.ToString(), "0b100110 ");
+  }
+  {
+      memory::MemoryBuffer<char> buffer;
+      EXPECT_NO_THROW(FormatInteger(":<9b", -0b100110, buffer));
+      EXPECT_EQ(buffer.ToString(), "-0b100110");
+  }
+  {
+      memory::MemoryBuffer<char> buffer;
+      EXPECT_NO_THROW(FormatInteger(":<9X", 0xAAF, buffer));
+      EXPECT_EQ(buffer.ToString(), "0XAAF    ");
+  }
+  {
+      memory::MemoryBuffer<char> buffer;
+      EXPECT_NO_THROW(FormatInteger(":<9X", -0xAAF, buffer));
+      EXPECT_EQ(buffer.ToString(), "-0XAAF   ");
+  }
+  {
+      memory::MemoryBuffer<char> buffer;
+      EXPECT_NO_THROW(FormatInteger(":<9d", 123, buffer));
+      EXPECT_EQ(buffer.ToString(), "123      ");
+  }
+  {
+      memory::MemoryBuffer<char> buffer;
+      EXPECT_NO_THROW(FormatInteger(":<9d", -123, buffer));
+      EXPECT_EQ(buffer.ToString(), "-123     ");
+  }
+  {
+      memory::MemoryBuffer<char> buffer;
+      EXPECT_NO_THROW(FormatInteger(":<9x", 0x123, buffer));
+      EXPECT_EQ(buffer.ToString(), "0x123    ");
+  }
+  {
+      memory::MemoryBuffer<char> buffer;
+      EXPECT_NO_THROW(FormatInteger(":<9x", -0x123, buffer));
+      EXPECT_EQ(buffer.ToString(), "-0x123   ");
   }
 }
 
