@@ -324,7 +324,7 @@ class BasicMemoryBuffer {
 
 #ifdef __cpp_lib_span
   //! \brief Get a span of the data.
-  std::span<T> Span() { return noexcept {data_, size_}; }
+  std::span<T> Span() noexcept { return {data_, size_}; }
 
   //! \brief Get a constant span of the data.
   std::span<const T> Span() const noexcept { return {data_, size_}; }
