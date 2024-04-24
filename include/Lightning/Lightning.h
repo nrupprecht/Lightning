@@ -41,7 +41,6 @@ SOFTWARE.
 #include <string>
 #include <string_view>
 #include <thread>
-#include <type_traits>
 #include <variant>
 #include <vector>
 
@@ -163,14 +162,14 @@ private:
 };
 
 //! \brief Raise a lightning exception at the current location.
-#define THROW(message) throw ::lightning::LightningException(message, __FILE__, LL_CURRENT_FUNCTION, __LINE__)
+#define LL_THROW_WITH_MSG(message) throw ::lightning::LightningException(message, __FILE__, LL_CURRENT_FUNCTION, __LINE__)
 
 #define LL_REQUIRE(condition, message) \
   do { \
     if (!(condition)) { \
       std::ostringstream _strm_; \
       _strm_ << message; \
-      THROW(_strm_.str()); \
+      LL_THROW_WITH_MSG(_strm_.str()); \
     } \
   } while (false)
 
@@ -179,7 +178,7 @@ private:
     if (!(condition)) { \
       std::ostringstream _strm_; \
       _strm_ << message; \
-      THROW(_strm_.str()); \
+      LL_THROW_WITH_MSG(_strm_.str()); \
     } \
   } while (false)
 
@@ -187,7 +186,7 @@ private:
   do { \
     std::ostringstream _strm_; \
     _strm_ << message; \
-    THROW(_strm_.str()); \
+    LL_THROW_WITH_MSG(_strm_.str()); \
   } while (false)
 
 // ==============================================================================
@@ -1644,7 +1643,7 @@ inline void FormatString(std::string_view fmt,
 //! \exception If the range is not large enough to format the date (at least 26 characters).
 inline char* FormatDateTo(char* c, char* end_c, const time::DateTime& dt) {
   // Store all zero-padded one and two-digit numbers, allows for very fast serialization.
-  static const char up_to[] =
+  static constexpr char up_to[] =
       "00010203040506070809"
       "10111213141516171819"
       "20212223242526272829"
@@ -1663,23 +1662,23 @@ inline char* FormatDateTo(char* c, char* end_c, const time::DateTime& dt) {
   *(start_c + 4) = '-';
   // Month
   const auto month = dt.GetMonthInt();
-  std::copy(up_to + 2 * month, up_to + 2 * month + 2, start_c + 5);
+  std::copy_n(up_to + 2 * month, 2, start_c + 5);
   *(start_c + 7) = '-';
   // Day
   const auto day = dt.GetDay();
-  std::copy(up_to + 2 * day, up_to + 2 * day + 2, start_c + 8);
+  std::copy_n(up_to + 2 * day, 2, start_c + 8);
   *(start_c + 10) = ' ';
   // Hour.
   const auto hour = dt.GetHour();
-  std::copy(up_to + 2 * hour, up_to + 2 * hour + 2, start_c + 11);
+  std::copy_n(up_to + 2 * hour, 2, start_c + 11);
   *(start_c + 13) = ':';
   // Minute.
   const auto minute = dt.GetMinute();
-  std::copy(up_to + 2 * minute, up_to + 2 * minute + 2, start_c + 14);
+  std::copy_n(up_to + 2 * minute, 2, start_c + 14);
   *(start_c + 16) = ':';
   // Second.
   const auto second = dt.GetSecond();
-  std::copy(up_to + 2 * second, up_to + 2 * second + 2, start_c + 17);
+  std::copy_n(up_to + 2 * second, 2, start_c + 17);
   *(start_c + 19) = '.';
   // Microsecond.
   const auto microseconds = dt.GetMicrosecond();
@@ -3540,6 +3539,7 @@ public:
     MessageInfo msg_info {};
     for (const auto& formatter : formatters_) {
       switch (formatter.index()) {
+        default:
         case 0: {
           // TODO: Update for LogNewLine type alignment.
           record.Bundle().FmtString(sink_settings, buffer, msg_info);
@@ -4232,7 +4232,7 @@ public:
   //!
   //! Note that the constructor is *not* explicit on purpose, so parameters can be defaulted like
   //! `const Logger &logger = {NoCore};`.
-  Logger(NoCore_t)
+  Logger(NoCore_t) // NOLINT(*-explicit-constructor)
       : core_(nullptr) {}
 
   //! \brief Create a logger with a new core and a single sink.
@@ -4592,7 +4592,7 @@ inline void formatLiteralSegment(std::string_view segment, memory::BasicMemoryBu
           buffer.PushBack('{');
           return;
         }
-        else if (*c == '@') {
+        if (*c == '@') {
           // Get characters up to the next '}'
           auto start = c + 1;
           for (; *c != '}'; ++c) {
@@ -4600,12 +4600,12 @@ inline void formatLiteralSegment(std::string_view segment, memory::BasicMemoryBu
             if (c == segment.end()) {
               AppendBuffer(buffer, "{@");
               AppendBuffer(buffer,
-                           std::string_view {&(*start), static_cast<std::string_view::size_type>(c - start)});
+                           std::string_view {start, static_cast<std::string_view::size_type>(c - start)});
               return;
             }
           }
           // Determine the special format string.
-          std::string_view view(&(*start), static_cast<std::string_view::size_type>(c - start));
+          std::string_view view(start, static_cast<std::string_view::size_type>(c - start));
           auto [was_special, special_formatting] = getSpecialFormatter(view);
           if (was_special) {
             AppendBuffer(buffer, special_formatting);
