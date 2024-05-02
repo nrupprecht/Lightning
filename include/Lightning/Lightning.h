@@ -3777,7 +3777,7 @@ public:
   //! \brief Copy the basic settings from another sink backend to this backend.
   void CopySettings(const SinkBackend& other) {
     settings_ = other.settings_;
-    flush_handler_ = other.flush_handler_->Clone();
+    flush_handler_ = copyFlushHandler();
     callback_ = other.callback_;
     auto_flush_ = other.auto_flush_;
   }
