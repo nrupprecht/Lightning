@@ -13,11 +13,9 @@ using namespace std::string_literals;
 
 namespace {
 
-struct Nonstreamable {};
-
 struct ToStringable { char c; };
 
-inline std::string to_string(const ToStringable x) {
+std::string to_string(const ToStringable x) {
   return std::string{'<', x.c, '>'};
 }
 
@@ -26,12 +24,17 @@ inline std::string to_string(const ToStringable x) {
 
 namespace Testing {
 
+TEST(Logger, CloneNoCore) {
+  Logger logger(NoCore);
+  EXPECT_NO_THROW(auto other_logger = logger.Clone());
+}
+
 TEST(Logger, RecordHandler_Streaming) {
   auto stream = std::make_shared<std::ostringstream>();
   auto sink = UnlockedSink::From<OstreamSink>(stream);
   sink->SetFormatter(MakeMsgFormatter("{}", formatting::MSG));
 
-  lightning::Logger logger(sink);
+  Logger logger(sink);
 
   LOG_SEV_TO(logger, Info) << ToStringable{'h'};
 
@@ -43,7 +46,7 @@ TEST(Logger, OstreamSink) {
   auto sink = UnlockedSink::From<OstreamSink>(stream);
   sink->SetFormatter(MakeMsgFormatter("{}", formatting::MSG));
 
-  lightning::Logger logger;
+  Logger logger;
   logger.GetCore()->AddSink(std::move(sink));
 
   LOG_SEV_TO(logger, Info) << "Hello world!";
@@ -131,38 +134,6 @@ TEST(Logger, LogStringView) {
 
   LOG_SEV_TO(logger, Info) << std::string_view{buffer, 13};
   EXPECT_EQ(stream->str(), "Hello, world!\n");
-}
-
-TEST(Logger, BlockAttributes) {
-  auto stream = std::make_shared<std::ostringstream>();
-  auto sink = UnlockedSink::From<OstreamSink>(stream);
-  Logger logger(sink);
-  /*
-  logger
-      .AddLoggerAttributeFormatter(attribute::BlockIndentationFormatter{})
-      .AddAttribute(attribute::BlockLevelAttribute{});
-
-  EXPECT_TRUE(sink->SetFormatFrom("[{Severity}]: {BlockLevel}>> {Message}"));
-
-  logger(Severity::Info) << "Hi there.";
-  {
-    controllers::BlockLevel indent1(logger);
-    logger(Severity::Info) << "Indented message.";
-    {
-      controllers::BlockLevel indent2(logger);
-      logger(Severity::Warning) << "Even more indented??";
-    }
-    logger(Severity::Error) << "This has gone too far.";
-  }
-  logger(Severity::Fatal) << "Death approaches.";
-
-  EXPECT_EQ(stream->str(), "[Info   ]: >> Hi there.\n"
-                          "[Info   ]:   >> Indented message.\n"
-                          "[Warning]:     >> Even more indented??\n"
-                          "[Error  ]:   >> This has gone too far.\n"
-                          "[Fatal  ]: >> Death approaches.\n"
-                          "");
-                          */
 }
 
 } // namespace Testing

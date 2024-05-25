@@ -18,16 +18,26 @@ TEST(Sink, GetWrappedSink) {
   sink->GetBackend().GetFormattingSettings().needs_formatting = true;
 
   {
-    auto locked_backend = sink->GetLockedBackend();
+    auto locked_sink = sink->GetLockedSink();
     EXPECT_TRUE(sink->IsLocked());
-    locked_backend->GetFormattingSettings().needs_formatting = false;
+    locked_sink->GetBackend().GetFormattingSettings().needs_formatting = false;
 
-    ASSERT_TRUE(locked_backend.As<OstreamSink>());
-    ASSERT_FALSE(locked_backend.As<FileSink>());
-    locked_backend.As<OstreamSink>()->GetStream() << "Hello world!";
+    ASSERT_TRUE(locked_sink->GetBackendAs<OstreamSink>());
+    ASSERT_FALSE(locked_sink->GetBackendAs<FileSink>());
+    locked_sink->GetBackendAs<OstreamSink>()->GetStream() << "Hello world!";
   }
   EXPECT_FALSE(sink->IsLocked());
   ASSERT_FALSE(sink->GetBackend().GetFormattingSettings().needs_formatting);
+}
+
+TEST(Sink, Clone) {
+  auto stream = std::make_shared<std::ostringstream>();
+  auto sink = NewSink<OstreamSink>(stream);
+
+  std::shared_ptr<Sink> cloned_sink;
+  EXPECT_NO_THROW(cloned_sink = sink->Clone());
+
+  EXPECT_NO_THROW(cloned_sink->GetBackend().CopySettings(sink->GetBackend()));
 }
 
 }  // namespace Testing

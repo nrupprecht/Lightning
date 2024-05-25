@@ -100,11 +100,11 @@ class Figure {
 
 //! \brief A class that represents a figure that serializes the data to a file. The file is designed to be read by an
 //! accompanying Python script that will produce the figure using matplotlib's pyplot.
-class MatplotlibSerializingFuture final : public Figure {
+class MatplotlibSerializingFigure final : public Figure {
  public:
   //! \brief Construct a new MatplotlibSerializingFuture object with the specified image width and height, and the
   //! specified write directory where the image's data file representation will be saved.
-  explicit MatplotlibSerializingFuture(double width, double height, std::filesystem::path write_directory)
+  explicit MatplotlibSerializingFigure(double width, double height, std::filesystem::path write_directory)
       : write_directory_(std::move(write_directory)), width_(width), height_(height) {}
 
   void SetXLabel(const std::string &x_label) override { x_label_ = x_label; }

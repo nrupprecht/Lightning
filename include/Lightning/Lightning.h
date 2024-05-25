@@ -33,7 +33,7 @@ SOFTWARE.
 #include <fstream>
 #include <iostream>
 #include <map>
-#include <memory>
+#include <shared_mutex>
 #include <mutex>
 #include <optional>
 #include <set>
@@ -58,27 +58,28 @@ namespace lightning {
 
 #define LL_ENABLE_IF(...) typename = std::enable_if_t<(__VA_ARGS__)>
 
+// clang-format off
 //! \brief Macro that allows you to create a type trait based on whether a statement about a type called
 //!        Value_t is valid.
 //!
 //! For example, to make a type trait called can_i_stream_this_v<T> that will be true if T can be streamed
 //! into std::cout, you can write: NEW_TYPE_TRAIT(can_i_stream_this_v, std::cout << std::declval<T>());
-//!
 #define NEW_TYPE_TRAIT(trait_name, trait_test) \
-  namespace detail_traits_##trait_name { \
+  namespace detail_traits_## trait_name { \
     template<typename Value_t> \
-    inline auto test_##trait_name(int) -> decltype((trait_test), std::true_type {}); \
-\
+    inline auto test_## trait_name(int) -> decltype((trait_test), std::true_type {}); \
+    \
     template<typename Value_t> \
-    inline auto test_##trait_name(...) -> std::false_type; \
-\
+    inline auto test_## trait_name(...) -> std::false_type; \
+    \
     template<typename Value_t> \
-    struct trait_class_##trait_name { \
-      static constexpr bool value = decltype(test_##trait_name<Value_t>(0))::value; \
+    struct trait_class_## trait_name { \
+      static constexpr bool value = decltype(test_## trait_name<Value_t>(0))::value; \
     }; \
   } \
   template<typename Value_t> \
-  static constexpr bool trait_name = detail_traits_##trait_name::trait_class_##trait_name<Value_t>::value;
+  static constexpr bool trait_name = detail_traits_## trait_name::trait_class_## trait_name<Value_t>::value;
+// clang-format on
 
 // ==============================================================================
 //  Current function.
@@ -132,7 +133,7 @@ public:
   explicit LightningException(const std::string& message,
                               const std::string& file,
                               const std::string& function,
-                              std::size_t line)
+                              const std::size_t line)
       : std::runtime_error(formatMessage(message, file, function, line))
       , message_(formatMessage(message, file, function, line))
       , file_(file)
@@ -162,7 +163,8 @@ private:
 };
 
 //! \brief Raise a lightning exception at the current location.
-#define LL_THROW_WITH_MSG(message) throw ::lightning::LightningException(message, __FILE__, LL_CURRENT_FUNCTION, __LINE__)
+#define LL_THROW_WITH_MSG(message) \
+  throw ::lightning::LightningException(message, __FILE__, LL_CURRENT_FUNCTION, __LINE__)
 
 #define LL_REQUIRE(condition, message) \
   do { \
@@ -218,7 +220,7 @@ template<typename T>
 using remove_cvref_t = std::remove_cv_t<std::remove_reference_t<T>>;
 
 namespace detail_always_false {
-template<typename T>
+template<typename>  // Type does not matter.
 struct always_false {
   static constexpr bool value = false;
 };
@@ -416,10 +418,10 @@ public:
 
 protected:
   //! \brief Make sure the capacity is at least as much as new_capacity.
-  void reserve(std::size_t new_capacity) {
+  void reserve(const std::size_t new_capacity) {
     // Note: only makes a virtual call if the capacity is too small.
     // Note: If normalization is needed we always need at least one more element, for the null terminator.
-    auto normalization_capacity = needs_normalization_ ? new_capacity + 1 : new_capacity;
+    const auto normalization_capacity = needs_normalization_ ? new_capacity + 1 : new_capacity;
     if (capacity_ < normalization_capacity) {
       allocate(normalization_capacity);
     }
@@ -442,17 +444,20 @@ protected:
   }
 
   //! \brief Increase the size by the requested amount and call normalize(). There must be enough capacity.
-  void increaseSize(std::size_t increase_by) {
+  void increaseSize(const std::size_t increase_by) {
     size_ += increase_by;
     normalize();
   }
 
   //! \brief Pointer to the data that is being used.
   T* data_ {};
+
   //! \brief The current size of the data stored in the buffer (number of entries).
   std::size_t size_ {};
+
   //! \brief The current capacity of the buffer.
   std::size_t capacity_ {};
+
   //! \brief Whether the buffer needs to be "normalized." This means, we need to add a null terminator if the
   //!        data type is char, making the buffer compatible with c-style string functions.
   const bool needs_normalization_ = true;
@@ -498,7 +503,7 @@ private:
 //!        and then return it as a string.
 class StringMemoryBuffer final : public BasicMemoryBuffer<char> {
 public:
-  explicit StringMemoryBuffer(std::size_t initial_capacity = 256)
+  explicit StringMemoryBuffer(const std::size_t initial_capacity = 256)
       : BasicMemoryBuffer(false) {
     allocateBuffer(initial_capacity);
   }
@@ -556,12 +561,12 @@ inline void AppendBuffer(BasicMemoryBuffer<char>& buffer, const char* start, con
 //!        rest of the storage.
 //!
 //! \note This is very similar to a MemoryBuffer, but differs in a couple ways. First, it is not a contiguous
-//! buffer, so it does not have a Data() (or related) methods. Second, it allows for direct indexing. I am not
-//! allowing MemoryBuffer to index, since there are certain use cases I might want to explore where you would
-//! not want to allow indexing. For example, you could create a BasicMemoryBuffer child that wraps around an
-//! ostream, and flushes the fixed buffer to the ostream whenever it is full, and then resets. Obviously, you
-//! cannot index into an arbitrary place in a class like this.
-//! So for now, despite their similarities, I am keeping these classes distinct and unrelated.
+//!       buffer, so it does not have a Data() (or related) methods. Second, it allows for direct indexing. I
+//!       am not allowing MemoryBuffer to index, since there are certain use cases I might want to explore
+//!       where you would not want to allow indexing. For example, you could create a BasicMemoryBuffer child
+//!       that wraps around an ostream, and flushes the fixed buffer to the ostream whenever it is full, and
+//!       then resets. Obviously, you cannot index into an arbitrary place in a class like this. So for now,
+//!       despite their similarities, I am keeping these classes distinct and unrelated.
 template<typename T, std::size_t stack_size_v>
 class HybridVector {
 public:
@@ -622,8 +627,10 @@ public:
 private:
   //! \brief Stack storage space.
   T stack_buffer_[stack_size_v];
+
   //! \brief Regular vector, for the remaining storage.
   std::vector<T> heap_buffer_;
+
   //! \brief The utilized size of the stack storage.
   std::size_t stack_size_ {};
 };
@@ -645,7 +652,7 @@ namespace time {
 //! \brief Compute whether a year is a leap year.
 //!
 //! \param year The year to check.
-constexpr bool IsLeapYear(int year) {
+constexpr bool IsLeapYear(const int year) {
   // According to the Gregorian calendar, a year is a leap year if the year is divisible by 4
   // UNLESS the year is also divisible by 100, in which case it is not a leap year
   // UNLESS the year is also divisible by 400, in which case it is a leap year.
@@ -659,7 +666,7 @@ constexpr bool IsLeapYear(int year) {
 }
 
 //! \brief  Get the number of days in a month in a particular year.
-inline int DaysInMonth(int month, int year) {
+inline int DaysInMonth(const int month, const int year) {
   LL_REQUIRE(0 < month && month < 13, "month must be in the range [1, 12], not " << month);
   static int days_in_month_[] = {0 /* Unused */, 31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31};
   if (month != 2) {
@@ -3834,22 +3841,26 @@ class ObjectWrapper : public ImplBase {
   friend class ImplBase;
 
 protected:
-  struct Impl : public ImplBase::Impl {
-    explicit Impl(Object_t* backend)
-        : backend(backend) {}
-    Object_t* backend {};
+  struct Impl : ImplBase::Impl {
+    explicit Impl(Object_t* obj)
+        : object(obj) {}
+    Object_t* object {};
   };
 
   explicit ObjectWrapper(const std::shared_ptr<Impl>& impl)
       : ImplBase(impl) {}
 
 public:
-  explicit ObjectWrapper(Object_t* backend)
-      : ImplBase(std::make_shared<Impl>(backend)) {}
-  Object_t* operator->() { return impl<ObjectWrapper>()->backend; }
-  explicit operator bool() { return static_cast<bool>(impl<ObjectWrapper>()->backend); }
+  explicit ObjectWrapper(Object_t* obj)
+      : ImplBase(std::make_shared<Impl>(obj)) {}
 
-  //! \brief Try casting the backend to a specific type.
+  Object_t* operator->() { return impl<ObjectWrapper>()->object; }
+  Object_t& operator*() { return *impl<ObjectWrapper>()->object; }
+  const Object_t& operator*() const { return *impl<ObjectWrapper>()->object; }
+
+  explicit operator bool() { return static_cast<bool>(impl<ObjectWrapper>()->object); }
+
+  //! \brief Try casting the object to a specific type.
   template<typename OtherObject_t>
   OtherObject_t* As() {
     return dynamic_cast<OtherObject_t*>(impl<ObjectWrapper>()->backend);
@@ -3860,20 +3871,19 @@ public:
 template<typename Object_t>
 class LockedObject : public ObjectWrapper<Object_t> {
 protected:
-  struct Impl : public ObjectWrapper<Object_t>::Impl {
-    explicit Impl(Object_t* backend, std::mutex& mutex)
+  template<typename Mutex_t>
+  struct Impl : ObjectWrapper<Object_t>::Impl {
+    explicit Impl(Object_t* backend, Mutex_t& mutex)
         : ObjectWrapper<Object_t>::Impl(backend)
         , lock(mutex) {}
-    std::lock_guard<std::mutex> lock;
+    std::unique_lock<Mutex_t> lock;
   };
 
 public:
-  explicit LockedObject(Object_t* backend, std::mutex& mutex)
-      : ObjectWrapper<Object_t>(std::make_shared<Impl>(backend, mutex)) {}
+  template<typename Mutex_t>
+  explicit LockedObject(Object_t* object, Mutex_t& mutex)
+      : ObjectWrapper<Object_t>(std::make_shared<Impl<Mutex_t>>(object, mutex)) {}
 };
-
-//! \brief A locked sink that uses a mutex to lock the sink, controlling access.
-using LockedSink = LockedObject<SinkBackend>;
 
 // ==============================================================================================
 //  Sinks
@@ -3936,12 +3946,17 @@ public:
   }
 
   //! \brief Mutably get the sink backend.
+  //!
+  //! \note Does not perform any locking.
   SinkBackend& GetBackend() { return *sink_backend_; }
 
   //! \brief Get the sink backend.
+  //!
+  //! \note Does not perform any locking.
   NO_DISCARD const SinkBackend& GetBackend() const { return *sink_backend_; }
 
-  NO_DISCARD ObjectWrapper<SinkBackend> GetLockedBackend() { return getLockedBackend(); }
+  //! \brief Locks (if necessary) the sink backend, returning a locked sink.
+  NO_DISCARD ObjectWrapper<Sink> GetLockedSink() { return getLockedSink(); }
 
   //! \brief Get the sink backend, cast to a specific type.
   //!
@@ -3968,8 +3983,8 @@ protected:
 
   //! \brief Get the sink backend, wrapped in a SinkWrapper. The default implementation does not lock the
   //!        sink, since the Sink base class has no mutex.
-  virtual ObjectWrapper<SinkBackend> getLockedBackend() {
-    return ObjectWrapper<SinkBackend>(sink_backend_.get());
+  virtual ObjectWrapper<Sink> getLockedSink() {
+    return ObjectWrapper(this);
   }
 
   //! \brief The sink backend, to which the frontend feeds record.
@@ -3981,6 +3996,9 @@ protected:
   //! \brief The sink's formatter.
   std::unique_ptr<formatting::BaseMessageFormatter> formatter_;
 };
+
+//! \brief A locked sink that uses a mutex to lock the sink, controlling access.
+using LockedSink = LockedObject<Sink>;
 
 //! \brief Sink frontend that uses no synchronization methods.
 //!
@@ -4040,13 +4058,13 @@ private:
       formatter_->Format(record, sink_backend_->GetFormattingSettings(), buffer);
     }
     {
-      std::lock_guard guard(lock_);
+      std::unique_lock guard(lock_);
       sink_backend_->Dispatch(buffer, record);
     }
   }
 
-  NO_DISCARD ObjectWrapper<SinkBackend> getLockedBackend() override {
-    return LockedSink(sink_backend_.get(), lock_);
+  NO_DISCARD ObjectWrapper<Sink> getLockedSink() override {
+    return LockedSink(this, lock_);
   }
 
   NO_DISCARD std::shared_ptr<Sink> clone() const override {
@@ -4054,7 +4072,7 @@ private:
   }
 
   //! \brief The mutex that controls access to the sink.
-  mutable std::mutex lock_;
+  mutable std::shared_mutex lock_;
 };
 
 //! \brief  Create a new sink frontend / backend pair.
@@ -4101,6 +4119,7 @@ public:
 
   //! \brief Add a sink to the core.
   Core& AddSink(std::shared_ptr<Sink> sink) {
+    std::unique_lock guard(lock_);
     sinks_.emplace_back(std::move(sink));
     return *this;
   }
@@ -4110,8 +4129,9 @@ public:
 
   //! \brief Set the formatter for every sink the core points at.
   Core& SetAllFormatters(const formatting::BaseMessageFormatter& formatter) {
+    std::shared_lock guard(lock_);
     for (const auto& sink : sinks_) {
-      sink->SetFormatter(formatter.Copy());
+      sink->GetLockedSink()->SetFormatter(formatter.Copy());
     }
     return *this;
   }
@@ -4121,27 +4141,49 @@ public:
     return SetAllFormatters(*formatter);
   }
 
+  //! \brief Map a function across sinks, locking the sink before passing it to the function.
+  template<typename SinkBackend_t, typename Func_t>
+  void MapOnSinks(Func_t&& func) const {
+    std::shared_lock guard(lock_);
+    for (auto& sink : sinks_) {
+      // Lock the sink (if it supports this).
+      auto locked_sink = sink->GetLockedSink();
+      if (auto backend_ptr = locked_sink->GetBackendAs<SinkBackend_t>()) {
+        func(*sink, *backend_ptr);
+      }
+    }
+  }
+
   //! \brief Get the core level filter.
   filter::AttributeFilter& GetFilter() { return core_filter_; }
 
   //! \brief Reset the core's filters.
   Core& ClearFilters() {
+    std::unique_lock guard(lock_);
     core_filter_.Clear();
     return *this;
   }
 
   //! \brief Get the vector of all sinks.
+  //!
+  //! Note that this does not lock the core, so the vector may be modified by other threads.
   NO_DISCARD const std::vector<std::shared_ptr<Sink>>& GetSinks() const { return sinks_; }
 
   //! \brief Apply a function to all sinks.
+  //!
+  //! Each sink is locked before the function is applied.
   template<typename Func_t>
   Core& ApplyToAllSink(Func_t&& func) {
-    std::for_each(sinks_.begin(), sinks_.end(), [f = std::forward<Func_t>(func)](auto& sink) { f(*sink); });
+    std::for_each(sinks_.begin(), sinks_.end(), [f = std::forward<Func_t>(func)](auto& sink) {
+      auto locked_sink = sink->GetLockedSink();
+      f(*sink);
+    });
     return *this;
   }
 
   //! \brief Remove all sinks from the core.
   Core& ClearSinks() {
+    std::unique_lock guard(lock_);
     sinks_.clear();
     return *this;
   }
@@ -4150,12 +4192,15 @@ public:
   //!
   //! Note: This function MAY discard.
   const Core& Flush() const {
-    std::for_each(sinks_.begin(), sinks_.end(), [](auto& sink) { sink->Flush(); });
+    std::shared_lock guard(lock_);
+    std::for_each(sinks_.begin(), sinks_.end(), [](auto& sink) { sink->GetLockedSink()->Flush(); });
     return *this;
   }
 
   //! \brief Make a deep copy of the core, including deep copies of all sinks.
   NO_DISCARD std::shared_ptr<Core> Clone() const {
+    std::shared_lock guard(lock_);
+
     auto core = std::make_shared<Core>();
     core->core_filter_ = core_filter_;
     for (const auto& sink : sinks_) {
@@ -4184,7 +4229,7 @@ private:
   filter::AttributeFilter core_filter_;
 
   //! \brief Mutex to control access to the core.
-  mutable std::mutex lock_;
+  mutable std::shared_mutex lock_;
 };
 
 // ==============================================================================
@@ -4232,7 +4277,7 @@ public:
   //!
   //! Note that the constructor is *not* explicit on purpose, so parameters can be defaulted like
   //! `const Logger &logger = {NoCore};`.
-  Logger(NoCore_t) // NOLINT(*-explicit-constructor)
+  Logger(NoCore_t)  // NOLINT(*-explicit-constructor)
       : core_(nullptr) {}
 
   //! \brief Create a logger with a new core and a single sink.
@@ -4311,7 +4356,7 @@ public:
 
   //! \brief Notify the core to flush all of its sinks.
   void Flush() const {
-    if (core_) {
+    if (HasCore()) {
       // Note - cast is to get around "result is unused" warning.
       static_cast<void>(core_->Flush());
     }
@@ -4323,23 +4368,19 @@ public:
     if (!HasCore()) {
       return {};
     }
+
     std::vector<std::pair<Sink*, SinkBackend_t*>> output;
-    for (auto& sink : GetCore()->GetSinks()) {
-      if (auto back_ptr = dynamic_cast<SinkBackend_t*>(&sink->GetBackend())) {
-        output.emplace_back(sink.get(), back_ptr);
-      }
-    }
+    GetCore()->MapOnSinks<SinkBackend_t>([&output](Sink& sink, SinkBackend_t& backend) {
+      output.emplace_back(&sink, &backend);
+    });
     return output;
   }
 
   //! \brief Map a function on every sink of the specified type that is in the logger's core.
   template<typename SinkBackend_t, typename Func_t>
   void MapOnSinks(Func_t&& func) const {
-    auto&& sinks = GetSinks<SinkBackend_t>();
-    for (auto& [frontend, backend] : sinks) {
-      if (auto backend_ptr = dynamic_cast<SinkBackend_t*>(backend)) {
-        func(*frontend, *backend_ptr);
-      }
+    if (HasCore()) {
+      core_->MapOnSinks<SinkBackend_t>(func);
     }
   }
 
@@ -4347,18 +4388,25 @@ public:
   //!
   //! Warning: this may be ill-advised if many loggers share the same core.
   void SetAllFormats(const std::unique_ptr<formatting::BaseMessageFormatter>& formatter) const {
-    if (auto core = GetCore()) {
-      core->SetAllFormatters(*formatter);
-    }
+    SetAllFormats(*formatter);
   }
+
+  //! \brief Set the formatters of all sinks in the logger's core.
+  //!
+  //! Warning: this may be ill-advised if many loggers share the same core.
   void SetAllFormats(const formatting::BaseMessageFormatter& formatter) const {
     if (auto core = GetCore()) {
       core->SetAllFormatters(formatter);
     }
   }
 
-  //! \brief Create a clone of the logger. This not only copies the logger, but clones the core and all sinks.
-  Logger Clone() { return Logger(*this).SetCore(core_->Clone()); }
+  //! \brief Create a clone of the logger.
+  //!
+  //! This not only copies the logger, but clones the core and all sinks.
+  NO_DISCARD Logger Clone() const {
+    auto core = core_ ? core_->Clone() : nullptr;
+    return Logger(*this).SetCore(std::move(core));
+  }
 
 private:
   //! \brief Whether to generate a time stamp for the logs.
@@ -4465,7 +4513,8 @@ public:
     return std::make_unique<OstreamSink>(out_);
   }
 
-  std::ostream& GetStream() { return *out_; }
+  //! \brief Get the stream from the sink.
+  std::ostream& GetStream() { return *out_; }  // NOLINT - Function should not be const
 
 private:
   void dispatch([[maybe_unused]] memory::BasicMemoryBuffer<char>& buffer,
@@ -4514,7 +4563,7 @@ public:
   }
 
 private:
-  inline static std::shared_ptr<Core> global_core_ = std::shared_ptr<Core>();
+  inline static std::shared_ptr<Core> global_core_ = {};
   inline static std::optional<Logger> logger_ {};
 };
 
@@ -4599,13 +4648,18 @@ inline void formatLiteralSegment(std::string_view segment, memory::BasicMemoryBu
             // If this is not formatted as a special formatter, that is fine, just treat it as characters.
             if (c == segment.end()) {
               AppendBuffer(buffer, "{@");
+              // Note: Linter is turned off because on some platforms, std::string_view::const_iterator is not
+              //       a char, but some other object, so we need to make sure we get it as a char*.
               AppendBuffer(buffer,
-                           std::string_view {start, static_cast<std::string_view::size_type>(c - start)});
+                           std::string_view {&(*start),  // NOLINT
+                                             static_cast<std::string_view::size_type>(c - start)});
               return;
             }
           }
           // Determine the special format string.
-          std::string_view view(start, static_cast<std::string_view::size_type>(c - start));
+          // Note: Linter is turned off because on some platforms, std::string_view::const_iterator is not
+          //       a char, but some other object, so we need to make sure we get it as a char*.
+          std::string_view view(&(*start), static_cast<std::string_view::size_type>(c - start));  // NOLINT
           auto [was_special, special_formatting] = getSpecialFormatter(view);
           if (was_special) {
             AppendBuffer(buffer, special_formatting);

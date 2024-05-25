@@ -12,7 +12,7 @@ using namespace std::string_literals;
 namespace Testing {
 
 TEST(Plotting, BasicSanity) {
-  auto figure = std::make_unique<MatplotlibSerializingFuture>(10, 8, "direct-to-ree");
+  auto figure = std::make_unique<MatplotlibSerializingFigure>(10, 8, "direct-to-ree");
 
   EXPECT_EQ(figure->GetWidth(), 10);
   EXPECT_EQ(figure->GetHeight(), 8);
