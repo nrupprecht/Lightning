@@ -3784,7 +3784,7 @@ public:
   //! \brief Copy the basic settings from another sink backend to this backend.
   void CopySettings(const SinkBackend& other) {
     settings_ = other.settings_;
-    flush_handler_ = copyFlushHandler();
+    flush_handler_ = other.copyFlushHandler();
     callback_ = other.callback_;
     auto_flush_ = other.auto_flush_;
   }
@@ -4086,6 +4086,7 @@ std::shared_ptr<Frontend_t> NewSink(Args_t&&... args) {
 class Core {
 public:
   bool WillAccept(const RecordAttributes& attributes) {
+    std::shared_lock guard(lock_);
     // If there are no sinks, there are no things that *can* accept.
     if (sinks_.empty()) {
       return false;
@@ -4100,6 +4101,7 @@ public:
   }
 
   bool WillAccept(std::optional<Severity> severity) {
+    std::shared_lock guard(lock_);
     if (!core_filter_.WillAccept(severity)) {
       return false;
     }
@@ -4110,6 +4112,7 @@ public:
 
   //! \brief Dispatch a ref bundle to the sinks.
   void Dispatch(const Record& record) const {
+    std::shared_lock guard(lock_);
     for (auto& sink : sinks_) {
       if (sink->WillAccept(record.Attributes())) {
         sink->Dispatch(record);
@@ -4155,6 +4158,8 @@ public:
   }
 
   //! \brief Get the core level filter.
+  //!
+  //! \note Does not lock the core, to use safely in a multithreaded context, use locked cores.
   filter::AttributeFilter& GetFilter() { return core_filter_; }
 
   //! \brief Reset the core's filters.
@@ -4166,7 +4171,7 @@ public:
 
   //! \brief Get the vector of all sinks.
   //!
-  //! Note that this does not lock the core, so the vector may be modified by other threads.
+  //! \note This does not lock the core, so the vector may be modified by other threads.
   NO_DISCARD const std::vector<std::shared_ptr<Sink>>& GetSinks() const { return sinks_; }
 
   //! \brief Apply a function to all sinks.
@@ -4174,6 +4179,7 @@ public:
   //! Each sink is locked before the function is applied.
   template<typename Func_t>
   Core& ApplyToAllSink(Func_t&& func) {
+    std::shared_lock guard(lock_);
     std::for_each(sinks_.begin(), sinks_.end(), [f = std::forward<Func_t>(func)](auto& sink) {
       auto locked_sink = sink->GetLockedSink();
       f(*sink);
@@ -4200,7 +4206,6 @@ public:
   //! \brief Make a deep copy of the core, including deep copies of all sinks.
   NO_DISCARD std::shared_ptr<Core> Clone() const {
     std::shared_lock guard(lock_);
-
     auto core = std::make_shared<Core>();
     core->core_filter_ = core_filter_;
     for (const auto& sink : sinks_) {
