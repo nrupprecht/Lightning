@@ -33,10 +33,10 @@ SOFTWARE.
 #include <fstream>
 #include <iostream>
 #include <map>
-#include <shared_mutex>
 #include <mutex>
 #include <optional>
 #include <set>
+#include <shared_mutex>
 #include <sstream>
 #include <string>
 #include <string_view>
@@ -2372,6 +2372,7 @@ private:
 
   //! \brief Cache the formatting string.
   std::string set_formatting_string_;
+
   //! \brief The object that should be colored.
   Segment<std::decay_t<typetraits::remove_cvref_t<T>>> segment_;
 };
@@ -2655,7 +2656,6 @@ inline const std::string& GetThreadID() {
 //! \brief Structure storing very common attributes that a logging message will often have.
 //!
 //! Additional attributes can be implemented as Attribute objects.
-//!
 struct BasicAttributes {
   BasicAttributes() = default;
 
@@ -2698,10 +2698,10 @@ struct BasicAttributes {
   //! \brief A string view of the name of the logger which sent a message.
   std::string_view logger_name {};
 
-  //! \brief Const char* to the file name.
+  //! \brief Const char* to the file name. Null if no file name.
   const char* file_name {};
 
-  //! \brief Const char* to the function name.
+  //! \brief Const char* to the function name. Null if no function name.
   const char* function_name {};
 
   //! \brief Optionally, the line number that the log is from.
@@ -3885,6 +3885,42 @@ public:
       : ObjectWrapper<Object_t>(std::make_shared<Impl<Mutex_t>>(object, mutex)) {}
 };
 
+namespace locks {
+
+//! \brief Shared (reader) lock guard that is only used if the `do_lock` flag is true.
+//!
+//! This allows us to toggle via a flag whether synchronization is necessary.
+template<typename Mutex_t>
+class PotentiallySharedLock {
+public:
+  PotentiallySharedLock(Mutex_t& mutex, bool do_lock) {
+    if (do_lock) {
+      lock_ = std::shared_lock<Mutex_t>(mutex);
+    }
+  }
+
+private:
+  std::shared_lock<Mutex_t> lock_;
+};
+
+//! \brief Unique (writer) lock guard that is only used if the `do_lock` flag is true.
+//!
+//! This allows us to toggle via a flag whether synchronization is necessary.
+template<typename Mutex_t>
+class PotentiallyUniqueLock {
+public:
+  PotentiallyUniqueLock(Mutex_t& mutex, bool do_lock) {
+    if (do_lock) {
+      lock_ = std::unique_lock<Mutex_t>(mutex);
+    }
+  }
+
+private:
+  std::unique_lock<Mutex_t> lock_;
+};
+
+}  // namespace locks
+
 // ==============================================================================================
 //  Sinks
 // ==============================================================================================
@@ -3983,9 +4019,7 @@ protected:
 
   //! \brief Get the sink backend, wrapped in a SinkWrapper. The default implementation does not lock the
   //!        sink, since the Sink base class has no mutex.
-  virtual ObjectWrapper<Sink> getLockedSink() {
-    return ObjectWrapper(this);
-  }
+  virtual ObjectWrapper<Sink> getLockedSink() { return ObjectWrapper(this); }
 
   //! \brief The sink backend, to which the frontend feeds record.
   std::unique_ptr<SinkBackend> sink_backend_ {};
@@ -4063,9 +4097,7 @@ private:
     }
   }
 
-  NO_DISCARD ObjectWrapper<Sink> getLockedSink() override {
-    return LockedSink(this, lock_);
-  }
+  NO_DISCARD ObjectWrapper<Sink> getLockedSink() override { return LockedSink(this, lock_); }
 
   NO_DISCARD std::shared_ptr<Sink> clone() const override {
     return std::make_shared<SynchronousSink>(sink_backend_->Clone());
@@ -4083,10 +4115,28 @@ std::shared_ptr<Frontend_t> NewSink(Args_t&&... args) {
 
 //! \brief Object that can receive records from multiple loggers, and dispatches them to multiple sinks.
 //!        The core has its own filter, which is checked before any of the individual sinks' filters.
+//!
+//! The core has a flag that allows it to operate in synchronous mode, which means that it will use reader /
+//! writer locks to control access to the sinks. This is only necessary if the core is going to be *modified*
+//! from multiple threads. It is always safe to read from the core from multiple threads, including logging to
+//! the same core from multiple threads, or running mapping functions on the sinks in the core. What you
+//! should not do without operating in synchronous mode is add or remove sinks from the core.
+//!
+//! Synchonous mode is on by default, and can be turned on or off after initialization.
 class Core {
 public:
+  //! \brief Construct the core with a particular mode (synchronous by default).
+  explicit Core(bool synchronous_mode = true)
+      : synchronous_mode_(synchronous_mode) {}
+
+  //! \brief Set the synchronicity mode of the Core.
+  void SetSynchronousMode(bool synchronous_mode) {
+    synchronous_mode_ = synchronous_mode;
+  }
+
+  //! \brief Check whether at least one sink would accept the record.
   bool WillAccept(const RecordAttributes& attributes) {
-    std::shared_lock guard(lock_);
+    locks::PotentiallySharedLock guard(lock_, synchronous_mode_);
     // If there are no sinks, there are no things that *can* accept.
     if (sinks_.empty()) {
       return false;
@@ -4100,8 +4150,12 @@ public:
         sinks_.begin(), sinks_.end(), [attributes](auto& sink) { return sink->WillAccept(attributes); });
   }
 
+  //! \brief Check whether at least one sink would potentially accept a message with a particular severity.
+  //!
+  //! Since most filtering is done only based on severity, it makes sense to have this as a quick check up
+  //! front.
   bool WillAccept(std::optional<Severity> severity) {
-    std::shared_lock guard(lock_);
+    locks::PotentiallySharedLock guard(lock_, synchronous_mode_);
     if (!core_filter_.WillAccept(severity)) {
       return false;
     }
@@ -4112,7 +4166,7 @@ public:
 
   //! \brief Dispatch a ref bundle to the sinks.
   void Dispatch(const Record& record) const {
-    std::shared_lock guard(lock_);
+    locks::PotentiallySharedLock guard(lock_, synchronous_mode_);
     for (auto& sink : sinks_) {
       if (sink->WillAccept(record.Attributes())) {
         sink->Dispatch(record);
@@ -4122,7 +4176,7 @@ public:
 
   //! \brief Add a sink to the core.
   Core& AddSink(std::shared_ptr<Sink> sink) {
-    std::unique_lock guard(lock_);
+    locks::PotentiallySharedLock guard(lock_, synchronous_mode_);
     sinks_.emplace_back(std::move(sink));
     return *this;
   }
@@ -4132,7 +4186,7 @@ public:
 
   //! \brief Set the formatter for every sink the core points at.
   Core& SetAllFormatters(const formatting::BaseMessageFormatter& formatter) {
-    std::shared_lock guard(lock_);
+    locks::PotentiallySharedLock guard(lock_, synchronous_mode_);
     for (const auto& sink : sinks_) {
       sink->GetLockedSink()->SetFormatter(formatter.Copy());
     }
@@ -4147,7 +4201,7 @@ public:
   //! \brief Map a function across sinks, locking the sink before passing it to the function.
   template<typename SinkBackend_t, typename Func_t>
   void MapOnSinks(Func_t&& func) const {
-    std::shared_lock guard(lock_);
+    locks::PotentiallySharedLock guard(lock_, synchronous_mode_);
     for (auto& sink : sinks_) {
       // Lock the sink (if it supports this).
       auto locked_sink = sink->GetLockedSink();
@@ -4164,7 +4218,7 @@ public:
 
   //! \brief Reset the core's filters.
   Core& ClearFilters() {
-    std::unique_lock guard(lock_);
+    locks::PotentiallyUniqueLock guard(lock_, synchronous_mode_);
     core_filter_.Clear();
     return *this;
   }
@@ -4179,7 +4233,8 @@ public:
   //! Each sink is locked before the function is applied.
   template<typename Func_t>
   Core& ApplyToAllSink(Func_t&& func) {
-    std::shared_lock guard(lock_);
+    locks::PotentiallySharedLock guard(lock_, synchronous_mode_);
+    // std::shared_lock guard(lock_);
     std::for_each(sinks_.begin(), sinks_.end(), [f = std::forward<Func_t>(func)](auto& sink) {
       auto locked_sink = sink->GetLockedSink();
       f(*sink);
@@ -4189,7 +4244,7 @@ public:
 
   //! \brief Remove all sinks from the core.
   Core& ClearSinks() {
-    std::unique_lock guard(lock_);
+    locks::PotentiallyUniqueLock guard(lock_, synchronous_mode_);
     sinks_.clear();
     return *this;
   }
@@ -4198,24 +4253,24 @@ public:
   //!
   //! Note: This function MAY discard.
   const Core& Flush() const {
-    std::shared_lock guard(lock_);
+    locks::PotentiallySharedLock guard(lock_, synchronous_mode_);
     std::for_each(sinks_.begin(), sinks_.end(), [](auto& sink) { sink->GetLockedSink()->Flush(); });
     return *this;
   }
 
   //! \brief Make a deep copy of the core, including deep copies of all sinks.
   NO_DISCARD std::shared_ptr<Core> Clone() const {
-    std::shared_lock guard(lock_);
+    locks::PotentiallySharedLock guard(lock_, synchronous_mode_);
     auto core = std::make_shared<Core>();
     core->core_filter_ = core_filter_;
     for (const auto& sink : sinks_) {
-      core->sinks_.emplace_back(sink->Clone());
+      core->sinks_.emplace_back(sink->GetLockedSink()->Clone());
     }
     return core;
   }
 
   //! \brief Get a locked handle to the core.
-  NO_DISCARD LockedObject<Core> Lock() { return LockedObject<Core>(this, lock_); }
+  NO_DISCARD LockedObject<Core> Lock() { return LockedObject(this, lock_); }
 
   //! \brief Check whether the core is locked.
   bool IsLocked() const {
@@ -4235,6 +4290,15 @@ private:
 
   //! \brief Mutex to control access to the core.
   mutable std::shared_mutex lock_;
+
+  //! \brief Whether the core should use locks or not.
+  //!
+  //! For safety, if the core is going to be modified by multiple threads, this should be true.
+  //! If the core itself is not going to be modified from multiple threads, this can be false. Note that it
+  //! is fine for multiple threads to use the core, e.g., to log via the same core from multiple threads, as
+  //! long as you don't do something like add or remove sinks while also logging, or add sinks from multiple
+  //! threads simultaneously.
+  bool synchronous_mode_;
 };
 
 // ==============================================================================
@@ -4330,8 +4394,9 @@ public:
 
   //! \brief Check whether the logger will accept a record with the specified severity (or lack of severity).
   NO_DISCARD bool WillAccept(std::optional<Severity> severity) const {
-    if (!core_)
+    if (!core_) {
       return false;
+    }
     return core_->WillAccept(severity);
   }
 
@@ -4354,6 +4419,8 @@ public:
   }
 
   //! \brief Set the name of the logger. This attribute is attached to every record.
+  //!
+  //! Note - this operation is not thread safe.
   Logger& SetName(const std::string& logger_name) {
     logger_name_ = logger_name;
     return *this;
@@ -4375,9 +4442,8 @@ public:
     }
 
     std::vector<std::pair<Sink*, SinkBackend_t*>> output;
-    GetCore()->MapOnSinks<SinkBackend_t>([&output](Sink& sink, SinkBackend_t& backend) {
-      output.emplace_back(&sink, &backend);
-    });
+    GetCore()->MapOnSinks<SinkBackend_t>(
+        [&output](Sink& sink, SinkBackend_t& backend) { output.emplace_back(&sink, &backend); });
     return output;
   }
 

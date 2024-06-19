@@ -55,7 +55,6 @@ void bench_fmtdatetime(int howmany);
 
 void bench_mt(int howmany, std::size_t thread_count);
 
-
 auto main() -> int {
   // Set up global logger.
   Global::GetCore()->AddSink(NewSink<StdoutSink>())
@@ -81,19 +80,19 @@ auto main() -> int {
   // ========================================================
 
   LOG_SEV(Info) << RepeatChar(header_length, '*');
-  LOG_SEV(Info) << "Single threaded: " << formatting::Format("{:L}", iters) << " messages";
+  LOG_SEV(Info) << formatting::Format("Single threaded: {:L} messages", iters);
   LOG_SEV(Info) << RepeatChar(header_length, '*');
   bench_st(iters);
   LOG_SEV(Info) << RepeatChar(header_length, '*') << "\n";
 
   LOG_SEV(Info) << RepeatChar(header_length, '*');
-  LOG_SEV(Info) << "Single threaded, Types: " << formatting::Format("{:L}", iters) << " messages";
+  LOG_SEV(Info) << formatting::Format("Single threaded, Types: {:L} messages", iters);
   LOG_SEV(Info) << RepeatChar(header_length, '*');
   bench_st_types(iters);
   LOG_SEV(Info) << RepeatChar(header_length, '*') << "\n";
 
   LOG_SEV(Info) << RepeatChar(header_length, '*');
-  LOG_SEV(Info) << "Single threaded: " << formatting::Format("{:L}", iters) << " messages, non-acceptance";
+  LOG_SEV(Info) << formatting::Format("Single threaded: {:L} messages, non-acceptance", iters);
   LOG_SEV(Info) << RepeatChar(header_length, '*');
   bench_nonaccepting(iters);
   LOG_SEV(Info) << RepeatChar(header_length, '*') << "\n";
@@ -123,8 +122,7 @@ auto main() -> int {
   LOG_SEV(Info) << RepeatChar(header_length, '*') << "\n";
 
   LOG_SEV(Info) << RepeatChar(header_length, '*');
-  LOG_SEV(Info) << "Multi threaded (" << num_threads << " threads): " << formatting::Format("{:L}", iters)
-                << " messages";
+  LOG_SEV(Info) << formatting::Format("Multi threaded ({}) threads): {:L} messages", num_threads, iters);
   LOG_SEV(Info) << RepeatChar(header_length, '*');
   bench_mt(iters, num_threads);
   LOG_SEV(Info) << RepeatChar(header_length, '*') << "\n";
@@ -136,7 +134,7 @@ void bench_st(int howmany) {
   std::size_t count = 0;
 
   auto make_sink = [&count]() {
-    std::string file_name = "logs/lightning_basic_st-" + std::to_string(count) + ".log";
+    std::string file_name = formatting::Format("logs/lightning_basic_st-{}.log", count);
     return std::pair{NewSink<FileSink, UnlockedSink>(file_name), file_name};
   };
 
@@ -145,6 +143,7 @@ void bench_st(int howmany) {
     auto [fs, file_name] = make_sink();
     Logger logger(fs);
     logger.SetName("basic_st/backtrace-off");
+    logger.GetCore()->SetSynchronousMode(false); // We do not need synchronous mode.
     auto formatter = std::make_unique<formatting::RecordFormatter>();
     formatter->ClearSegments()
         .AddLiteralSegment("[")
@@ -171,6 +170,7 @@ void bench_st(int howmany) {
     auto [fs, file_name] = make_sink();
     Logger logger(fs);
     logger.SetName("basic_st/backtrace-off");
+    logger.GetCore()->SetSynchronousMode(false); // We do not need synchronous mode.
     fs->SetFormatter(MakeMsgFormatter("[{}] [{}] [{}] {}",
                                       formatting::DateTimeAttributeFormatter{},
                                       formatting::LoggerNameAttributeFormatter{},
@@ -191,7 +191,7 @@ void bench_st(int howmany) {
     auto [fs, file_name] = make_sink();
     Logger logger(fs);
     logger.SetName("basic_st/backtrace-off");
-
+    logger.GetCore()->SetSynchronousMode(false); // We do not need synchronous mode.
     auto formatter = std::make_unique<formatting::FormatterBySeverity>();
     formatter->SetDefaultFormatter(MakeMsgFormatter("[{}] [{}] [{}] {}",
                                                     formatting::DateTimeAttributeFormatter{},
@@ -215,6 +215,7 @@ void bench_st(int howmany) {
     fs->GetBackend().CreateFlushHandler<flush::AutoFlush>();
     Logger logger(fs);
     logger.SetName("basic_st/backtrace-off");
+    logger.GetCore()->SetSynchronousMode(false); // We do not need synchronous mode.
     fs->SetFormatter(MakeMsgFormatter("[{}] [{}] [{}] {}",
                                       formatting::DateTimeAttributeFormatter{},
                                       formatting::LoggerNameAttributeFormatter{},
@@ -236,6 +237,7 @@ void bench_st(int howmany) {
     fs->GetBackend().CreateFlushHandler<flush::FlushEveryN>(10u);
     Logger logger(fs);
     logger.SetName("basic_st/backtrace-off");
+    logger.GetCore()->SetSynchronousMode(false); // We do not need synchronous mode.
     fs->SetFormatter(MakeMsgFormatter("[{}] [{}] [{}] {}",
                                       formatting::DateTimeAttributeFormatter{},
                                       formatting::LoggerNameAttributeFormatter{},
@@ -256,6 +258,7 @@ void bench_st(int howmany) {
     auto [fs, file_name] = make_sink();
     Logger logger(fs);
     logger.SetName("basic_st/backtrace-off");
+    logger.GetCore()->SetSynchronousMode(false); // We do not need synchronous mode.
     fs->SetFormatter(MakeMsgFormatter("[{}] [{}:{}] [{}] [{}] {}",
                                       formatting::DateTimeAttributeFormatter{},
                                       formatting::FileNameAttributeFormatter{false},
@@ -278,6 +281,7 @@ void bench_st(int howmany) {
     auto [fs, file_name] = make_sink();
     Logger logger(fs);
     logger.SetName("basic_st/backtrace-off");
+    logger.GetCore()->SetSynchronousMode(false); // We do not need synchronous mode.
     fs->SetFormatter(MakeMsgFormatter("[{}] [{}:{}] [{}] [{}] {}",
                                       formatting::DateTimeAttributeFormatter{},
                                       formatting::FileNameAttributeFormatter{true},
@@ -300,6 +304,7 @@ void bench_st(int howmany) {
     auto [fs, file_name] = make_sink();
     Logger logger(fs);
     logger.SetName("basic_st/backtrace-off");
+    logger.GetCore()->SetSynchronousMode(false); // We do not need synchronous mode.
     fs->SetFormatter(MakeMsgFormatter("[{}] [{}:{}] [{}] [{}] [{}] {}",
                                       formatting::DateTimeAttributeFormatter{},
                                       formatting::FileNameAttributeFormatter{false},
@@ -325,6 +330,7 @@ void bench_st(int howmany) {
                                         + ".log");
     Logger logger(fs);
     logger.SetName("synchronous-sink-logger");
+    logger.GetCore()->SetSynchronousMode(false); // We do not need synchronous mode.
     fs->SetFormatter(formatting::MakeMsgFormatter("[{}] [{}] [{}] {}",
                                                   formatting::DateTimeAttributeFormatter{},
                                                   formatting::LoggerNameAttributeFormatter{},
@@ -345,6 +351,7 @@ void bench_st(int howmany) {
     auto [fs, file_name] = make_sink();
     Logger logger(fs);
     logger.SetName("basic_st/backtrace-off");
+    logger.GetCore()->SetSynchronousMode(false); // We do not need synchronous mode.
     fs->SetFormatter(MakeMsgFormatter("[{}] [{}] [{}] {}",
                                       formatting::DateTimeAttributeFormatter{},
                                       formatting::LoggerNameAttributeFormatter{},
@@ -365,6 +372,7 @@ void bench_st(int howmany) {
     auto [fs, file_name] = make_sink();
     Logger logger(fs);
     logger.SetName("basic_st/backtrace-off");
+    logger.GetCore()->SetSynchronousMode(false); // We do not need synchronous mode.
     fs->SetFormatter(MakeMsgFormatter("{}", formatting::MSG));
 
     auto start = high_resolution_clock::now();
@@ -381,11 +389,12 @@ void bench_st(int howmany) {
     auto [fs, file_name] = make_sink();
     Logger logger(fs);
     logger.SetName("basic_st/backtrace-off");
+    logger.GetCore()->SetSynchronousMode(false); // We do not need synchronous mode.
     fs->SetFormatter(MakeMsgFormatter("{}", formatting::MSG));
 
     auto start = high_resolution_clock::now();
     for (auto i = 0; i < howmany; ++i) {
-      LOG_SEV_TO(logger, Info) << "Hello logger: msg number " << i;;
+      LOG_SEV_TO(logger, Info) << "Hello logger: msg number " << i;
     }
     auto delta_d = duration_cast<duration<double>>(high_resolution_clock::now() - start).count();
     LOG_SEV(Info) << "MsgFormatter, with msg, no header:" << PadUntil(pad_width) << "Elapsed: " << delta_d
@@ -409,6 +418,7 @@ void bench_st(int howmany) {
     auto fs = NewSink<EmptySink, UnlockedSink>();
     Logger logger(fs);
     logger.SetName("basic_st/backtrace-off");
+    logger.GetCore()->SetSynchronousMode(false); // We do not need synchronous mode.
     fs->SetFormatter(MakeMsgFormatter("[{}] [{}] [{}] {}",
                                       formatting::DateTimeAttributeFormatter{},
                                       formatting::LoggerNameAttributeFormatter{},
@@ -428,6 +438,7 @@ void bench_st(int howmany) {
     auto fs = NewSink<TrivialDispatchSink, UnlockedSink>();
     Logger logger(fs);
     logger.SetName("basic_st/backtrace-off");
+    logger.GetCore()->SetSynchronousMode(false); // We do not need synchronous mode.
     fs->SetFormatter(MakeMsgFormatter("[{}] [{}] [{}] {}",
                                       formatting::DateTimeAttributeFormatter{},
                                       formatting::LoggerNameAttributeFormatter{},
@@ -447,6 +458,7 @@ void bench_st(int howmany) {
     std::string file_name = "logs/lightning_basic_st-nonformatting.log";
     auto fs = NewSink<FileSink, UnlockedSink>(file_name);
     Logger logger(fs);
+    logger.GetCore()->SetSynchronousMode(false); // We do not need synchronous mode.
     fs->SetFormatter(MakeMsgFormatter(
         "[2023-06-26 20:33:50.539002] [basic_st/backtrace-off] [Info   ] Hello logger: msg number {}",
         formatting::MSG));
@@ -464,6 +476,7 @@ void bench_st(int howmany) {
     std::string file_name = "logs/lightning_basic_st-format-date.log";
     auto fs = NewSink<FileSink, UnlockedSink>(file_name);
     Logger logger(fs);
+    logger.GetCore()->SetSynchronousMode(false); // We do not need synchronous mode.
     fs->SetFormatter(MakeMsgFormatter("[{}] [basic_st/backtrace-off] [Info   ] {}",
                                       formatting::DateTimeAttributeFormatter{},
                                       formatting::MSG));
@@ -483,6 +496,7 @@ void bench_st_types(int howmany) {
     auto fs = NewSink<FileSink, UnlockedSink>("logs/lightning_basic_st-types.log");
     Logger logger(fs);
     logger.SetName("basic_st/backtrace-off");
+    logger.GetCore()->SetSynchronousMode(false); // We do not need synchronous mode.
     fs->SetFormatter(MakeMsgFormatter("[{}] [{}] [{}] {}",
                                       formatting::DateTimeAttributeFormatter{},
                                       formatting::LoggerNameAttributeFormatter{},
@@ -666,6 +680,7 @@ void bench_nonaccepting(int howmany) {
     fs->GetFilter().Accept({Severity::Error});
     Logger logger(fs);
     logger.SetName("basic_st/backtrace-off");
+    logger.GetCore()->SetSynchronousMode(false); // We do not need synchronous mode.
     fs->SetFormatter(MakeMsgFormatter("[{}] [{}] [{}] {}",
                                       formatting::DateTimeAttributeFormatter{},
                                       formatting::LoggerNameAttributeFormatter{},
@@ -686,6 +701,7 @@ void bench_nonaccepting(int howmany) {
     Logger logger(fs);
     logger.GetCore()->GetFilter().Accept({Severity::Error});
     logger.SetName("basic_st/backtrace-off");
+    logger.GetCore()->SetSynchronousMode(false); // We do not need synchronous mode.
     fs->SetFormatter(MakeMsgFormatter("[{}] [{}] [{}] {}",
                                       formatting::DateTimeAttributeFormatter{},
                                       formatting::LoggerNameAttributeFormatter{},
@@ -929,15 +945,6 @@ void bench_fmtdatetime(int howmany) {
                            x.GetMinute(),
                            x.GetSecond(),
                            x.GetMicrosecond());
-//      formatting::FormatTo(buffer, settings,
-//                           "{}-{}-{} {}:{}:{}.{}",
-//                           2023,
-//                           1,
-//                           3,
-//                           12,
-//                           34,
-//                           12,
-//                           34'567);
     }
     auto delta_d = duration_cast<duration<double>>(high_resolution_clock::now() - start).count();
     LOG_SEV(Info) << "Format date (FormatTo):" << PadUntil(pad_width) << "Elapsed: " << delta_d << " secs "
@@ -962,6 +969,7 @@ void bench_mt(int howmany, std::size_t thread_count) {
   {
     auto fs = SynchronousSink::From<FileSink>("logs/lightning_basic_mt.log");
     Logger logger(fs);
+    logger.GetCore()->SetSynchronousMode(false); // We still do not need synchronous mode.
     fs->SetFormatter(formatting::MakeMsgFormatter("[{}] [basic_mt/backtrace-off] [{}] {}",
                                                   formatting::DateTimeAttributeFormatter{},
                                                   formatting::SeverityAttributeFormatter{},
@@ -980,7 +988,7 @@ void bench_mt(int howmany, std::size_t thread_count) {
 
     for (auto& t: threads) {
       t.join();
-    };
+    }
 
     auto delta_d = duration_cast<duration<double>>(high_resolution_clock::now() - start).count();
     LOG_SEV(Info) << "Same logger:" << PadUntil(pad_width) << "Elapsed: " << delta_d << " secs "
@@ -1010,7 +1018,7 @@ void bench_mt(int howmany, std::size_t thread_count) {
 
     for (auto& t: threads) {
       t.join();
-    };
+    }
 
     auto delta_d = duration_cast<duration<double>>(high_resolution_clock::now() - start).count();
     LOG_SEV(Info) << "Multiple loggers, same sink:" << PadUntil(pad_width) << "Elapsed: " << delta_d
@@ -1043,7 +1051,7 @@ void bench_mt(int howmany, std::size_t thread_count) {
 
     for (auto& t: threads) {
       t.join();
-    };
+    }
 
     auto delta_d = duration_cast<duration<double>>(high_resolution_clock::now() - start).count();
     LOG_SEV(Info) << "Multiple threads, multiple loggers:" << PadUntil(pad_width) << "Elapsed: " << delta_d
