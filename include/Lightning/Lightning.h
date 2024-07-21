@@ -29,6 +29,7 @@ SOFTWARE.
 #include <algorithm>
 #include <charconv>
 #include <chrono>
+#include <csignal>
 #include <cstring>  // For std::strlen, std::memcpy, etc.
 #include <fstream>
 #include <iostream>
@@ -358,7 +359,7 @@ public:
   }
 
   //! \brief Append the contents of another buffer to this buffer.
-  void Append(const BasicMemoryBuffer<T>& other) { Append(other.data_, other.data_ + other.size_); }
+  void Append(const BasicMemoryBuffer& other) { Append(other.data_, other.data_ + other.size_); }
 
 #ifdef __cpp_lib_span
   //! \brief Append a span of values to the buffer.
@@ -1845,8 +1846,15 @@ struct FormattingSettings {
   //! \brief How to terminate the message, e.g. with a newline.
   std::string message_terminator = "\n";
 
+  // TODO: The above settings are how to format a record, the below settings are how a sink behaves.
+  //       Consider separating these into two different structures.
+
   //! \brief Whether the sink frontend should format the record to a string and pass that to the backend.
   bool needs_formatting = true;
+
+  //! \brief Whether the sink would accept and use a preformatted record. If false, the sink backend wants the
+  //!        record to be formatted using its specific settings every time.
+  bool accepts_preformatted = true;
 };
 
 //! \brief  The base class for all message segments.
@@ -3211,7 +3219,7 @@ public:
     if (attributes.basic_attributes.time_stamp) {
       auto& dt = attributes.basic_attributes.time_stamp.value();
       auto [start, end] = buffer.Allocate(26);
-      formatting::FormatDateTo(start, end, dt);
+      FormatDateTo(start, end, dt);
     }
   }
 };
@@ -3318,19 +3326,35 @@ inline unsigned CalculateMessageIndentation(const char* buffer_end, const Messag
   return CountNonAnsiSequenceCharacters(c, buffer_end);
 }
 
-//! \brief  Base class for message formatters, objects capable of taking a record and formatting it into a
-//!         string, according to the formatting settings.
+//! \brief Base class for message formatters, objects capable of taking a record and formatting it into a
+//!        string, according to the formatting settings.
 class BaseMessageFormatter {
 public:
   virtual ~BaseMessageFormatter() = default;
 
   //! \brief Format the record into a buffer, given the formatting settings.
-  virtual void Format(const Record& record,
-                      const FormattingSettings& sink_settings,
-                      memory::BasicMemoryBuffer<char>& buffer) const = 0;
+  //!
+  //! \param record The record to format.
+  //! \param sink_settings The settings for formatting the message.
+  //! \param buffer The buffer to write the formatted message into.
+  //! \param formatted_msg If the message has already been formatted, this is a pointer to the buffer
+  //!                      containing the formatted message, otherwise, a nullptr.
+  void Format(const Record& record,
+              const FormattingSettings& sink_settings,
+              memory::BasicMemoryBuffer<char>& buffer,
+              const memory::BasicMemoryBuffer<char>* formatted_msg = {}) const {
+    format(record, sink_settings, buffer, formatted_msg);
+  }
 
   //! \brief Make a deep copy of the message formatter.
   NO_DISCARD virtual std::unique_ptr<BaseMessageFormatter> Copy() const = 0;
+
+protected:
+  //! \brief Private implementation of the format method.
+  virtual void format(const Record& record,
+                      const FormattingSettings& sink_settings,
+                      memory::BasicMemoryBuffer<char>& buffer,
+                      const memory::BasicMemoryBuffer<char>* formatted_msg) const = 0;
 };
 
 //! \brief Object used to represent a placeholder for the logging message.
@@ -3383,14 +3407,17 @@ public:
                                                           << literals_.size());
   }
 
-  void Format(const Record& record,
+
+private:
+  void format(const Record& record,
               const FormattingSettings& sink_settings,
-              memory::BasicMemoryBuffer<char>& buffer) const override {
+              memory::BasicMemoryBuffer<char>& buffer,
+              const memory::BasicMemoryBuffer<char>* formatted_msg) const override {
     MessageInfo msg_info {};
     msg_info.needs_message_indentation = record.Bundle().NeedsMessageIndentation();
 
     // Format all the segments.
-    format<0>(buffer, record, sink_settings, msg_info);
+    format<0>(buffer, record, sink_settings, formatted_msg, msg_info);
     // Add the terminator.
     AppendBuffer(buffer, sink_settings.message_terminator);
   }
@@ -3399,11 +3426,11 @@ public:
     return std::unique_ptr<BaseMessageFormatter>(new MsgFormatter(*this));
   }
 
-private:
   template<std::size_t N>
   void format(memory::BasicMemoryBuffer<char>& buffer,
               [[maybe_unused]] const Record& record,
               [[maybe_unused]] const FormattingSettings& sink_settings,
+              const memory::BasicMemoryBuffer<char>* formatted_msg,
               MessageInfo& msg_info) const {
     // First, the next literal segment.
     AppendBuffer(buffer, literals_[N]);
@@ -3412,25 +3439,33 @@ private:
     if constexpr (N != sizeof...(Types)) {
       // Then the formatter from the slot.
       if constexpr (std::is_same_v<MSG_t, std::tuple_element_t<N, decltype(formatters_)>>) {
-        // Since this calculation can take some time, only calculate if needed.
-        if (msg_info.needs_message_indentation) {
-          // At this point, we can calculate the true message indentation by looking for the last newline
-          // (if any), and not counting escape characters.
-          msg_info.message_indentation = CalculateMessageIndentation(buffer.End(), msg_info);
+        // If the message was already formatted, just append it.
+        if (formatted_msg) {
+          buffer.Append(*formatted_msg);
         }
+        // Otherwise, we have to do the work.
         else {
-          msg_info.message_indentation = 0u;
+          // Since this calculation can take some time, only calculate if needed.
+          if (msg_info.needs_message_indentation) {
+            // At this point, we can calculate the true message indentation by looking for the last newline
+            // (if any), and not counting escape characters.
+            msg_info.message_indentation = CalculateMessageIndentation(buffer.End(), msg_info);
+          }
+          else {
+            msg_info.message_indentation = 0u;
+          }
+          // Bundle's FmtString function will set msg_info.is_in_message_segment to true, so we don't need to
+          // here.
+          record.Bundle().FmtString(sink_settings, buffer, msg_info);
         }
-        // Bundle's FmtString function will set msg_info.is_in_message_segment to true, so we don't need to
-        // here.
-        record.Bundle().FmtString(sink_settings, buffer, msg_info);
       }
       else {
         std::get<N>(formatters_).AddToBuffer(record.Attributes(), sink_settings, msg_info, buffer);
-        msg_info.total_length = static_cast<unsigned>(buffer.Size());
       }
+      msg_info.total_length = static_cast<unsigned>(buffer.Size());
+
       // Recursively format the next literal and (if it does not terminate) segment.
-      format<N + 1>(buffer, record, sink_settings, msg_info);
+      format<N + 1>(buffer, record, sink_settings, formatted_msg, msg_info);
     }
   }
 
@@ -3459,17 +3494,6 @@ inline auto MakeStandardFormatter() {
 //!        record.
 class FormatterBySeverity final : public BaseMessageFormatter {
 public:
-  void Format(const Record& record,
-              const FormattingSettings& sink_settings,
-              memory::BasicMemoryBuffer<char>& buffer) const override {
-    // Format all the segments.
-    if (const auto* formatter = getFormatter(record.Attributes().basic_attributes.level)) {
-      MessageInfo msg_info {};
-      msg_info.needs_message_indentation = record.Bundle().NeedsMessageIndentation();
-      formatter->Format(record, sink_settings, buffer);
-    }
-  }
-
   NO_DISCARD std::unique_ptr<BaseMessageFormatter> Copy() const override {
     auto formatter = std::make_unique<FormatterBySeverity>();
     for (auto i = 0u; i < 7; ++i) {
@@ -3513,6 +3537,18 @@ public:
   }
 
 private:
+  void format(const Record& record,
+              const FormattingSettings& sink_settings,
+              memory::BasicMemoryBuffer<char>& buffer,
+              const memory::BasicMemoryBuffer<char>* formatted_msg) const override {
+    // Format all the segments.
+    if (const auto* formatter = getFormatter(record.Attributes().basic_attributes.level)) {
+      MessageInfo msg_info {};
+      msg_info.needs_message_indentation = record.Bundle().NeedsMessageIndentation();
+      formatter->Format(record, sink_settings, buffer, formatted_msg);
+    }
+  }
+
   //! \brief A function that, given the severity level, returns the formatter for that level.
   //! If the severity is not recognized, returns the default formatter.
   NO_DISCARD const BaseMessageFormatter* getFormatter(std::optional<Severity> severity) const {
@@ -3541,32 +3577,6 @@ public:
   //! \brief The default record formatter just prints the message.
   RecordFormatter() { AddMsgSegment(); }
 
-  void Format(const Record& record,
-              const FormattingSettings& sink_settings,
-              memory::BasicMemoryBuffer<char>& buffer) const override {
-    MessageInfo msg_info {};
-    for (const auto& formatter : formatters_) {
-      switch (formatter.index()) {
-        default:
-        case 0: {
-          // TODO: Update for LogNewLine type alignment.
-          record.Bundle().FmtString(sink_settings, buffer, msg_info);
-          break;
-        }
-        case 1: {
-          std::get<1>(formatter)->AddToBuffer(record.Attributes(), sink_settings, msg_info, buffer);
-          break;
-        }
-        case 2: {
-          AppendBuffer(buffer, std::get<2>(formatter));
-          break;
-        }
-      }
-    }
-    // Add terminator.
-    AppendBuffer(buffer, sink_settings.message_terminator);
-  }
-
   NO_DISCARD std::unique_ptr<BaseMessageFormatter> Copy() const override {
     return std::unique_ptr<BaseMessageFormatter>(new RecordFormatter(*this));
   }
@@ -3594,6 +3604,38 @@ public:
   NO_DISCARD std::size_t NumSegments() const { return formatters_.size(); }
 
 private:
+  void format(const Record& record,
+              const FormattingSettings& sink_settings,
+              memory::BasicMemoryBuffer<char>& buffer,
+              const memory::BasicMemoryBuffer<char>* formatted_msg) const override {
+    MessageInfo msg_info {};
+    for (const auto& formatter : formatters_) {
+      switch (formatter.index()) {
+        default:
+        case 0: {  // Message.
+          if (formatted_msg) {
+            buffer.Append(*formatted_msg);
+          }
+          else {
+            // TODO: Update for LogNewLine type alignment.
+            record.Bundle().FmtString(sink_settings, buffer, msg_info);
+          }
+          break;
+        }
+        case 1: {  // AttributeFormatter
+          std::get<1>(formatter)->AddToBuffer(record.Attributes(), sink_settings, msg_info, buffer);
+          break;
+        }
+        case 2: {  // String.
+          AppendBuffer(buffer, std::get<2>(formatter));
+          break;
+        }
+      }
+    }
+    // Add terminator.
+    AppendBuffer(buffer, sink_settings.message_terminator);
+  }
+
   std::vector<std::variant<MSG_t, std::shared_ptr<AttributeFormatter>, std::string>> formatters_;
 };
 
@@ -3719,12 +3761,14 @@ using SinkCallback = std::function<void(const memory::BasicMemoryBuffer<char>& b
 //!        doing something with it. Not responsible for thread synchronization, this is the job of the
 //!        frontend.
 class SinkBackend {
+  friend class Sink;
+
 public:
   //! \brief Flush the sink upon deletion.
   virtual ~SinkBackend() { Flush(); }
 
   //! \brief Dispatch a record.
-  void Dispatch(memory::BasicMemoryBuffer<char>& buffer, const Record& record) {
+  void Dispatch(const memory::BasicMemoryBuffer<char>& buffer, const Record& record) {
     if (callback_) {
       // If there is a callback, call it.
       callback_(buffer, record);
@@ -3798,10 +3842,13 @@ public:
 
 protected:
   //! \brief Private dispatch implementation.
-  virtual void dispatch(memory::BasicMemoryBuffer<char>& buffer, const Record& record) = 0;
+  virtual void dispatch(const memory::BasicMemoryBuffer<char>& buffer, const Record& record) = 0;
 
   //! \brief Protected implementation of flushing the sink.
-  virtual void flush() {}
+  virtual void flush() { flushLockFree(); }
+
+  //! \brief Protected implementation of flushing the sink, must be without locking.
+  virtual void flushLockFree() {}
 
   NO_DISCARD std::optional<flush::FlushHandler> copyFlushHandler() const {
     return flush_handler_ ? std::optional(flush_handler_->Clone()) : std::nullopt;
@@ -3929,6 +3976,8 @@ private:
 //! \brief Base class for sink frontends. These are responsible for common tasks, like filtering
 //!        and controlling access to the sink backend, i.e. synchronization.
 class Sink {
+  friend class Core;
+
 public:
   //! \brief Construct a sink around a specific backend.
   explicit Sink(std::unique_ptr<SinkBackend>&& backend)
@@ -3949,7 +3998,12 @@ public:
   filter::AttributeFilter& GetFilter() { return filter_; }
 
   //! \brief Dispatch a record.
-  virtual void Dispatch(const Record& record) { dispatch(record); }
+  virtual void Dispatch(const Record& record) { dispatch(record, nullptr); }
+
+  //! \brief Dispatch a record, given the pre-formatted record.
+  virtual void Dispatch(const Record& record, const memory::BasicMemoryBuffer<char>& buffer) {
+    dispatch(record, &buffer);
+  }
 
   // ==============================================================================================
   //  Pass-through methods to the backend.
@@ -4012,8 +4066,8 @@ public:
   }
 
 protected:
-  //! \brief Private virtual record dispatch method.
-  virtual void dispatch(const Record& record) = 0;
+  //! \brief Private virtual dispatch method for a pre-formatted message.
+  virtual void dispatch(const Record& record, const memory::BasicMemoryBuffer<char>* formatted_msg) = 0;
 
   //! \brief Private implementation of the clone method.
   NO_DISCARD virtual std::shared_ptr<Sink> clone() const = 0;
@@ -4021,6 +4075,12 @@ protected:
   //! \brief Get the sink backend, wrapped in a SinkWrapper. The default implementation does not lock the
   //!        sink, since the Sink base class has no mutex.
   virtual ObjectWrapper<Sink> getLockedSink() { return ObjectWrapper(this); }
+
+  void flushLockFree() const {
+    if (sink_backend_) {
+      sink_backend_->flushLockFree();
+    }
+  }
 
   //! \brief The sink backend, to which the frontend feeds record.
   std::unique_ptr<SinkBackend> sink_backend_ {};
@@ -4051,10 +4111,18 @@ public:
   }
 
 private:
-  void dispatch(const Record& record) override {
+  void dispatch(const Record& record, const memory::BasicMemoryBuffer<char>* formatted_msg) override {
+    const auto& settings = sink_backend_->GetFormattingSettings();
+
+    // If the formatted message was already provided, pass that in.
+    if (formatted_msg && settings.accepts_preformatted) {
+      sink_backend_->Dispatch(*formatted_msg, record);
+      return;
+    }
+
     memory::MemoryBuffer<char> buffer;
-    if (sink_backend_->GetFormattingSettings().needs_formatting) {
-      formatter_->Format(record, sink_backend_->GetFormattingSettings(), buffer);
+    if (settings.needs_formatting) {
+      formatter_->Format(record, sink_backend_->GetFormattingSettings(), buffer, formatted_msg);
     }
     sink_backend_->Dispatch(buffer, record);
   }
@@ -4085,12 +4153,20 @@ public:
   }
 
 private:
-  void dispatch(const Record& record) override {
+  void dispatch(const Record& record, const memory::BasicMemoryBuffer<char>* formatted_msg) override {
     memory::MemoryBuffer<char> buffer;
+
+    // If the formatted message was already provided, pass that in.
+    const auto& settings = sink_backend_->GetFormattingSettings();
+    if (formatted_msg && settings.accepts_preformatted) {
+      sink_backend_->Dispatch(*formatted_msg, record);
+      return;
+    }
+
     // Technically, there could be some small asynchrony issue here with needs formatting being changed by
     // another thread, but not only is it unlikely, it cannot cause any deadlocks.
-    if (sink_backend_->GetFormattingSettings().needs_formatting) {
-      formatter_->Format(record, sink_backend_->GetFormattingSettings(), buffer);
+    if (settings.needs_formatting) {
+      formatter_->Format(record, sink_backend_->GetFormattingSettings(), buffer, formatted_msg);
     }
     {
       std::unique_lock guard(lock_);
@@ -4126,14 +4202,16 @@ std::shared_ptr<Frontend_t> NewSink(Args_t&&... args) {
 //! Synchonous mode is on by default, and can be turned on or off after initialization.
 class Core {
 public:
+  friend class Global;
+
+  virtual ~Core() = default;
+
   //! \brief Construct the core with a particular mode (synchronous by default).
   explicit Core(bool synchronous_mode = true)
       : synchronous_mode_(synchronous_mode) {}
 
   //! \brief Set the synchronicity mode of the Core.
-  void SetSynchronousMode(bool synchronous_mode) {
-    synchronous_mode_ = synchronous_mode;
-  }
+  void SetSynchronousMode(bool synchronous_mode) { synchronous_mode_ = synchronous_mode; }
 
   //! \brief Check whether at least one sink would accept the record.
   bool WillAccept(const RecordAttributes& attributes) {
@@ -4168,11 +4246,7 @@ public:
   //! \brief Dispatch a ref bundle to the sinks.
   void Dispatch(const Record& record) const {
     locks::PotentiallySharedLock guard(lock_, synchronous_mode_);
-    for (auto& sink : sinks_) {
-      if (sink->WillAccept(record.Attributes())) {
-        sink->Dispatch(record);
-      }
-    }
+    dispatch(record);
   }
 
   //! \brief Add a sink to the core.
@@ -4235,7 +4309,6 @@ public:
   template<typename Func_t>
   Core& ApplyToAllSink(Func_t&& func) {
     locks::PotentiallySharedLock guard(lock_, synchronous_mode_);
-    // std::shared_lock guard(lock_);
     std::for_each(sinks_.begin(), sinks_.end(), [f = std::forward<Func_t>(func)](auto& sink) {
       auto locked_sink = sink->GetLockedSink();
       f(*sink);
@@ -4261,8 +4334,8 @@ public:
 
   //! \brief Make a deep copy of the core, including deep copies of all sinks.
   NO_DISCARD std::shared_ptr<Core> Clone() const {
-    locks::PotentiallySharedLock guard(lock_, synchronous_mode_);
     auto core = std::make_shared<Core>();
+    locks::PotentiallySharedLock guard(lock_, synchronous_mode_);
     core->core_filter_ = core_filter_;
     for (const auto& sink : sinks_) {
       core->sinks_.emplace_back(sink->GetLockedSink()->Clone());
@@ -4282,7 +4355,27 @@ public:
     return true;
   }
 
+protected:
+  //! \brief Dispatch method, protected implementation.
+  //!
+  //! By default, dispatch is done by dispatching to every sink.
+  virtual void dispatch(const Record& record) const {
+    for (auto& sink : sinks_) {
+      if (sink->WillAccept(record.Attributes())) {
+        sink->Dispatch(record);
+      }
+    }
+  }
+
 private:
+  //! \brief A function that flushes all sinks without locking. This is for use by the signal handler, since
+  //!        it is UB for the signal handler to call functions that use locks.
+  void flushLockFree() {
+    for (auto& sink : sinks_) {
+      sink->flushLockFree();
+    }
+  }
+
   //! \brief All sinks the core will dispatch messages to.
   std::vector<std::shared_ptr<Sink>> sinks_;
 
@@ -4300,6 +4393,39 @@ private:
   //! long as you don't do something like add or remove sinks while also logging, or add sinks from multiple
   //! threads simultaneously.
   bool synchronous_mode_;
+};
+
+class FormattingCore : public Core {
+public:
+  explicit FormattingCore(std::unique_ptr<formatting::BaseMessageFormatter>&& formatter,
+                          bool synchronous_mode = false)
+      : Core(synchronous_mode)
+      , formatter_(std::move(formatter)) {}
+
+  void SetFormatter(std::unique_ptr<formatting::BaseMessageFormatter>&& formatter) {
+    formatter_ = std::move(formatter);
+  }
+
+protected:
+  //! \brief Dispatch method, protected implementation.
+  //!
+  //! By default, dispatch is done by dispatching to every sink.
+  void dispatch(const Record& record) const override {
+    // Format the message.
+    memory::MemoryBuffer<char> buffer;
+    formatter_->Format(record, formatting_settings_, buffer);
+    // Pass the formatted record into the sinks as well.
+    for (auto& sink : GetSinks()) {
+      if (sink->WillAccept(record.Attributes())) {
+        sink->Dispatch(record, buffer);
+      }
+    }
+  }
+
+  FormattingSettings formatting_settings_;
+
+  //! \brief The sink's formatter.
+  std::unique_ptr<formatting::BaseMessageFormatter> formatter_;
 };
 
 // ==============================================================================
@@ -4476,7 +4602,7 @@ public:
   //!
   //! This not only copies the logger, but clones the core and all sinks.
   NO_DISCARD Logger Clone() const {
-    auto core = core_ ? core_->Clone() : nullptr;
+    auto core = HasCore() ? core_->Clone() : nullptr;
     return Logger(*this).SetCore(std::move(core));
   }
 
@@ -4504,7 +4630,7 @@ public:
   NO_DISCARD std::unique_ptr<SinkBackend> Clone() const override { return std::make_unique<EmptySink>(); }
 
 private:
-  void dispatch(memory::BasicMemoryBuffer<char>&, const Record&) override {}
+  void dispatch(const memory::BasicMemoryBuffer<char>&, const Record&) override {}
 };
 
 //! \brief A sink, used for testing, that formats a record, but does not stream the result anywhere.
@@ -4517,7 +4643,7 @@ public:
   }
 
 private:
-  void dispatch([[maybe_unused]] memory::BasicMemoryBuffer<char>& buffer,
+  void dispatch([[maybe_unused]] const memory::BasicMemoryBuffer<char>& buffer,
                 [[maybe_unused]] const Record& record) override {}
 };
 
@@ -4535,14 +4661,14 @@ public:
   }
 
 private:
-  void dispatch([[maybe_unused]] memory::BasicMemoryBuffer<char>& buffer,
+  void dispatch([[maybe_unused]] const memory::BasicMemoryBuffer<char>& buffer,
                 [[maybe_unused]] const Record& record) override {
     if (!buffer.Empty()) {
       fout_.write(buffer.Data(), static_cast<std::streamsize>(buffer.Size()));
     }
   }
 
-  void flush() override { fout_.flush(); }
+  void flushLockFree() override { fout_.flush(); }
 
   std::ofstream fout_;
   std::string filename_;
@@ -4557,14 +4683,14 @@ public:
   NO_DISCARD std::unique_ptr<SinkBackend> Clone() const override { return std::make_unique<StdoutSink>(); }
 
 private:
-  void dispatch([[maybe_unused]] memory::BasicMemoryBuffer<char>& buffer,
+  void dispatch([[maybe_unused]] const memory::BasicMemoryBuffer<char>& buffer,
                 [[maybe_unused]] const Record& record) override {
     if (!buffer.Empty()) {
       std::cout.write(buffer.Data(), static_cast<std::streamsize>(buffer.Size()));
     }
   }
 
-  void flush() override { std::cout.flush(); }
+  void flushLockFree() override { std::cout.flush(); }
 };
 
 //! \brief A sink that writes to an ostream.
@@ -4589,16 +4715,19 @@ public:
   std::ostream& GetStream() { return *out_; }  // NOLINT - Function should not be const
 
 private:
-  void dispatch([[maybe_unused]] memory::BasicMemoryBuffer<char>& buffer,
+  void dispatch([[maybe_unused]] const memory::BasicMemoryBuffer<char>& buffer,
                 [[maybe_unused]] const Record& record) override {
     if (!buffer.Empty()) {
       out_->write(buffer.Data(), static_cast<std::streamsize>(buffer.Size()));
     }
   }
 
-  void flush() override { out_->flush(); }
+  void flushLockFree() override { out_->flush(); }
 
-  //! \brief A reference to the stream to write to.
+  //! \brief Shared pointer to a stream.
+  //!
+  //! This is not a reference because that makes it to easy to have a reference to an object past its
+  //! lifetime, like if you add a stream sink to the global core.
   std::shared_ptr<std::ostream> out_;
 };
 
@@ -4606,24 +4735,25 @@ private:
 //  Global logger.
 // ==============================================================================
 
-//! \brief  The global interface for logging.
+// Declare LightningFlushAllHandler, so we can make it a friend even though it is extern "C".
+extern "C" void LightningFlushAllHandler(int sig);
+
+//! \brief The global interface for logging.
 class Global {
 public:
   Global() = delete;
 
   //! \brief Get the global core.
   static std::shared_ptr<Core> GetCore() {
-    if (!global_core_) {
-      global_core_ = std::make_shared<Core>();
-    }
+    static std::once_flag flag;
+    std::call_once(flag, [&]() { global_core_ = std::make_shared<Core>(); });
     return global_core_;
   }
 
   //! \brief Get the global logger.
   static Logger& GetLogger() {
-    if (!logger_) {
-      logger_ = Logger(GetCore());
-    }
+    static std::once_flag flag;
+    std::call_once(flag, [&]() { logger_ = Logger(GetCore()); });
     return *logger_;
   }
 
@@ -4634,7 +4764,15 @@ public:
     static_cast<void>(core->Flush());
   }
 
+  friend void LightningFlushAllHandler(int sig);
+
 private:
+  static void flushLockFree() {
+    if (global_core_) {
+      global_core_->flushLockFree();
+    }
+  }
+
   inline static std::shared_ptr<Core> global_core_ = {};
   inline static std::optional<Logger> logger_ {};
 };
@@ -4667,6 +4805,25 @@ private:
 //! \brief Get a logging handler for a specific logger.
 #define LOG_HANDLER_FOR(logger, severity) \
   (logger).LogWithLocation(::lightning::Severity::severity, __FILE__, LL_CURRENT_FUNCTION, __LINE__)
+
+//! \brief Function for use as a signal handler.
+//!
+//! See, e.g., https://en.cppreference.com/w/cpp/utility/program/signal for how to install signal handlers.
+//! This function calls the lock-free function since you should not call code with locks from a signal
+//! handler.
+extern "C" inline void LightningFlushAllHandler([[maybe_unused]] int sig) {
+  Global::flushLockFree();
+}
+
+//! \brief Set the flush handler to be `LightningFlushAllHandler` for all signals.
+inline void LightningSetAllSignalHandlers() {
+  std::signal(SIGTERM, LightningFlushAllHandler);
+  std::signal(SIGSEGV, LightningFlushAllHandler);
+  std::signal(SIGINT, LightningFlushAllHandler);
+  std::signal(SIGILL, LightningFlushAllHandler);
+  std::signal(SIGABRT, LightningFlushAllHandler);
+  std::signal(SIGFPE, LightningFlushAllHandler);
+}
 
 // ==============================================================================
 //  Formatting functions.
@@ -4839,6 +4996,7 @@ void formatTo(memory::BasicMemoryBuffer<char>& buffer,
                           msg_info,
                           std::make_index_sequence<sizeof...(args)> {});
 }
+
 }  // namespace detail
 
 //! \brief Format data to a memory buffer. This is the main formatting function.

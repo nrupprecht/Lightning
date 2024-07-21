@@ -183,7 +183,7 @@ void bench_st(int howmany) {
 
 void bench_st_types(int howmany) {
   auto make_logger = []() {
-    auto fs = UnlockedSink::From<FileSink>("logs/lightning_basic_st-types.log");
+    const auto fs = UnlockedSink::From<FileSink>("logs/lightning_basic_st-types.log");
     Logger logger(fs);
     logger.SetName("basic_st/backtrace-off");
     logger.GetCore()->SetSynchronousMode(false); // We do not need synchronous mode.
@@ -199,7 +199,7 @@ void bench_st_types(int howmany) {
   {
     auto logger = make_logger();
     auto start = high_resolution_clock::now();
-    const char message[] = "Message";
+    constexpr char message[] = "Message";
     for (auto i = 0; i < howmany; ++i) {
       LOG_SEV_TO(logger, Info) << "Hello logger: writing data " << message;
     }
@@ -303,7 +303,7 @@ void bench_st_types(int howmany) {
     AddRow("Bool", delta_d, howmany);
   }
 
-  // Float
+  // Double
   {
     auto logger = make_logger();
     auto start = high_resolution_clock::now();
@@ -353,7 +353,7 @@ void bench_st_types(int howmany) {
 
 void bench_nonaccepting(int howmany) {
   {
-    auto fs = UnlockedSink::From<FileSink>("logs/lightning_basic_st_nonaccepting.log");
+    const auto fs = UnlockedSink::From<FileSink>("logs/lightning_basic_st_nonaccepting.log");
     fs->GetFilter().Accept({Severity::Error});
     Logger logger(fs);
     logger.SetName("basic_st/backtrace-off");
@@ -372,7 +372,7 @@ void bench_nonaccepting(int howmany) {
     AddRow("Non-accepting sink", delta_d, howmany);
   }
   {
-    auto fs = UnlockedSink::From<FileSink>("logs/lightning_basic_st_nonaccepting.log");
+    const auto fs = UnlockedSink::From<FileSink>("logs/lightning_basic_st_nonaccepting.log");
     Logger logger(fs);
     logger.GetCore()->GetFilter().Accept({Severity::Error});
     logger.SetName("basic_st/backtrace-off");
@@ -392,7 +392,7 @@ void bench_nonaccepting(int howmany) {
   }
 
   {
-    auto fs = NewSink<FileSink, UnlockedSink>("logs/lightning_basic_st_nocore.log");
+    const auto fs = NewSink<FileSink, UnlockedSink>("logs/lightning_basic_st_nocore.log");
     Logger logger(NoCore);
     logger.SetName("basic_st/backtrace-off");
     fs->SetFormatter(MakeMsgFormatter("[{}] [{}] [{}] {}",
@@ -412,7 +412,7 @@ void bench_nonaccepting(int howmany) {
 
 void bench_mt(int howmany, std::size_t thread_count) {
   {
-    auto fs = UnlockedSink::From<FileSink>("logs/lightning_basic_mt.log");
+    const auto fs = UnlockedSink::From<FileSink>("logs/lightning_basic_mt.log");
     Logger logger(fs);
     logger.SetName("basic_mt/backtrace-off");
     logger.GetCore()->SetSynchronousMode(false); // We do not need synchronous mode.
@@ -424,9 +424,9 @@ void bench_mt(int howmany, std::size_t thread_count) {
 
     std::vector<std::thread> threads;
     threads.reserve(thread_count);
-    auto start = high_resolution_clock::now();
+    const auto start = high_resolution_clock::now();
     for (size_t t = 0; t < thread_count; ++t) {
-      threads.emplace_back([&]() {
+      threads.emplace_back([&howmany, &thread_count, &logger] {
         for (int j = 0; j < howmany / static_cast<int>(thread_count); ++j) {
           LOG_SEV_TO(logger, Info) << "Hello logger: msg number " << j;
         }
@@ -435,9 +435,9 @@ void bench_mt(int howmany, std::size_t thread_count) {
 
     for (auto& t : threads) {
       t.join();
-    };
+    }
 
-    auto delta_d = duration_cast<duration<double>>(high_resolution_clock::now() - start).count();
+    const auto delta_d = duration_cast<duration<double>>(high_resolution_clock::now() - start).count();
     AddRow("One logger, multiple threads", delta_d, howmany);
   }
   {
@@ -450,23 +450,23 @@ void bench_mt(int howmany, std::size_t thread_count) {
 
     std::vector<std::thread> threads;
     threads.reserve(thread_count);
-    auto start = high_resolution_clock::now();
+    const auto start = high_resolution_clock::now();
     for (size_t t = 0; t < thread_count; ++t) {
-      threads.emplace_back([&, t]() {
+      threads.emplace_back([&fs, &howmany, &thread_count, t] {
         Logger logger(fs);
         logger.SetName("basic_mt/logger-" + std::to_string(t));
         logger.GetCore()->SetSynchronousMode(false); // We do not need synchronous mode.
         for (int j = 0; j < howmany / static_cast<int>(thread_count); ++j) {
-          LOG_SEV_TO(logger, Info) << "Hello logger " << std::this_thread::get_id() << ": msg number " << j;
+          LOG_SEV_TO(logger, Info) << "Hello logger " << GetThreadID() << ": msg number " << j;
         }
       });
     }
 
     for (auto& t : threads) {
       t.join();
-    };
+    }
 
-    auto delta_d = duration_cast<duration<double>>(high_resolution_clock::now() - start).count();
+    const auto delta_d = duration_cast<duration<double>>(high_resolution_clock::now() - start).count();
     AddRow("Multiple loggers, same sink", delta_d, howmany);
   }
 }
