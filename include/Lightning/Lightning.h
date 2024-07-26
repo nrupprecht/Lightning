@@ -899,7 +899,8 @@ private:
     LL_REQUIRE(0 < year, "year must be > 0");
     LL_REQUIRE(0 < month && month <= 12, "month must be in the range [1, 12]");
     LL_REQUIRE(0 < day && day <= DaysInMonth(month, year),
-               "there are only " << DaysInMonth(month, year) << " days in " << year << "-" << month);
+               "there are only " << DaysInMonth(month, year) << " days in "
+                                 << MonthAbbreviation(static_cast<Month>(month)) << " " << year);
   }
 
   //! \brief Validate whether an hour, minute, second, and microseconds are valid.
@@ -984,17 +985,19 @@ inline DateTime AddMicroseconds(const DateTime& time, unsigned long long microse
 
   // This is, relatively speaking, the hard part, have to take into account different numbers of days
   // in the month, and increment years when you go past December.
-  auto which_month = time.GetMonthInt(), which_year = time.GetYear();
+  int added_days = 0;
   while (0 < carry_days) {
-    const auto days = DaysInMonth(which_month, which_year);
-    if (new_days + carry_days < days) {
-      new_days += carry_days;
+    const auto days_in_month = DaysInMonth(new_months, new_years);
+    if (carry_days - added_days <= days_in_month - new_days) {
+      new_days += carry_days - added_days;
       break;
     }
-    new_days = 1;
-    ++which_month;
-    if (which_month == 13) {
-      ++which_year, which_month = 1;
+    // Go to the next month.
+    added_days += days_in_month - new_days;
+    new_days = 0;
+    ++new_months;
+    if (new_months == 13) {
+      ++new_months, new_years = 1;
     }
   }
 
@@ -1007,22 +1010,30 @@ inline DateTime AddMicroseconds(const DateTime& time, unsigned long long microse
 //!        the original DateTime.
 class FastDateGenerator {
 public:
-  FastDateGenerator() noexcept
-      : start_time_point_(std::chrono::system_clock::now())
-      , base_date_time_(start_time_point_) {}
+  FastDateGenerator() noexcept {
+    start_time_point_ = std::chrono::system_clock::now();
+    base_date_time_ = DateTime(start_time_point_);
+  }
 
   NO_DISCARD DateTime CurrentTime() const noexcept {
     const auto current_time = std::chrono::system_clock::now();
     const auto dt = current_time - start_time_point_;
     const auto us = std::chrono::duration_cast<std::chrono::microseconds>(dt).count();
+
+    if (1'000'000 < us) {
+      start_time_point_ = current_time;
+      base_date_time_ = DateTime(start_time_point_);
+      return base_date_time_;
+    }
+
     return AddMicroseconds(base_date_time_, static_cast<unsigned long long>(us));
   }
 
 private:
   //! \brief Keep track of when the logger was created.
-  std::chrono::time_point<std::chrono::system_clock> start_time_point_;
+  mutable std::chrono::time_point<std::chrono::system_clock> start_time_point_;
   //! \brief The DateTime at the time that the generator was created.
-  DateTime base_date_time_;
+  mutable DateTime base_date_time_;
 };
 
 }  // namespace time

@@ -39,6 +39,29 @@ TEST(DateTime, AddMicroseconds) {
   EXPECT_EQ(AddMicroseconds(dt, 1'000'000ull), DateTime::YMD_Time(2023'01'01, 0, 0, 1, 0));
   EXPECT_EQ(AddMicroseconds(dt, 1'000'012ull), DateTime::YMD_Time(2023'01'01, 0, 0, 1, 12));
   EXPECT_EQ(AddMicroseconds(dt, 60'000'012ull), DateTime::YMD_Time(2023'01'01, 0, 1, 0, 12));
+  //
+}
+
+TEST(DateTime, AddMicroseconds_2) {
+  {
+    // Test going to next month
+    DateTime dt(2023'01'31);
+    // Add one day
+    EXPECT_EQ(AddMicroseconds(dt, 24 * 60 * 60 * 1'000'000ull), DateTime(2023'02'01));
+    // Add two days
+    EXPECT_EQ(AddMicroseconds(dt, 24 * 60 * 60 * 2'000'000ull), DateTime(2023'02'02));
+    // Add 30 days
+    EXPECT_EQ(AddMicroseconds(dt, 24 * 60 * 60 * 30'000'000ull), DateTime(2023'03'02));
+  }
+  {
+    // Leap year
+
+    DateTime dt(20240228);
+    EXPECT_EQ(AddMicroseconds(dt, 24 * 60 * 60 * 1'000'000ull), DateTime(20240229));
+
+    // Add two days
+    EXPECT_EQ(AddMicroseconds(dt, 24 * 60 * 60 * 2'000'000ull), DateTime(20240301));
+  }
 }
 
 TEST(DateTime, Streaming) {
