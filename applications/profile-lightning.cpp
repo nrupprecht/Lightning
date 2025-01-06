@@ -5,6 +5,7 @@
 #include <cmath>
 #include <iomanip>
 #include <iostream>
+#include <filesystem>
 
 #include "Lightning/Lightning.h"
 

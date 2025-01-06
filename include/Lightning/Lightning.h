@@ -32,6 +32,7 @@ SOFTWARE.
 #include <csignal>
 #include <cstring>  // For std::strlen, std::memcpy, etc.
 #include <fstream>
+#include <functional>
 #include <iostream>
 #include <map>
 #include <memory>
@@ -51,6 +52,7 @@ SOFTWARE.
 #endif  // __cpp_lib_span
 
 namespace lightning {
+
 // ==============================================================================
 //  Macro definitions.
 // ==============================================================================
@@ -151,17 +153,17 @@ private:
   NO_DISCARD static std::string formatMessage(const std::string& message,
                                               const std::string& file,
                                               const std::string& function,
-                                              std::size_t line) {
+                                              const std::size_t line) {
     std::ostringstream strm;
     strm << "exception from " << file << ":" << line << "\nin function " << function << "\n\"" << message
          << "\"";
     return strm.str();
   }
 
-  std::string message_;
-  std::string file_;
-  std::string function_;
-  std::size_t line_;
+  const std::string message_;
+  const std::string file_;
+  const std::string function_;
+  const std::size_t line_;
 };
 
 //! \brief Raise a lightning exception at the current location.
@@ -169,27 +171,27 @@ private:
   throw ::lightning::LightningException(message, __FILE__, LL_CURRENT_FUNCTION, __LINE__)
 
 #define LL_REQUIRE(condition, message) \
-  do { \
-    if (!(condition)) { \
-      std::ostringstream _strm_; \
-      _strm_ << message; \
+  do {                                 \
+    if (!(condition)) {                \
+      std::ostringstream _strm_;       \
+      _strm_ << message;               \
       LL_THROW_WITH_MSG(_strm_.str()); \
-    } \
+    }                                  \
   } while (false)
 
-#define LL_ASSERT(condition, message) \
-  do { \
-    if (!(condition)) { \
-      std::ostringstream _strm_; \
-      _strm_ << message; \
+#define LL_ASSERT(condition, message)  \
+  do {                                 \
+    if (!(condition)) {                \
+      std::ostringstream _strm_;       \
+      _strm_ << message;               \
       LL_THROW_WITH_MSG(_strm_.str()); \
-    } \
+    }                                  \
   } while (false)
 
-#define LL_FAIL(message) \
-  do { \
-    std::ostringstream _strm_; \
-    _strm_ << message; \
+#define LL_FAIL(message)             \
+  do {                               \
+    std::ostringstream _strm_;       \
+    _strm_ << message;               \
     LL_THROW_WITH_MSG(_strm_.str()); \
   } while (false)
 
@@ -738,7 +740,13 @@ class DateTime {
 public:
   DateTime() = default;
 
-  DateTime(int year, int month, int day, int hour = 0, int minute = 0, int second = 0, int microsecond = 0) {
+  constexpr DateTime(const int year,
+                     const int month,
+                     const int day,
+                     const int hour = 0,
+                     const int minute = 0,
+                     const int second = 0,
+                     const int microsecond = 0) {
     setYMD(year, month, day);
     setHMSUS(hour, minute, second, microsecond);
   }
@@ -833,7 +841,11 @@ public:
 
   //! \brief Construct a DateTime out of a yyyymmdd integer, hours, minutes and optional seconds and
   //! microseconds.
-  static DateTime YMD_Time(int yyyymmdd, int hours, int minutes, int seconds = 0, int microsecond = 0) {
+  static DateTime YMD_Time(const int yyyymmdd,
+                           const int hours,
+                           const int minutes,
+                           const int seconds = 0,
+                           const int microsecond = 0) {
     DateTime dt(yyyymmdd);
     dt.setHMSUS(hours, minutes, seconds, microsecond);
     return dt;
@@ -851,8 +863,14 @@ private:
   //! \param minute The minute of the time.
   //! \param second The second of the time.
   //! \param microsecond The microsecond of the time.
-  DateTime(
-      bool, int year, int month, int day, int hour = 0, int minute = 0, int second = 0, int microsecond = 0) {
+  DateTime(bool,
+           const int year,
+           const int month,
+           const int day,
+           const int hour = 0,
+           const int minute = 0,
+           const int second = 0,
+           const int microsecond = 0) {
     setYMD(year, month, day, false);
     setHMSUS(hour, minute, second, microsecond, false);
   }
@@ -863,7 +881,7 @@ private:
   //! \param month Set the month of the date.
   //! \param day Set the day of the date.
   //! \param validate Whether to validate the date.
-  void setYMD(int year, int month, int day, bool validate = true) {
+  void setYMD(const int year, const int month, const int day, const bool validate = true) {
     if (validate)
       validateYMD(year, month, day);
     // Zero previous y-m-d.
@@ -880,7 +898,11 @@ private:
   //! \param second Set the seconds of the time.
   //! \param microseconds Set the microseconds of the time.
   //! \param validate Whether to validate the date.
-  void setHMSUS(int hour, int minute, int second, int microseconds, bool validate = true) {
+  void setHMSUS(const int hour,
+                const int minute,
+                const int second,
+                const int microseconds,
+                const bool validate = true) {
     if (validate)
       validateHMSUS(hour, minute, second, microseconds);
     // Zero previous h-m-s-us.
@@ -895,7 +917,7 @@ private:
   //! \param year The year to validate.
   //! \param month The month to validate.
   //! \param day The day to validate.
-  static void validateYMD(int year, int month, int day) {
+  static void validateYMD(const int year, const int month, const int day) {
     LL_REQUIRE(0 < year, "year must be > 0");
     LL_REQUIRE(0 < month && month <= 12, "month must be in the range [1, 12]");
     LL_REQUIRE(0 < day && day <= DaysInMonth(month, year),
@@ -1081,7 +1103,8 @@ constexpr int log10_max_ull_power_of_ten = 19;
 //!
 //! \param x The number to count the digits of.
 //! \param upper Indicates that the number has at most `upper` digits.
-inline unsigned NumberOfDigitsULL(unsigned long long x, int upper = detail::log10_max_ull_power_of_ten) {
+inline unsigned NumberOfDigitsULL(const unsigned long long x,
+                                  int upper = detail::log10_max_ull_power_of_ten) {
   upper = std::max(0, std::min(upper, 19));
   if (x == 0)
     return 1u;
@@ -1121,9 +1144,9 @@ unsigned NumberOfDigits(Integral_t x, int upper = detail::log10_max_ull_power_of
 inline char* CopyPaddedInt(char* start,
                            char* end,
                            unsigned long long x,
-                           int width,
-                           char fill_char = '0',
-                           int max_power = detail::log10_max_ull_power_of_ten) {
+                           const int width,
+                           const char fill_char = '0',
+                           const int max_power = detail::log10_max_ull_power_of_ten) {
   const auto nd = NumberOfDigits(x, max_power);
   const auto remainder = static_cast<unsigned>(width) - nd;
   if (0 < remainder) {
@@ -1167,7 +1190,7 @@ namespace detail {
 //!
 //! \param x The integer to format.
 //! \param buffer The buffer to format the integer into.
-inline void formatIntegerWithCommas(unsigned long long x, memory::BasicMemoryBuffer<char>& buffer) {
+inline void formatIntegerWithCommas(const unsigned long long x, memory::BasicMemoryBuffer<char>& buffer) {
   const auto num_digits = NumberOfDigitsULL(x);
 
   // Compute the number of commas that will be needed.
@@ -1211,7 +1234,7 @@ inline void formatIntegerWithCommas(unsigned long long x, memory::BasicMemoryBuf
 //!
 //! \param str The string to format.
 //! \param buffer The buffer to format the string into.
-inline void formatDebugString(std::string_view str, memory::BasicMemoryBuffer<char>& buffer) {
+inline void formatDebugString(const std::string_view str, memory::BasicMemoryBuffer<char>& buffer) {
   // Debug formatting.
   buffer.PushBack('"');
   for (auto c : str) {
@@ -1246,7 +1269,7 @@ inline void formatDebugString(std::string_view str, memory::BasicMemoryBuffer<ch
 //! \brief Helper function to get arrays of upper- or lower-case hex digits.
 //!
 //! \param upper_case Whether to get upper-case hex digits (true) instead of lower-case hex digits (false).
-inline const char* getHexDigits(bool upper_case) {
+inline const char* getHexDigits(const bool upper_case) {
   static const char* upper_hex_digits = "0123456789ABCDEF";
   static const char* lower_hex_digits = "0123456789abcdef";
   return upper_case ? upper_hex_digits : lower_hex_digits;
@@ -1383,9 +1406,9 @@ template<typename Integral_t,
          LL_ENABLE_IF(std::is_integral_v<Integral_t> && !std::is_same_v<Integral_t, bool>)>
 void FormatHex(Integral_t x,
                memory::BasicMemoryBuffer<char>& buffer,
-               bool use_uppercase = true,
-               PrefixFmtType prefix_fmt_type = PrefixFmtType::Lower,
-               bool pad_zeros = false) {
+               const bool use_uppercase = true,
+               const PrefixFmtType prefix_fmt_type = PrefixFmtType::Lower,
+               const bool pad_zeros = false) {
   if constexpr (std::is_signed_v<Integral_t>) {
     if (x < 0) {
       buffer.PushBack('-');
@@ -1442,8 +1465,8 @@ template<typename Integral_t,
          LL_ENABLE_IF(std::is_integral_v<Integral_t> && !std::is_same_v<Integral_t, bool>)>
 void FormatBinary(Integral_t x,
                   memory::BasicMemoryBuffer<char>& buffer,
-                  PrefixFmtType prefix_fmt_type = PrefixFmtType::Lower,
-                  bool pad_zeros = false) {
+                  const PrefixFmtType prefix_fmt_type = PrefixFmtType::Lower,
+                  const bool pad_zeros = false) {
   if constexpr (std::is_signed_v<Integral_t>) {
     if (x < 0) {
       buffer.PushBack('-');
@@ -1498,7 +1521,9 @@ void FormatBinary(Integral_t x,
 //! \param buffer The buffer to format the integer into.
 template<typename Integral_t,
          LL_ENABLE_IF(std::is_integral_v<Integral_t> && !std::is_same_v<Integral_t, bool>)>
-void FormatInteger(std::string_view fmt, Integral_t number, memory::BasicMemoryBuffer<char>& buffer) {
+void FormatInteger(const std::string_view fmt,
+                   const Integral_t number,
+                   memory::BasicMemoryBuffer<char>& buffer) {
   // Check if there are formatting instructions.
   if (fmt.empty()) {
     auto num_digits = formatting::NumberOfDigits(number);
@@ -1551,8 +1576,8 @@ void FormatInteger(std::string_view fmt, Integral_t number, memory::BasicMemoryB
                                                              << fmt << "'");
   }
 
-  auto num_digits = static_cast<unsigned>(temp_buffer.Size());
-  auto total_width = std::max(num_digits, fmt_data.width);
+  const auto num_digits = static_cast<unsigned>(temp_buffer.Size());
+  const auto total_width = std::max(num_digits, fmt_data.width);
 
   std::size_t alignment_offset = 0, right_width = 0;
   if (fmt_data.alignment == Alignment::Right) {
@@ -1589,7 +1614,7 @@ inline void FormatString(std::string_view fmt,
                          std::string_view str,
                          memory::BasicMemoryBuffer<char>& buffer) {
   if (fmt.empty()) {
-    memory::AppendBuffer(buffer, str);
+    AppendBuffer(buffer, str);
     return;
   }
   FmtData fmt_data;
@@ -2673,6 +2698,17 @@ inline const std::string& GetThreadID() {
   return thread_id;
 }
 
+//! \brief Go through a file path at compile time to get the index of where the file name starts in a path.
+constexpr std::size_t GetFileNameIndex(const char* file_name) {
+  std::size_t index = 0;
+  for (std::size_t i = 0; file_name[i] != '\0'; ++i) {
+    if (file_name[i] == '/' || file_name[i] == '\\') {
+      index = i + 1;
+    }
+  }
+  return index;
+}
+
 //! \brief Structure storing very common attributes that a logging message will often have.
 //!
 //! Additional attributes can be implemented as Attribute objects.
@@ -2683,7 +2719,7 @@ struct BasicAttributes {
   //!
   //! Note that we usually set do_timestamp off, since loggers create their own timestamps with their fast
   //! datetime generators.
-  explicit BasicAttributes(std::optional<Severity> lvl, bool do_timestamp = false)
+  explicit BasicAttributes(const std::optional<Severity> lvl, const bool do_timestamp = false)
       : level(lvl) {
     if (do_timestamp)
       time_stamp = time::DateTime::Now();
@@ -2693,18 +2729,14 @@ struct BasicAttributes {
   //!
   //! Note that we usually set do_timestamp off, since loggers create their own timestamps with their fast
   //! datetime generators.
-  explicit BasicAttributes(std::optional<Severity> lvl,
+  explicit BasicAttributes(const std::optional<Severity> lvl,
                            const char* file_name,
                            const char* function_name,
-                           unsigned line_number,
-                           bool do_timestamp = false)
+                           const unsigned line_number)
       : level(lvl)
       , file_name(file_name)
       , function_name(function_name)
-      , line_number(line_number) {
-    if (do_timestamp)
-      time_stamp = time::DateTime::Now();
-  }
+      , line_number(line_number) {}
 
   //! \brief The severity level of the record.
   std::optional<Severity> level {};
@@ -2734,23 +2766,23 @@ struct BasicAttributes {
 //! severity attribute.
 class BasicSeverityFilter {
 public:
-  NO_DISCARD bool Check(std::optional<Severity> severity) const {
+  NO_DISCARD bool Check(const std::optional<Severity> severity) const {
     if (severity)
       return filter_(*severity);
     return allow_if_no_severity_;
   }
 
-  BasicSeverityFilter& SetAcceptance(Severity severity, bool does_accept) {
+  BasicSeverityFilter& SetAcceptance(const Severity severity, const bool does_accept) {
     filter_.SetAcceptance(severity, does_accept);
     return *this;
   }
 
-  BasicSeverityFilter& SetAcceptance(SeveritySet acceptable) {
+  BasicSeverityFilter& SetAcceptance(const SeveritySet acceptable) {
     filter_ = acceptable;
     return *this;
   }
 
-  BasicSeverityFilter& AcceptNoSeverity(bool flag) {
+  BasicSeverityFilter& AcceptNoSeverity(const bool flag) {
     allow_if_no_severity_ = flag;
     return *this;
   }
@@ -2766,11 +2798,11 @@ private:
 //! \brief Object containing all attributes for a record.
 struct RecordAttributes {
   template<typename... Attrs_t>
-  explicit RecordAttributes(BasicAttributes basic_attributes = {}, Attrs_t&&... attrs)
+  explicit RecordAttributes(const BasicAttributes basic_attributes = {}, Attrs_t&&... attrs)
       : basic_attributes(basic_attributes) {
     if constexpr (0 < sizeof...(Attrs_t)) {
       attributes.reserve(sizeof...(attrs));
-      (attributes.emplace_back(std::move(attrs)), ...);
+      (attributes.emplace_back(std::forward<Attrs_t>(attrs)), ...);
     }
   }
 
@@ -4795,9 +4827,9 @@ private:
 //! \brief Log with severity to a specific logger. First does a very fast check whether the
 //!        message would be accepted given its severity level, since this is a very common case.
 //!        If it will be, creates a handler, constructing the record in-place inside the handler.
-#define LOG_SEV_TO(logger, severity) \
-  if ((logger).WillAccept(::lightning::Severity::severity)) \
-    if (auto handler = (logger).LogWithLocation( \
+#define LOG_SEV_TO(logger, severity)                                                   \
+  if ((logger).WillAccept(::lightning::Severity::severity))                            \
+    if (auto handler = (logger).LogWithLocation(                                       \
             ::lightning::Severity::severity, __FILE__, LL_CURRENT_FUNCTION, __LINE__)) \
   handler.GetRecord().Bundle()
 
@@ -4805,8 +4837,8 @@ private:
 #define LOG_SEV(severity) LOG_SEV_TO(::lightning::Global::GetLogger(), severity)
 
 //! \brief Log to a specific logger, without severity.
-#define LOG_TO(logger) \
-  if ((logger).WillAccept(::std::nullopt)) \
+#define LOG_TO(logger)                                                                                    \
+  if ((logger).WillAccept(::std::nullopt))                                                                \
     if (auto handler = (logger).LogWithLocation(::std::nullopt, __FILE__, LL_CURRENT_FUNCTION, __LINE__)) \
   handler.GetRecord().Bundle()
 
