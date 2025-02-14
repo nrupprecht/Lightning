@@ -5,5 +5,7 @@ cmake-build-release/**
 build/**
 conan/**
 conan*
+bazel-*
+.*
 
 CMakeUserPresets.json

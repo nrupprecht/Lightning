@@ -1,0 +1,4 @@
+load("//test:test.bzl", "lightning_unit_test", "create_unit_tests")
+
+# Create a unit test per .cpp file.
+create_unit_tests(srcs = glob(["*.cpp"]))

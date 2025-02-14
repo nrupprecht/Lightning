@@ -1,7 +1,1 @@
-cc_library(
-    name = "lightning",
-    hdrs = glob(["include/Lightning/**/*.h"]),
-    includes = ["include"],
-    visibility = ["//visibility:public"],
-    copts = ["-std=c++17"]
-)
+

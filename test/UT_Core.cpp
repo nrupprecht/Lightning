@@ -6,7 +6,6 @@
 
 // Includes
 #include <string>
-
 #include "Lightning/Lightning.h"
 
 using namespace lightning;

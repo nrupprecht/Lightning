@@ -1,0 +1,13 @@
+cc_binary(
+    name = "profile-lightning",
+    srcs = ["profile-lightning.cpp"],
+    deps = ["//include:lightning"],
+    copts = ["-std=c++17"],
+)
+
+cc_binary(
+    name = "profile-table-generation",
+    srcs = ["profile-table-generation.cpp"],
+    deps = ["//include:lightning"],
+    copts = ["-std=c++17"],
+)
