@@ -1,1 +1,8 @@
 
+cc_library(
+    name = "lightning",
+    hdrs = glob(["include/Lightning/*.h"]),
+    includes = ["include"],  # Adds this as a search path
+    visibility = ["//visibility:public"],
+    copts = ["-std=c++17"],
+)

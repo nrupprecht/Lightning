@@ -1,4 +1,6 @@
-from conans import ConanFile, CMake
+from conan import ConanFile
+from conan.tools.cmake import CMake, CMakeToolchain, CMakeDeps
+
 
 
 class LightningProject(ConanFile):
@@ -12,7 +14,7 @@ class LightningProject(ConanFile):
     settings = "os", "compiler", "build_type", "arch"
     exports_sources = "include/**", "source/**", "CMakeLists.txt", "cmake/**", "test/**"
 
-    generators = "CMakeToolchain", "CMakeDeps", "VirtualRunEnv", "cmake"
+    generators = ("CMakeToolchain", "CMakeDeps", "VirtualRunEnv")
 
     def build(self):
         cmake = CMake(self)

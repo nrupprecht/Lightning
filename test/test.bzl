@@ -6,7 +6,7 @@ def lightning_unit_test(src):
         srcs = [src],
         copts = ["-std=c++17"],
         deps = [
-            "//include:lightning",
+            "//:lightning",
             "@googletest//:gtest",
             "@googletest//:gtest_main",
         ],
