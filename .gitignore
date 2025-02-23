@@ -9,3 +9,4 @@ bazel-*
 .*
 
 CMakeUserPresets.json
+MODULE.bazel.lock

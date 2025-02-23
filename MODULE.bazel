@@ -1,5 +1,7 @@
 # MODULE.bazel
 
+module(name="lightning", version="0.1.0")
+
 # Choose the most recent version available at
 # https://registry.bazel.build/modules/googletest
 bazel_dep(name = "googletest", version = "1.15.2")

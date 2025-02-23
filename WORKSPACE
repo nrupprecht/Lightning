@@ -1,2 +1,2 @@
 
-workspace(name="Lightning")
+workspace(name="lightning")
